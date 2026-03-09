@@ -5236,12 +5236,27 @@
         <span class="lm">${esc(l.message)}${l.path ? ` <span style="color:var(--mut)">· ${esc(l.path)}</span>` : ''}</span>
       </div>
       ${userTextEl}
+      ${l.error_id ? `<div style="margin-top:4px">
+        <button class="bg bsm" style="font-size:10px" onclick="event.stopPropagation();goToFeedbackWithError('${esc(l.error_id)}')">
+          ⭐ Найти отзывы с этой ошибкой
+        </button>
+      </div>` : ''}
       ${l.traceback ? `<div class="ltb">${esc(l.traceback)}</div>` : ''}`;
         if (l.traceback) div.addEventListener('click', () => div.classList.toggle('exp'));
         el.appendChild(div);
       });
       pg('err-pg', page, d.total, PG, p => loadErr(p));
     }
+
+    function goToFeedbackWithError(eid) {
+      sp('feedback');
+      // Search in feedback: set a custom search by looking for ERR-id in bot text
+      // We'll set the rating filter to all and reload with a special query approach
+      // Since feedback API doesn't have error_id search, we search by text in loadFeedback
+      _fbErrSearch = eid;
+      fbLoad(0);
+    }
+    let _fbErrSearch = null;
 
     // ── ANALYTICS (overview) ──────────────────────────────────────────────────────
     let _anData = null;
@@ -6013,16 +6028,29 @@
       const p = new URLSearchParams({offset: _fbOff, limit: _FB_PER_PAGE});
       if (_fbRating !== 'all') p.set('rating', _fbRating);
       if (_fbStatus !== 'all') p.set('status', _fbStatus);
+      if (_fbErrSearch) {
+        p.set('search', _fbErrSearch);
+        // Show banner that we're filtering by error
+        listEl.innerHTML = `<div style="padding:8px 12px;background:rgba(255,100,100,.08);border-radius:6px;font-size:11px;margin-bottom:8px;display:flex;align-items:center;gap:8px">
+          <span>⚠️ Фильтр по ошибке: <b>${esc(_fbErrSearch)}</b></span>
+          <button class="bg bsm" style="font-size:10px" onclick="_fbErrSearch=null;fbLoad(0)">× Сбросить</button>
+        </div><div class="empty"><div class="sp"></div></div>`;
+      }
 
       try {
         const d = await api('/dashboard/api/feedback?' + p);
         const items = d.items || [];
         const total = d.total || 0;
 
+        const banner = _fbErrSearch
+          ? `<div style="padding:8px 12px;background:rgba(255,100,100,.08);border-radius:6px;font-size:11px;margin-bottom:8px;display:flex;align-items:center;gap:8px">
+              <span>⚠️ Фильтр по ошибке: <b>${esc(_fbErrSearch)}</b></span>
+              <button class="bg bsm" style="font-size:10px" onclick="_fbErrSearch=null;fbLoad(0)">× Сбросить</button>
+            </div>` : '';
         if (!items.length) {
-          listEl.innerHTML = '<div class="empty" style="padding:40px">Нет отзывов</div>';
+          listEl.innerHTML = banner + '<div class="empty" style="padding:40px">Нет отзывов</div>';
         } else {
-          listEl.innerHTML = items.map(fb => _fbRenderItem(fb)).join('');
+          listEl.innerHTML = banner + items.map(fb => _fbRenderItem(fb)).join('');
         }
 
         const pg = Math.floor(_fbOff / _FB_PER_PAGE) + 1;
@@ -6060,6 +6088,13 @@
 
       const noText = !rawQ && !rawA;
 
+      const errorIdMatch = (rawA + rawQ).match(/ERR-[A-Z0-9]{6}/);
+      const errorLinkBtn = errorIdMatch
+        ? `<button class="bg bsm" style="font-size:10px;margin-top:6px" onclick="goToError('${errorIdMatch[0]}')">
+             ⚠️ ${errorIdMatch[0]} → перейти к ошибке
+           </button>`
+        : '';
+
       return `
         <div style="background:${bg};border:${border};border-radius:var(--rad-sm);padding:12px 14px">
           <div style="display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:8px">
@@ -6080,7 +6115,18 @@
               <div style="font-size:11px;line-height:1.5;white-space:pre-wrap">${esc(botA) || '<i style=\'color:var(--mut)\'>пусто</i>'}</div>
             </div>
           </div>`}
+          ${errorLinkBtn}
         </div>`;
+    }
+
+    function goToError(eid) {
+      // Switch to errors panel and pre-fill the error ID filter
+      sp('errors');
+      const inp = document.getElementById('er-eid');
+      const qInp = document.getElementById('er-q');
+      if (inp) inp.value = eid;
+      if (qInp) qInp.value = '';
+      loadErr();
     }
 
     // ── BOOT ──────────────────────────��───────────────────────────────────────────

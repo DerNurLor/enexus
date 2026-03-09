@@ -21,7 +21,7 @@ from app.core.config import settings
 from app.models.conversation import Message as MessageModel
 
 from app.bot.handlers.ai_handler import handle_message
-from app.bot.handlers.commands  import cmd_roles, cmd_miniapp, cmd_limit
+from app.bot.handlers.commands  import cmd_roles, cmd_miniapp, cmd_limit, cmd_support, cmd_suggest, cmd_about
 from app.bot.message_store import store_message, store_callback_choice, store_bot_reply, _entities_to_html
 from datetime import datetime, timezone
 import logging
@@ -192,6 +192,24 @@ async def handle_miniapp(message: TelegramMessage) -> None:
 @router.message(Command("limit"))
 async def handle_limit(message: TelegramMessage) -> None:
     await cmd_limit(message)
+
+
+@router.message(Command("support"))
+async def handle_support(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message, role="user"))
+    await cmd_support(message)
+
+
+@router.message(Command("suggest"))
+async def handle_suggest(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message, role="user"))
+    await cmd_suggest(message)
+
+
+@router.message(Command("about"))
+async def handle_about(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message, role="user"))
+    await cmd_about(message)
 
 
 @router.message(F.chat.type.in_({'group', 'supergroup'}))
@@ -761,4 +779,7 @@ BOT_COMMANDS = [
     BotCommand(command="miniapp", description="Открыть расписание (Mini App)"),
     BotCommand(command="limit",   description="Мой лимит запросов"),
     BotCommand(command="roles",   description="Мои роли и права"),
+    BotCommand(command="support", description="Написать в поддержку"),
+    BotCommand(command="suggest", description="Предложить идею"),
+    BotCommand(command="about",   description="О боте"),
 ]
