@@ -10,7 +10,7 @@
 # =============================================================================
 set -euo pipefail
 
-SECRETS_DIR="/run/secrets"
+SECRETS_DIR="/etc/ncfu/secrets"
 COMPOSE_FILE="$(dirname "$(realpath "$0")")/docker-compose.yml"
 COMPOSE_DIR="$(dirname "$COMPOSE_FILE")"
 
@@ -29,7 +29,7 @@ _read() {
   [[ -f "$f" ]] && cat "$f" || echo ""
 }
 
-export MONGO_USER="ncfu_admin"
+export MONGO_USER="ncfu_app"
 export MONGO_PASSWORD="$(_read mongo_password)"
 export MONGO_DB="ncfu_schedule"
 export AUTH_MONGO_DB="ncfu_auth"
