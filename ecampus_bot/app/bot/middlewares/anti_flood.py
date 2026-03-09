@@ -175,6 +175,14 @@ class MessageLimitMiddleware(BaseMiddleware):
         if chat_type == "private":
             quota_id    = user.id
             default_cap = _cfg.quota_private
+            # Per-user cap from AuthUser.daily_requests overrides global default
+            try:
+                from app.auth.models import AuthUser as _AuthUser
+                au = await _AuthUser.find_one({"tg_id": user.id})
+                if au and au.daily_requests is not None and au.daily_requests > 0:
+                    default_cap = au.daily_requests
+            except Exception:
+                pass
         else:
             quota_id    = chat.id
             default_cap = await _group_cap(event, _cfg.quota_group_small, _cfg.quota_group_large)
@@ -188,6 +196,25 @@ class MessageLimitMiddleware(BaseMiddleware):
         r   = get_redis()
 
         try:
+            # Check BEFORE incrementing — don't count blocked requests
+            raw = await r.get(key)
+            current = int(raw) if raw else 0
+
+            if current >= cap:
+                logger.info(
+                    f"MessageLimit: chat={chat.id} type={chat_type} "
+                    f"count={current}/{cap} uid={user.id} (blocked before increment)"
+                )
+                try:
+                    from app.core.config import settings as _s
+                    miniapp_url = f"{_s.webhook_base_url}/miniapp"
+                    limit_text, limit_kb = _make_limit_msg(str(chat_type), miniapp_url)
+                    await event.answer(limit_text, parse_mode="HTML", reply_markup=limit_kb)
+                except Exception:
+                    pass
+                return None
+
+            # Increment only if allowed
             pipe = r.pipeline()
             pipe.incr(key)
             pipe.ttl(key)
@@ -200,21 +227,17 @@ class MessageLimitMiddleware(BaseMiddleware):
             logger.warning(f"MessageLimit Redis error chat={chat.id}: {exc}")
             return await handler(event, data)   # fail open
 
-        if count > cap:
-            logger.info(
-                f"MessageLimit: chat={chat.id} type={chat_type} "
-                f"count={count}/{cap} uid={user.id}"
-            )
+        # Call handler — if it raises/returns error, decrement quota back
+        try:
+            result = await handler(event, data)
+            return result
+        except Exception as handler_exc:
+            # Don't charge the user for a bot-side error
             try:
-                from app.core.config import settings as _s
-                miniapp_url = f"{_s.webhook_base_url}/miniapp"
-                limit_text, limit_kb = _make_limit_msg(str(chat_type), miniapp_url)
-                await event.answer(limit_text, parse_mode="HTML", reply_markup=limit_kb)
+                await r.decr(key)
             except Exception:
                 pass
-            return None
-
-        return await handler(event, data)
+            raise handler_exc
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -311,3 +334,15 @@ async def get_quota_status(user_id: int, chat_id: int, chat_type: str) -> dict:
         "remaining": remaining,
         "exhausted": used >= cap,
     }
+
+
+async def reset_user_quota(tg_id: int) -> bool:
+    """Reset quota counter for a private user by tg_id. Returns True on success."""
+    key = _quota_key(tg_id)
+    r = get_redis()
+    try:
+        await r.delete(key)
+        return True
+    except Exception as exc:
+        logger.warning(f"reset_user_quota failed tg_id={tg_id}: {exc}")
+        return False

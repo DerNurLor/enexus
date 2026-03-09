@@ -415,6 +415,15 @@ async def admin_update_user(
     if body.monthly_ai_tokens is not None: user.monthly_ai_tokens = body.monthly_ai_tokens
     await user.save()
 
+    # If daily_requests changed — reset Redis quota so new limit applies immediately
+    if body.daily_requests is not None and user.tg_id:
+        try:
+            from app.cache.redis import get_redis
+            r = get_redis()
+            await r.delete(f"quota:{user.tg_id}")
+        except Exception as exc:
+            logger.warning(f"Failed to reset quota on limit change: {exc}")
+
     # If user was blocked, revoke all their tokens
     if body.is_blocked:
         try:
@@ -447,6 +456,29 @@ async def admin_revoke_all_keys(
         user_id=str(admin.id), tg_id=admin.tg_id, action="admin.revoke_all_keys",
         details={"target": user_id, "count": len(keys)},
     ).insert()
+
+
+@api.post("/admin/users/{user_id}/reset-quota", status_code=200)
+async def admin_reset_quota(
+    user_id: str,
+    admin:   AuthUser = Depends(require_permission("users:write")),
+):
+    """Reset user's Redis quota counter so they can send messages again immediately."""
+    user = await AuthUser.get(user_id)
+    if not user:
+        raise HTTPException(404, "Not found")
+    try:
+        from app.cache.redis import get_redis
+        r = get_redis()
+        key = f"quota:{user.tg_id}"
+        await r.delete(key)
+    except Exception as exc:
+        raise HTTPException(500, f"Redis error: {exc}")
+    await AuthActivityLog(
+        user_id=str(admin.id), tg_id=admin.tg_id, action="admin.reset_quota",
+        details={"target": user_id, "tg_id": user.tg_id},
+    ).insert()
+    return {"ok": True, "tg_id": user.tg_id}
 
 
 # ── admin: roles ──────────────────────────────────────────────────────────────

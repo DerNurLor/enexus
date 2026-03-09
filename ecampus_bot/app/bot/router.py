@@ -76,8 +76,10 @@ async def bot_added_to_group(event: ChatMemberUpdated) -> None:
             InlineKeyboardButton(text="📅 Открыть расписание", web_app=WebAppInfo(url=miniapp_url))
         ]])
         chat_title = chat.title or "эту группу"
-        await event.answer(
-            f"👋 Привет! Рад присоединиться к <b>{chat_title}</b>!\n\n"
+        await event.bot.send_message(
+            chat_id=chat.id,
+            text=(
+                f"👋 Привет! Рад присоединиться к <b>{chat_title}</b>!\n\n"
                 "📌 <b>Что я умею:</b>\n"
                 "  • Расписание группы, преподавателя, аудитории\n"
                 "  • Свободные аудитории прямо сейчас\n"
@@ -87,7 +89,8 @@ async def bot_added_to_group(event: ChatMemberUpdated) -> None:
                 "  Или используйте команды:\n"
                 "  /help — все возможности\n"
                 "  /miniapp — расписание в приложении 📅\n\n"
-                "🔕 <i>Я не слежу за общим чатом — отвечаю только на упоминания и команды.</i>",
+                "🔕 <i>Я не слежу за общим чатом — отвечаю только на упоминания и команды.</i>"
+            ),
             parse_mode="HTML",
             reply_markup=kb,
         )
@@ -108,14 +111,18 @@ async def cmd_start(message: TelegramMessage) -> None:
     sent = await message.answer(
         "👋 Привет! Я бот расписания СКФУ.\n\n"
             "Спрашивай на естественном русском языке:\n"
-            "  • <i>Где пара через 5 минут у Подзолко?</i>\n"
             "  • <i>Расписание ИСС-б-о-22-3 на эту неделю</i>\n"
+            "  • <i>Где пара через 5 минут у Подзолко?</i>\n"
             "  • <i>Свободные аудитории в корпусе 11</i>\n"
             "  • <i>Что сейчас у группы АИС-б-о-25-1?</i>\n\n"
-            "Или используй команды:\n"
-            "  /miniapp — полное расписание в приложении 📅\n"
-            "  /roles   — роли и привилегии 🎭\n"
-            "  /help    — справка",
+            "📋 <b>Команды:</b>\n"
+            "  /help    — полная справка по возможностям\n"
+            "  /miniapp — расписание в приложении 📅\n"
+            "  /limit   — ваш лимит запросов\n"
+            "  /roles   — ваши роли и привилегии\n"
+            "  /support — написать в поддержку\n"
+            "  /suggest — предложить улучшение\n"
+            "  /about   — о боте",
         parse_mode="HTML",
     )
     # Сохраняем ответ бота — Telegram не присылает Update на исходящие сообщения
@@ -128,21 +135,31 @@ async def cmd_start(message: TelegramMessage) -> None:
 async def cmd_help(message: TelegramMessage) -> None:
     asyncio.ensure_future(store_message(message, role="user"))
     sent = await message.answer(
-        "📖 <b>Что я умею:</b>\n\n"
-            "<b>Расписание группы:</b>\n"
+        "📖 <b>Справка по боту расписания СКФУ</b>\n\n"
+            "Просто напиши запрос на естественном языке:\n\n"
+            "📅 <b>Расписание группы:</b>\n"
             "  <i>Расписание ИСС-б-о-22-3</i>\n"
-            "  <i>Что у группы АИС25 завтра?</i>\n\n"
-            "<b>Где сейчас преподаватель:</b>\n"
+            "  <i>Что у группы АИС25 завтра?</i>\n"
+            "  <i>Пары на эту неделю у группы МАТ-22</i>\n\n"
+            "👤 <b>Преподаватель:</b>\n"
             "  <i>Где Подзолко сейчас?</i>\n"
-            "  <i>Где пара у Иванова через 5 минут?</i>\n\n"
-            "<b>Свободные аудитории:</b>\n"
-            "  <i>Какие аудитории свободны сейчас?</i>\n"
-            "  <i>В какое время свободен корпус 11?</i>\n\n"
-            "<b>Поиск:</b>\n"
-            "  <i>Найди Петрова</i>  ·  <i>Ищу группу ИСС</i>\n\n"
-            "<b>Команды:</b>\n"
-            "  /miniapp — открыть Mini App\n"
-            "  /roles   — ваши роли и права\n",
+            "  <i>Расписание Иванова на завтра</i>\n\n"
+            "🚪 <b>Аудитории:</b>\n"
+            "  <i>Свободные аудитории прямо сейчас</i>\n"
+            "  <i>Что сейчас в аудитории 305 корпуса 2?</i>\n"
+            "  <i>Свободные аудитории в корпусе 11 с 14:00</i>\n\n"
+            "🔍 <b>Поиск:</b>\n"
+            "  <i>Найди группу ИСС</i>  ·  <i>Найди Петрова</i>\n\n"
+            "📋 <b>Команды:</b>\n"
+            "  /miniapp — открыть расписание в приложении 📅\n"
+            "  /limit   — узнать остаток лимита запросов\n"
+            "  /roles   — ваши роли и права доступа\n"
+            "  /support — написать в поддержку\n"
+            "  /suggest — предложить идею или улучшение\n"
+            "  /about   — информация о боте\n"
+            "  /start   — начало работы\n"
+            "  /help    — эта справка\n\n"
+            "💡 <i>В группах обращайтесь к боту через упоминание: @botname запрос</i>",
         parse_mode="HTML",
     )
     asyncio.ensure_future(store_message(sent, role="bot"))
@@ -412,8 +429,25 @@ async def cb_disambig(cb: CallbackQuery) -> None:
         else:
             reply = "❓ Неизвестный тип запроса."
     except Exception as exc:
-        logger.error(f"disambig dispatch error: {exc}")
-        await progress.edit_text("❌ Ошибка при загрузке расписания.")
+        import secrets, string as _str
+        eid = "ERR-" + "".join(secrets.choice(_str.ascii_uppercase + _str.digits) for _ in range(6))
+        logger.error(f"[{eid}] disambig dispatch error: {exc}")
+        try:
+            from app.auth.models import AuthErrorLog
+            import traceback as _tb
+            await AuthErrorLog(
+                level="ERROR",
+                message=f"[{eid}] {type(exc).__name__}: {exc}",
+                traceback=_tb.format_exc(),
+                error_id=eid,
+                tg_id=user_tg_id or None,
+                tg_chat_id=getattr(progress, "chat", None) and progress.chat.id,
+                intent=intent_type,
+                details={"exc_type": type(exc).__name__},
+            ).insert()
+        except Exception as _le:
+            logger.warning(f"error log failed: {_le}")
+        await progress.edit_text(f"❌ Ошибка при загрузке расписания.\n<code>{eid}</code>", parse_mode="HTML")
         return
 
     # Render reply (PAGED or plain) and save bot reply with correct user tg_id

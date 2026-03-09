@@ -2515,10 +2515,24 @@
         setSavingLimit(false);
       }
 
+      async function resetQuota() {
+        try {
+          await api('/dashboard/api/admin/users/' + user.id + '/reset-quota', {method: 'POST'});
+          toast.ok('Использование сброшено — лимит восстановлен');
+        } catch (e) {toast.err(e.message);}
+      }
+
       async function revokeAllKeys() {
         try {
           await api('/dashboard/api/admin/users/' + user.id + '/revoke-all-keys', {method: 'POST'});
           toast.ok('Все ключи отозваны');
+        } catch (e) {toast.err(e.message);}
+      }
+
+      async function resetQuota() {
+        try {
+          await api('/dashboard/api/admin/users/' + user.id + '/reset-quota', {method: 'POST'});
+          toast.ok('Лимит сброшен — пользователь может снова отправлять запросы');
         } catch (e) {toast.err(e.message);}
       }
 
@@ -2567,6 +2581,9 @@
             </div>
             <button className="btn btn-ghost w-full" onClick={saveDailyLimit} disabled={savingLimit}>
               {savingLimit ? <span style={{display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center'}}><Spinner /> Сохранение...</span> : '✓ Сохранить лимит'}
+            </button>
+            <button className="btn btn-ghost w-full" style={{marginTop: 6, color: 'var(--t-60)'}} onClick={resetQuota}>
+              ↺ Сбросить использование (выдать лимит заново)
             </button>
             <hr className="divider" />
             <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14}}>
