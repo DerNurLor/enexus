@@ -124,6 +124,15 @@ http {
         #
         # Прямой /dashboard/* — заблокирован.
 
+        # Статические ассеты SPA (JS/CSS) — разрешены без префикса,
+        # т.к. Vite генерирует абсолютные пути /dashboard/assets/*
+        location /dashboard/assets/ {
+            rewrite ^(/dashboard/.*)$ $$1 break;
+            proxy_pass $$upstream_backend;
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+
         # Прямой доступ без префикса — запрещён
         location = /dashboard {
             return 403;
