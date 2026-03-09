@@ -47,15 +47,8 @@ services:
       - ./docker/mongo/init.js:/docker-entrypoint-initdb.d/01-init.js:ro
     healthcheck:
       test:
-        - "CMD"
-        - "mongosh"
-        - "--quiet"
-        - "--username"
-        - "${MONGO_USER}"
-        - "--password"
-        - "${MONGO_PASSWORD}"
-        - "--eval"
-        - "db.adminCommand('ping')"
+        - "CMD-SHELL"
+        - "mongosh --quiet --username $$MONGO_INITDB_ROOT_USERNAME --password $$MONGO_INITDB_ROOT_PASSWORD --eval "db.adminCommand('ping')""
       interval: 15s
       timeout: 5s
       retries: 5
