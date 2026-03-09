@@ -221,7 +221,7 @@ async def cmd_suggest(message: Message) -> None:
     await message.answer(
         "✅ <b>Предложение принято!</b>\n\n"
             "Спасибо, ваша идея поможет сделать бот лучше.\n"
-            f"Номер: <code>{str(ticket.id)[:8]}</code>\n\n"
+            f"Номер: <code>{str(ticket.id)[:8]}</code>\n",
         parse_mode="HTML",
     )
 
