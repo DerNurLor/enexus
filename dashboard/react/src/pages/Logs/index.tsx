@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, keepPreviousData } from '@tanstack/react-query'
 import { api, extractError } from '@/api/client'
 import { useUIStore } from '@/store/ui'
 import { Spinner, EmptyState, SectionHeader, Pagination, SkeletonRow } from '@/components/common'
@@ -20,7 +20,7 @@ export function PanelActivity() {
   const { data, isLoading } = useQuery({
     queryKey: ['activity', page, action, userId, refreshKey],
     queryFn: () => api.getActivityLogs({ action: action || undefined, user_id: userId || undefined, skip: page * PG, limit: PG }),
-    keepPreviousData: true,
+    placeholderData: keepPreviousData,
     staleTime: 15_000,
   })
 
@@ -45,7 +45,7 @@ export function PanelActivity() {
             <tbody>
               {isLoading && !logs.length
                 ? Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} cols={5} />)
-                : logs.map((l) => <ActivityRow key={l.id} log={l} />)
+                : logs.map((l: ActivityLog) => <ActivityRow key={l.id} log={l} />)
               }
             </tbody>
           </table>
@@ -95,7 +95,7 @@ export function PanelErrors() {
   const { data, isLoading } = useQuery({
     queryKey: ['errors', page, search, level, refreshKey],
     queryFn: () => api.getErrorLogs({ search: search || undefined, level: level || undefined, skip: page * PG, limit: PG }),
-    keepPreviousData: true,
+    placeholderData: keepPreviousData,
     staleTime: 15_000,
   })
 
@@ -128,7 +128,7 @@ export function PanelErrors() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {isLoading && !logs.length
           ? Array.from({ length: 5 }).map((_, i) => <div key={i} className="skeleton" style={{ height: 48, borderRadius: 4 }} />)
-          : logs.map((e) => (
+          : logs.map((e: ErrorLog) => (
             <div key={e.id} className="card" style={{ padding: '10px 12px', cursor: 'pointer' }} onClick={() => setExpanded(expanded === e.id ? null : e.id)}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
                 <span style={{ fontSize: 9, color: LEVEL_COLOR[e.level] ?? 'var(--t-40)', fontFamily: 'var(--mono)', flexShrink: 0, marginTop: 1, letterSpacing: '0.06em' }}>{e.level}</span>

@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { api, extractError } from '@/api/client'
 import { useUIStore, toast } from '@/store/ui'
 import { Spinner, UserAvatar, StatusBadge, RolePills, Pagination, SkeletonRow, EmptyState, SectionHeader, DetailPanel, CopyBtn } from '@/components/common'
@@ -21,7 +21,7 @@ export function PanelUsers() {
   const { data, isLoading } = useQuery({
     queryKey: ['users', page, q, blockedOnly, refreshKey],
     queryFn: () => api.getUsers({ skip: page * PG, limit: PG, q: q || undefined, blocked_only: blockedOnly || undefined }),
-    keepPreviousData: true,
+    placeholderData: keepPreviousData,
     staleTime: 15_000,
   })
 
@@ -70,7 +70,7 @@ export function PanelUsers() {
             <tbody>
               {isLoading && !users.length
                 ? Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} />)
-                : users.map((u) => (
+                : users.map((u: AdminUser) => (
                   <tr key={u.id} onClick={() => setSelected(u)} style={{ cursor: 'pointer' }}>
                     <td style={{ paddingLeft: 16 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
