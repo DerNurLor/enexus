@@ -168,12 +168,13 @@ class Query:
         room_name:      Optional[str] = None,
         institute_id:   Optional[int] = None,
         institute_name: Optional[str] = None,
+        subject:        Optional[str] = None,
         first:          int = 50,
         after:          Optional[str] = None,
     ) -> LessonConnection:
         return await R.resolve_lessons_on(
             date, group_id, group_name, teacher_id, teacher_name,
-            room_id, room_name, institute_id, institute_name, first, after,
+            room_id, room_name, institute_id, institute_name, subject, None, first,
         )
 
     @strawberry.field(description="Rooms free for N minutes starting at a given datetime (ISO 8601).")
