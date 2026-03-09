@@ -1,61 +1,149 @@
 #!/usr/bin/env bash
-# ═══════════════════════════════════════════════════════════════════════════════
-# setup-secrets.sh — интерактивная настройка секретов на сервере
-# Запускать с sudo:  sudo bash setup-secrets.sh
-# ═══════════════════════════════════════════════════════════════════════════════
+# =============================================================================
+# setup-secrets.sh — настройка секретов NCFU Bot Stack
+# Хранит в /etc/ncfu/secrets (постоянно, переживёт ребут)
+# Запускать: sudo bash setup-secrets.sh
+# =============================================================================
 set -euo pipefail
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; NC='\033[0m'
-info()  { echo -e "${GREEN}[✓]${NC} $*"; }
-warn()  { echo -e "${YELLOW}[!]${NC} $*"; }
-error() { echo -e "${RED}[✗]${NC} $*"; exit 1; }
-ask()   { local v; read -rsp "    $1: " v; echo; printf '%s' "$v"; }
+SECRETS_FILE="/etc/ncfu/secrets"
 
-[[ $EUID -ne 0 ]] && error "Запусти с sudo: sudo bash $0"
+[[ $EUID -ne 0 ]] && { echo "❌ Запускай через: sudo bash setup-secrets.sh"; exit 1; }
 
-DIR="/etc/ncfu/secrets"
-mkdir -p "$DIR" && chmod 700 "$DIR"
-
-w() { printf '%s' "$2" > "$DIR/$1"; chmod 600 "$DIR/$1"; info "Записан: $DIR/$1"; }
-
-echo -e "\n══════════════════════════════════════════════"
-echo   "  Настройка секретов NCFU Bot Stack"
-echo -e "══════════════════════════════════════════════\n"
-
-echo "▸ MongoDB"
-P=$(ask "Пароль MongoDB"); [[ -z "$P" ]] && error "Не может быть пустым"; w mongo_password "$P"
-
-echo -e "\n▸ Redis"
-P=$(ask "Пароль Redis"); [[ -z "$P" ]] && error "Не может быть пустым"; w redis_password "$P"
-
-echo -e "\n▸ Telegram"
-P=$(ask "Токен основного бота (от @BotFather)"); [[ -z "$P" ]] && error "Не может быть пустым"
-w telegram_bot_token "$P"
-w telegram_webhook_secret "$(openssl rand -hex 32 | tr -d '\n')"
-info "  Webhook secret сгенерирован автоматически"
-
-warn "Дополнительные боты (Enter = пропустить):"
-P=$(ask "Токен бота поддержки"); [[ -n "$P" ]] && w support_bot_token "$P"
-P=$(ask "Токен admin-бота");     [[ -n "$P" ]] && w admin_bot_token "$P"
-
-echo -e "\n▸ OpenAI"
-P=$(ask "OpenAI API Key (sk-...)"); [[ -z "$P" ]] && error "Не может быть пустым"; w openai_api_key "$P"
-
-echo -e "\n▸ JWT & Dashboard (генерируются автоматически)"
-w jwt_secret             "$(openssl rand -hex 64 | tr -d '\n')"
-w dashboard_secret       "$(openssl rand -hex 32 | tr -d '\n')"
-w graphql_secret         "$(openssl rand -hex 32 | tr -d '\n')"
-w mongo_express_password "$(openssl rand -hex 16 | tr -d '\n')"
+mkdir -p /etc/ncfu
+chmod 700 /etc/ncfu
 
 echo ""
-P=$(ask "Sentry DSN (Enter = пропустить)"); [[ -n "$P" ]] && w sentry_dsn "$P"
-
-echo -e "\n══════════════════════════════════════════════"
-info "Готово! Все секреты записаны в $DIR"
-echo -e "\nФайлы:"; ls -la "$DIR"
+echo "╔══════════════════════════════════════════════════╗"
+echo "║       NCFU — Настройка секретов на сервере       ║"
+echo "╚══════════════════════════════════════════════════╝"
 echo ""
-warn "Следующий шаг:"
-echo "  docker network create ncfu_network"
-echo "  docker volume create ncfu_mongo_data"
-echo "  docker compose -f docker-compose.prod.yml up -d --build"
-echo "══════════════════════════════════════════════"
+
+declare -A C
+if [[ -f "$SECRETS_FILE" ]]; then
+  echo "⚠️  Файл существует. Пустой ввод = оставить текущее."
+  echo ""
+  while IFS='=' read -r key val; do
+    [[ "$key" =~ ^[[:space:]]*#.*$|^[[:space:]]*$ ]] && continue
+    key="${key// /}"
+    C["$key"]="${val}"
+  done < "$SECRETS_FILE"
+fi
+
+ask() {
+  local key="$1" prompt="$2" secret="${3:-false}"
+  local cur="${C[$key]:-}"
+  local display=""
+  [[ -n "$cur" ]] && { [[ "$secret" == "true" ]] && display=" [${cur:0:4}****]" || display=" [$cur]"; }
+  printf "  %s%s\n  > " "$prompt" "$display"
+  local input; read -r input
+  if [[ -n "$input" ]]; then
+    C["$key"]="$input"
+  elif [[ -z "$cur" ]]; then
+    echo "  ⚠️  Обязательное поле!"; ask "$key" "$prompt" "$secret"
+  fi
+}
+
+# ТОЛЬКО буквы и цифры — гарантированно совместим с MongoDB SASL, Redis, URL
+safepass() {
+  local key="$1" prompt="$2"
+  if [[ -n "${C[$key]:-}" ]]; then
+    printf "  %s [уже задан]\n" "$prompt"
+  else
+    C["$key"]="$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | head -c 32)"
+    printf "  %s ✅ сгенерирован\n" "$prompt"
+  fi
+}
+
+hexsecret() {
+  local key="$1" prompt="$2" len="${3:-32}"
+  if [[ -n "${C[$key]:-}" ]]; then
+    printf "  %s [уже задан]\n" "$prompt"
+  else
+    C["$key"]="$(openssl rand -hex $len)"
+    printf "  %s ✅ сгенерирован\n" "$prompt"
+  fi
+}
+
+echo "── MongoDB ───────────────────────────────────────────"
+C["MONGO_USER"]="${C[MONGO_USER]:-ncfu_app}"
+C["MONGO_DB"]="${C[MONGO_DB]:-ncfu_schedule}"
+C["AUTH_MONGO_DB"]="${C[AUTH_MONGO_DB]:-ncfu_auth}"
+safepass MONGO_PASSWORD "Пароль MongoDB"
+echo ""
+
+echo "── Redis ─────────────────────────────────────────────"
+safepass REDIS_PASSWORD "Пароль Redis"
+echo ""
+
+echo "── Telegram ──────────────────────────────────────────"
+ask TELEGRAM_BOT_TOKEN "Токен бота (от @BotFather)" true
+ask WEBHOOK_BASE_URL   "Домен (https://enexus.isabelline.xyz)" false
+hexsecret TELEGRAM_WEBHOOK_SECRET "Webhook secret" 32
+echo ""
+
+echo "── OpenAI ────────────────────────────────────────────"
+ask OPENAI_API_KEY "OpenAI API Key (sk-...)" true
+echo ""
+
+echo "── Авто-генерация ────────────────────────────────────"
+hexsecret JWT_SECRET       "JWT Secret"       32
+hexsecret DASHBOARD_SECRET "Dashboard Secret" 16
+hexsecret GRAPHQL_SECRET   "GraphQL Secret"   16
+echo ""
+
+C["ADMIN_PATH"]="${C[ADMIN_PATH]:-admin}"
+C["APP_ENV"]="${C[APP_ENV]:-production}"
+C["BASE_URL"]="${C[BASE_URL]:-https://ecampus.ncfu.ru}"
+C["SCRAPER_CONCURRENCY"]="${C[SCRAPER_CONCURRENCY]:-5}"
+C["SCRAPE_INTERVAL_HOURS"]="${C[SCRAPE_INTERVAL_HOURS]:-1}"
+C["CORS_ALLOWED_ORIGINS"]="${C[CORS_ALLOWED_ORIGINS]:-${C[WEBHOOK_BASE_URL]:-}}"
+C["SUPPORT_BOT_TOKEN"]="${C[SUPPORT_BOT_TOKEN]:-}"
+C["SUPPORT_ADMIN_CHAT_ID"]="${C[SUPPORT_ADMIN_CHAT_ID]:-0}"
+C["SENTRY_DSN"]="${C[SENTRY_DSN]:-}"
+
+cat > "$SECRETS_FILE" << EOF
+# /etc/ncfu/secrets — ТОЛЬКО ROOT — НЕ КОПИРОВАТЬ В GIT
+# Обновлён: $(date -u '+%Y-%m-%d %H:%M UTC')
+
+APP_ENV=${C[APP_ENV]}
+
+MONGO_USER=${C[MONGO_USER]}
+MONGO_PASSWORD=${C[MONGO_PASSWORD]}
+MONGO_DB=${C[MONGO_DB]}
+AUTH_MONGO_DB=${C[AUTH_MONGO_DB]}
+
+REDIS_PASSWORD=${C[REDIS_PASSWORD]}
+
+TELEGRAM_BOT_TOKEN=${C[TELEGRAM_BOT_TOKEN]}
+TELEGRAM_WEBHOOK_SECRET=${C[TELEGRAM_WEBHOOK_SECRET]}
+WEBHOOK_BASE_URL=${C[WEBHOOK_BASE_URL]}
+SUPPORT_BOT_TOKEN=${C[SUPPORT_BOT_TOKEN]}
+SUPPORT_ADMIN_CHAT_ID=${C[SUPPORT_ADMIN_CHAT_ID]}
+
+OPENAI_API_KEY=${C[OPENAI_API_KEY]}
+
+JWT_SECRET=${C[JWT_SECRET]}
+DASHBOARD_SECRET=${C[DASHBOARD_SECRET]}
+GRAPHQL_SECRET=${C[GRAPHQL_SECRET]}
+
+ADMIN_PATH=${C[ADMIN_PATH]}
+CORS_ALLOWED_ORIGINS=${C[CORS_ALLOWED_ORIGINS]}
+
+BASE_URL=${C[BASE_URL]}
+SCRAPER_CONCURRENCY=${C[SCRAPER_CONCURRENCY]}
+SCRAPE_INTERVAL_HOURS=${C[SCRAPE_INTERVAL_HOURS]}
+
+SENTRY_DSN=${C[SENTRY_DSN]}
+EOF
+
+chmod 600 "$SECRETS_FILE"
+chown root:root "$SECRETS_FILE"
+
+echo ""
+echo "╔══════════════════════════════════════════════════════╗"
+echo "║  ✅  Секреты сохранены в $SECRETS_FILE"
+echo "╚══════════════════════════════════════════════════════╝"
+echo ""
+echo "Следующий шаг: sudo bash deploy.sh"
+echo ""
