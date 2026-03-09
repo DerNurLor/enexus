@@ -449,8 +449,6 @@ async def cb_disambig(cb: CallbackQuery) -> None:
             logger.warning(f"error log failed: {_le}")
         await progress.edit_text(f"❌ Ошибка при загрузке расписания.\n<code>{eid}</code>", parse_mode="HTML")
         return
-
-    # Render reply (PAGED or plain) and save bot reply with correct user tg_id
     _PAGED_PFX = chr(0) + "PAGED" + chr(0)
     if reply.startswith(_PAGED_PFX):
         import json as _json2

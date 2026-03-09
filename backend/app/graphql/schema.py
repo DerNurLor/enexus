@@ -185,7 +185,7 @@ class Query:
         building:    Optional[str] = None,
         institute_id: Optional[int] = None,
     ) -> List[FreeRoomType]:
-        return await R.resolve_free_rooms(at, duration, building, institute_id)
+        return await R.resolve_free_rooms(at, duration, building)
 
     @strawberry.field(description="Universal search across groups, teachers, rooms.")
     async def search(
