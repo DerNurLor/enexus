@@ -42,17 +42,18 @@ export default function App() {
       try {
         if (!initData) {
           // Dev mode
-          setUser({
-            id: 'dev', tg_id: 0,
-            first_name: 'Dev', last_name: 'User',
-            username: 'devuser', display: 'Dev User',
-            roles: ['user', 'beta'], permissions: ['beta_access'],
-            is_blocked: false, is_beta: true, is_vip: false, is_admin: false,
-            avatar: undefined,
-          })
-          setToken('dev')
-          toast('Dev mode — initData отсутствует')
-          revealApp()
+          // setUser({
+          //   id: 'dev', tg_id: 0,
+          //   first_name: 'Dev', last_name: 'User',
+          //   username: 'devuser', display: 'Dev User',
+          //   roles: ['user', 'beta'], permissions: ['beta_access'],
+          //   is_blocked: false, is_beta: true, is_vip: false, is_admin: false,
+          //   avatar: undefined,
+          // })
+          // setToken('dev')
+          // toast('Dev mode — initData отсутствует')
+          // revealApp()
+          setErrorMsg('Приложение доступно только через Telegram.')
           return
         }
 
@@ -77,7 +78,7 @@ export default function App() {
     }
 
     boot()
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   function revealApp() {
@@ -206,12 +207,12 @@ export default function App() {
             {errorMsg}
           </div>
         ) : (
-          <>
-            <div className="loader-logo">СКФУ</div>
-            <div className="loader-ring" />
-            <div className="loader-sub">Загрузка расписания…</div>
-          </>
-        )}
+            <>
+              <div className="loader-logo">СКФУ</div>
+              <div className="loader-ring" />
+              <div className="loader-sub">Загрузка расписания…</div>
+            </>
+          )}
       </div>
 
       {/* App */}
