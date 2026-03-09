@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
 # =============================================================================
-# deploy.sh — загружает /etc/ncfu/secrets и запускает стек
+# deploy.sh — загружает /etc/ncfu/secrets и управляет стеком
 #
 # Использование:
-#   sudo bash deploy.sh          # запустить / обновить
-#   sudo bash deploy.sh restart  # рестарт без пересборки
-#   sudo bash deploy.sh pull     # git pull + rebuild + restart
-#   sudo bash deploy.sh stop     # остановить
-#   sudo bash deploy.sh down     # остановить и удалить контейнеры
-#   sudo bash deploy.sh logs     # логи всех сервисов
-#   sudo bash deploy.sh status   # статус контейнеров
-#   sudo bash deploy.sh fresh    # полный сброс (удаляет MongoDB volume!)
+#   sudo bash deploy.sh              # запустить / обновить
+#   sudo bash deploy.sh build miniapp # пересобрать + перезапустить сервис
+#   sudo bash deploy.sh restart      # рестарт без пересборки
+#   sudo bash deploy.sh pull         # git pull + rebuild + restart
+#   sudo bash deploy.sh stop         # остановить
+#   sudo bash deploy.sh down         # остановить и удалить контейнеры
+#   sudo bash deploy.sh logs [сервис] # логи
+#   sudo bash deploy.sh status       # статус контейнеров
+#   sudo bash deploy.sh fresh        # полный сброс (удаляет MongoDB volume!)
 # =============================================================================
 set -euo pipefail
 
@@ -27,7 +28,6 @@ fi
 
 # Загружаем секреты
 set -a
-# shellcheck disable=SC1090
 source "$SECRETS_FILE"
 set +a
 
@@ -41,25 +41,15 @@ for v in "${REQUIRED[@]}"; do
   fi
 done
 
-# Проверяем что пароли не содержат спецсимволов которые ломают MongoDB
+# Проверяем что пароли не содержат спецсимволов
 for v in MONGO_PASSWORD REDIS_PASSWORD; do
   val="${!v}"
   if [[ "$val" =~ [^a-zA-Z0-9] ]]; then
-    echo "❌ $v содержит спецсимволы — это сломает MongoDB/Redis!"
-    echo "   Запусти setup-secrets.sh чтобы сгенерировать новый безопасный пароль"
-    echo "   Затем запусти: sudo bash deploy.sh fresh"
+    echo "❌ $v содержит спецсимволы — сломает MongoDB/Redis!"
+    echo "   Запусти setup-secrets.sh и затем: sudo bash deploy.sh fresh"
     exit 1
   fi
 done
-
-echo ""
-echo "╔══════════════════════════════════════════════════╗"
-echo "║              NCFU — Deploy                       ║"
-echo "╚══════════════════════════════════════════════════╝"
-echo "  Секреты: ✅"
-echo "  Домен:   ${WEBHOOK_BASE_URL:-не задан}"
-echo "  Команда: ${1:-up}"
-echo ""
 
 cd "$DIR"
 
@@ -69,25 +59,41 @@ _ensure_infra() {
 }
 
 CMD="${1:-up}"
+SVCS="${2:-}"
 
 case "$CMD" in
-  up|deploy|"")
+  up|"")
+    echo "▶ Запуск стека..."
     _ensure_infra
     docker compose build --pull
     docker compose up -d --remove-orphans
     sleep 3
     docker compose ps
-    echo ""
     echo "✅ Стек запущен"
     ;;
 
+  build)
+    if [[ -z "$SVCS" ]]; then
+      echo "❌ Укажи сервис: sudo bash deploy.sh build miniapp"
+      exit 1
+    fi
+    echo "▶ Пересборка + перезапуск: $SVCS"
+    docker compose build $SVCS
+    docker compose up -d --no-deps $SVCS
+    sleep 3
+    docker compose ps $SVCS
+    echo "✅ Готово: $SVCS"
+    ;;
+
   restart)
+    echo "▶ Рестарт..."
     _ensure_infra
     docker compose up -d --remove-orphans
     docker compose ps
     ;;
 
   pull)
+    echo "▶ Git pull + rebuild..."
     git -C "$DIR" pull
     _ensure_infra
     docker compose build --pull
@@ -109,11 +115,19 @@ case "$CMD" in
 
   stop)   docker compose stop ;;
   down)   docker compose down ;;
-  logs)   docker compose logs -f --tail=100 ;;
+
+  logs)
+    if [[ -n "$SVCS" ]]; then
+      docker compose logs -f --tail=100 $SVCS
+    else
+      docker compose logs -f --tail=100
+    fi
+    ;;
+
   status) docker compose ps ;;
 
   *)
-    echo "Команды: up, restart, pull, fresh, stop, down, logs, status"
+    echo "Команды: up, build <сервис>, restart, pull, fresh, stop, down, logs [сервис], status"
     exit 1
     ;;
 esac
