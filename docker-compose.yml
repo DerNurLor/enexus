@@ -178,10 +178,11 @@ services:
       REDIS_URL:        "redis://:${REDIS_PASSWORD}@redis:6379/0"
       BACKEND_URL:      "http://backend:8000"
       APP_ENV:          "${APP_ENV:-production}"
-      JWT_SECRET:       "${JWT_SECRET}"
-      WEBHOOK_BASE_URL: "${WEBHOOK_BASE_URL}"
-      OPENAI_API_KEY:   "${OPENAI_API_KEY}"
-      SENTRY_DSN:       "${SENTRY_DSN:-}"
+      JWT_SECRET:         "${JWT_SECRET}"
+      WEBHOOK_BASE_URL:   "${WEBHOOK_BASE_URL}"
+      OPENAI_API_KEY:     "${OPENAI_API_KEY}"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
+      SENTRY_DSN:         "${SENTRY_DSN:-}"
     ports:
       - "127.0.0.1:8002:8002"
     depends_on:
