@@ -161,12 +161,12 @@ make shell bot             # bash внутри контейнера
 
 | Документ | Содержание |
 |---|---|
-| **[ARCHITECTURE.md](ARCHITECTURE.md)** | Архитектура, схемы, потоки данных, AI-пайплайн, безопасность |
-| **[API.md](API.md)** | REST + GraphQL + WebSocket — полный API Reference |
-| **[USER_GUIDE.md](USER_GUIDE.md)** | Руководство пользователя бота и Mini App |
-| **[DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** | Локальный запуск, разработка, деплой, CI/CD |
-| **[CONTRIBUTING.md](CONTRIBUTING.md)** | Как участвовать в разработке |
-| **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** | FAQ и решение типичных проблем |
+| **[Documentation/ARCHITECTURE.md](ARCHITECTURE.md)** | Архитектура, схемы, потоки данных, AI-пайплайн, безопасность |
+| **[Documentation/API.md](API.md)** | REST + GraphQL + WebSocket — полный API Reference |
+| **[Documentation/USER_GUIDE.md](USER_GUIDE.md)** | Руководство пользователя бота и Mini App |
+| **[Documentation/DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md)** | Локальный запуск, разработка, деплой, CI/CD |
+| **[Documentation/CONTRIBUTING.md](CONTRIBUTING.md)** | Как участвовать в разработке |
+| **[Documentation/TROUBLESHOOTING.md](TROUBLESHOOTING.md)** | FAQ и решение типичных проблем |
 | **[CHANGELOG.md](CHANGELOG.md)** | История изменений |
 
 ---
