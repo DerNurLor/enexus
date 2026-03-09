@@ -13,7 +13,7 @@ ask()   { local v; read -rsp "    $1: " v; echo; printf '%s' "$v"; }
 
 [[ $EUID -ne 0 ]] && error "Запусти с sudo: sudo bash $0"
 
-DIR="/run/secrets"
+DIR="/etc/ncfu/secrets"
 mkdir -p "$DIR" && chmod 700 "$DIR"
 
 w() { printf '%s' "$2" > "$DIR/$1"; chmod 600 "$DIR/$1"; info "Записан: $DIR/$1"; }
