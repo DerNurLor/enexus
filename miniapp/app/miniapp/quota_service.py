@@ -35,6 +35,15 @@ async def get_quota_status(user_id: int, chat_id: int, chat_type: str) -> dict:
     if chat_type == "private":
         quota_id    = user_id
         default_cap = _cfg.quota_private
+        # Per-user cap from AuthUser.daily_requests overrides global default
+        # (mirrors the logic in ecampus_bot/app/bot/middlewares/anti_flood.py)
+        try:
+            from app.auth.models import AuthUser as _AuthUser
+            au = await _AuthUser.find_one({"tg_id": user_id})
+            if au and au.daily_requests is not None and au.daily_requests > 0:
+                default_cap = au.daily_requests
+        except Exception:
+            pass
     else:
         quota_id    = chat_id
         default_cap = _cfg.quota_group_large

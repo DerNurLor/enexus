@@ -3814,6 +3814,140 @@
     // ═══════════════════════════════════════
     //  FEEDBACK / ANALYTICS
     // ═══════════════════════════════════════
+    function FeedbackQAList({ onGoToError }) {
+      const [items, setItems] = useState([]);
+      const [total, setTotal] = useState(0);
+      const [offset, setOffset] = useState(0);
+      const [loading, setLoading] = useState(false);
+      const [rating, setRating] = useState('all');
+      const [status, setStatus] = useState('all');
+      const [search, setSearch] = useState('');
+      const [errSearch, setErrSearch] = useState(null);
+      const LIMIT = 20;
+
+      const load = useCallback(async (off = 0, rRating = rating, rStatus = status, rSearch = search, rErr = errSearch) => {
+        setLoading(true);
+        try {
+          const p = new URLSearchParams({offset: off, limit: LIMIT});
+          if (rRating !== 'all') p.set('rating', rRating);
+          if (rStatus !== 'all') p.set('status', rStatus);
+          const q = rErr || rSearch;
+          if (q) p.set('search', q);
+          const d = await api('/dashboard/api/feedback?' + p);
+          setItems(d.items || []);
+          setTotal(d.total || 0);
+          setOffset(off);
+        } catch (e) { toast.err(e.message); }
+        setLoading(false);
+      }, [rating, status, search, errSearch]);
+
+      useEffect(() => { load(0); }, []);
+
+      const goToError = (eid) => {
+        setErrSearch(eid);
+        load(0, rating, status, '', eid);
+      };
+      const clearErr = () => { setErrSearch(null); load(0, rating, status, search, null); };
+
+      const ratingIcon = (r) => r === 'like' ? '👍' : r === 'dislike' ? '👎' : '⏳';
+      const ratingLabel = (r) => r === 'like' ? 'Понравилось' : r === 'dislike' ? 'Не понравилось' : 'Ожидание';
+
+      const cardStyle = (r) => ({
+        border: `1px solid ${r === 'like' ? 'rgba(80,200,80,.25)' : r === 'dislike' ? 'rgba(255,80,80,.25)' : 'rgba(120,120,120,.2)'}`,
+        background: r === 'like' ? 'rgba(80,200,80,.04)' : r === 'dislike' ? 'rgba(255,80,80,.04)' : 'rgba(120,120,120,.04)',
+        borderRadius: 'var(--rad-md)',
+        padding: '10px 12px',
+        marginBottom: 8,
+      });
+
+      const pages = Math.ceil(total / LIMIT) || 1;
+      const page = Math.floor(offset / LIMIT) + 1;
+
+      return (
+        <div>
+          {errSearch && (
+            <div style={{padding: '8px 12px', background: 'rgba(255,100,100,.08)', borderRadius: 6, fontSize: 11, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 8}}>
+              <span>⚠️ Фильтр по ошибке: <b style={{fontFamily: 'var(--mono)'}}>{errSearch}</b></span>
+              <button onClick={clearErr} style={{background: 'none', border: '1px solid var(--line2)', borderRadius: 4, color: 'var(--t-40)', cursor: 'pointer', fontSize: 10, padding: '2px 6px'}}>× Сбросить</button>
+            </div>
+          )}
+          <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10, alignItems: 'center'}}>
+            {[['all','Все'],['like','👍'],['dislike','👎']].map(([v,l]) => (
+              <button key={v} onClick={() => { setRating(v); load(0, v, status, search, errSearch); }}
+                style={{padding: '4px 10px', fontSize: 10, border: '1px solid var(--line2)', borderRadius: 4, cursor: 'pointer',
+                  background: rating === v ? 'var(--t-100)' : 'transparent', color: rating === v ? 'var(--void)' : 'var(--t-40)'}}>
+                {l}
+              </button>
+            ))}
+            <span style={{color: 'var(--t-30)', fontSize: 10}}>|</span>
+            {[['all','Все'],['rated','✅ Оценено'],['pending','⏳ Ожидание']].map(([v,l]) => (
+              <button key={v} onClick={() => { setStatus(v); load(0, rating, v, search, errSearch); }}
+                style={{padding: '4px 10px', fontSize: 10, border: '1px solid var(--line2)', borderRadius: 4, cursor: 'pointer',
+                  background: status === v ? 'var(--t-100)' : 'transparent', color: status === v ? 'var(--void)' : 'var(--t-40)'}}>
+                {l}
+              </button>
+            ))}
+            <input value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && load(0)}
+              placeholder="Поиск по тексту…" style={{fontSize: 10, padding: '4px 8px', background: 'var(--ink-20)', border: '1px solid var(--line2)', borderRadius: 4, color: 'var(--t-80)', outline: 'none', flex: 1, minWidth: 120}} />
+            <button onClick={() => load(0)} style={{padding: '4px 10px', fontSize: 10, border: '1px solid var(--line2)', borderRadius: 4, cursor: 'pointer', background: 'transparent', color: 'var(--t-40)'}}>↺</button>
+          </div>
+          {loading ? (
+            <div style={{textAlign: 'center', padding: 32, color: 'var(--t-30)', fontSize: 12}}>Загрузка…</div>
+          ) : items.length === 0 ? (
+            <div style={{textAlign: 'center', padding: 32, color: 'var(--t-30)', fontSize: 12}}>Нет отзывов</div>
+          ) : (
+            <div>
+              {items.map((fb, i) => {
+                const errorIdMatch = ((fb.user_text || '') + (fb.bot_text || '')).match(/ERR-[A-Z0-9]{6}/);
+                const botClean = (fb.bot_text || '').replace(/<[^>]+>/g, '').slice(0, 500);
+                return (
+                  <div key={i} style={cardStyle(fb.rating)}>
+                    <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, fontSize: 11}}>
+                      <span style={{fontSize: 16}}>{ratingIcon(fb.rating)}</span>
+                      <span style={{fontWeight: 600}}>{ratingLabel(fb.rating)}</span>
+                      {fb.tg_id && <span style={{color: 'var(--t-30)', fontFamily: 'var(--mono)', fontSize: 10}}>tg:{fb.tg_id}</span>}
+                      <span style={{marginLeft: 'auto', color: 'var(--t-30)', fontSize: 10}}>{fb.created_at ? fb.created_at.slice(0, 16).replace('T', ' ') : ''}</span>
+                    </div>
+                    {!fb.user_text && !fb.bot_text ? (
+                      <div style={{fontSize: 10, color: 'var(--t-30)', fontStyle: 'italic'}}>Текст не сохранён</div>
+                    ) : (
+                      <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8}}>
+                        <div style={{background: 'var(--ink-20)', borderRadius: 6, padding: '6px 8px'}}>
+                          <div style={{fontSize: 9, fontWeight: 700, color: 'var(--t-30)', letterSpacing: '.06em', marginBottom: 4}}>ВОПРОС</div>
+                          <div style={{fontSize: 10, lineHeight: 1.5, whiteSpace: 'pre-wrap'}}>{fb.user_text || <i style={{color: 'var(--t-30)'}}>пусто</i>}</div>
+                        </div>
+                        <div style={{background: 'var(--ink-20)', borderRadius: 6, padding: '6px 8px'}}>
+                          <div style={{fontSize: 9, fontWeight: 700, color: 'var(--t-30)', letterSpacing: '.06em', marginBottom: 4}}>ОТВЕТ БОТА</div>
+                          <div style={{fontSize: 10, lineHeight: 1.5, whiteSpace: 'pre-wrap'}}>{botClean || <i style={{color: 'var(--t-30)'}}>пусто</i>}</div>
+                        </div>
+                      </div>
+                    )}
+                    {errorIdMatch && (
+                      <button onClick={() => goToError(errorIdMatch[0])}
+                        style={{marginTop: 6, fontSize: 10, padding: '3px 8px', background: 'rgba(255,100,100,.1)', border: '1px solid rgba(255,100,100,.25)', borderRadius: 4, cursor: 'pointer', color: 'var(--dan)'}}>
+                        ⚠️ {errorIdMatch[0]} → найти в ошибках
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div style={{display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 11}}>
+            <button onClick={() => load(offset - LIMIT)} disabled={offset === 0}
+              style={{padding: '4px 10px', fontSize: 10, border: '1px solid var(--line2)', borderRadius: 4, cursor: offset === 0 ? 'not-allowed' : 'pointer', opacity: offset === 0 ? .4 : 1, background: 'transparent', color: 'var(--t-40)'}}>
+              ← Назад
+            </button>
+            <span style={{color: 'var(--t-30)', fontSize: 10}}>стр. {page}/{pages} · всего {total}</span>
+            <button onClick={() => load(offset + LIMIT)} disabled={offset + LIMIT >= total}
+              style={{padding: '4px 10px', fontSize: 10, border: '1px solid var(--line2)', borderRadius: 4, cursor: offset + LIMIT >= total ? 'not-allowed' : 'pointer', opacity: offset + LIMIT >= total ? .4 : 1, background: 'transparent', color: 'var(--t-40)'}}>
+              Вперёд →
+            </button>
+          </div>
+        </div>
+      );
+    }
+
     function PanelFeedback() {
       const [days, setDays] = useState(30);
       const [fromDate, setFromDate] = useState('');
@@ -3906,6 +4040,7 @@
         {key: 'overview', label: 'Обзор'},
         {key: 'messages', label: 'Сообщения'},
         {key: 'feedback', label: 'Отзывы'},
+        {key: 'list', label: '📋 Q&A Список'},
         {key: 'intents', label: 'Интенты'},
         {key: 'errors', label: 'Ошибки'},
         {key: 'users', label: 'Пользователи'},
@@ -4072,6 +4207,14 @@
                 </div>
               </div>
             </div>
+          )}
+
+          {activeTab === 'list' && (
+            <FeedbackQAList onGoToError={(eid) => {
+              // Switch to errors panel
+              const errNav = document.querySelector('[data-page="errors"]');
+              if (errNav) errNav.click();
+            }} />
           )}
 
           {activeTab === 'intents' && (

@@ -83,7 +83,7 @@ def _issue_miniapp_token(user) -> str:
 # ── /roles ─────────────────────────────────────────────────────────────────────
 
 async def cmd_roles(message: Message) -> None:
-    """Show user's roles and associated permissions."""
+    """Show user's roles, permissions and privileges in a clean format."""
     from app.auth.models import AuthRole
     tg_user = message.from_user
     if not tg_user:
@@ -95,36 +95,160 @@ async def cmd_roles(message: Message) -> None:
     ).to_list()
     role_map = {r.name: r for r in role_docs}
 
-    lines = [f"👤 <b>Ваш профиль</b>\n"]
-    name = f"{user.first_name} {user.last_name or ''}".strip()
-    uname = f"@{user.username}" if user.username else f"tg:{user.tg_id}"
-    lines.append(f"  {name} · {uname}\n")
-    lines.append(f"🎭 <b>Роли:</b> {', '.join(f'<code>{r}</code>' for r in user.roles)}\n")
-
-    for role_name in user.roles:
-        doc = role_map.get(role_name)
-        if doc and doc.permissions:
-            perm_str = "  " + " · ".join(f"<i>{p}</i>" for p in doc.permissions[:6])
-            lines.append(f"\n<b>{role_name}</b>:\n{perm_str}")
-
-    # Role-specific messages
-    all_perms = set()
+    # Collect all permissions
+    all_perms: set[str] = set(user.extra_permissions or [])
     for doc in role_docs:
         all_perms.update(doc.permissions)
 
-    extras = []
-    if "beta_access" in all_perms:
-        extras.append("🧪 Beta: расширенные фильтры расписания")
+    name  = f"{user.first_name} {user.last_name or ''}".strip()
+    uname = f"@{user.username}" if user.username else f"tg:{user.tg_id}"
+
+    # ── Role badges ──────────────────────────────────────────────────────────
+    ROLE_META: dict[str, tuple[str, str]] = {
+        "admin":    ("🔴", "Администратор"),
+        "moderator":("🟠", "Модератор"),
+        "vip":      ("🟡", "VIP"),
+        "beta":     ("🔵", "Бета-тестер"),
+        "user":     ("⚪", "Пользователь"),
+    }
+
+    role_lines: list[str] = []
+    for role_name in user.roles:
+        icon, label = ROLE_META.get(role_name, ("⚫", role_name.capitalize()))
+        doc = role_map.get(role_name)
+        desc = f" — {doc.description}" if doc and doc.description else ""
+        role_lines.append(f"  {icon} <b>{label}</b> (<code>{role_name}</code>){desc}")
+
+    # ── Privilege highlights ─────────────────────────────────────────────────
+    extras: list[str] = []
     if "admin:full" in all_perms:
-        extras.append(f"⚙️ Admin: <a href=\"{settings.webhook_base_url}/dashboard/admin\">панель управления</a>")
+        extras.append(
+            f"⚙️ <b>Панель управления</b> → "
+            f"<a href=\"{settings.webhook_base_url}/dashboard/admin\">открыть</a>"
+        )
+    if "beta_access" in all_perms:
+        extras.append("🧪 <b>Бета-доступ</b> — расширенные фильтры расписания")
     if "floorplan:edit" in all_perms:
-        extras.append("🗺 Редактирование планов этажей")
+        extras.append("🗺 <b>Редактирование</b> планов этажей")
+    elif "floorplan:view" in all_perms:
+        extras.append("🗺 <b>Просмотр</b> планов этажей")
+    if user.daily_requests is not None and user.daily_requests > 0:
+        extras.append(f"📊 <b>Персональный лимит</b>: {user.daily_requests} запросов / период")
+
+    # ── Build message ────────────────────────────────────────────────────────
+    lines = [
+        f"👤 <b>{name}</b>  ·  <i>{uname}</i>\n",
+        "🎭 <b>Роли:</b>",
+    ]
+    lines += role_lines
 
     if extras:
-        lines.append("\n\n<b>Ваши привилегии:</b>")
+        lines.append("\n🔓 <b>Привилегии:</b>")
         lines += [f"  {e}" for e in extras]
 
+    lines.append(
+        f"\n💼 <b>Личный кабинет:</b> "
+        f"<a href=\"{settings.webhook_base_url}/dashboard/me\">открыть</a>"
+    )
+
     await message.answer("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
+
+
+# ── /suggest ──────────────────────────────────────────────────────────────────
+
+async def cmd_suggest(message: Message) -> None:
+    """Submit a suggestion/idea ticket — lifecycle mirrors /support but category=suggestion."""
+    from app.auth.models import SupportTicket
+    tg_user = message.from_user
+    if not tg_user:
+        return
+
+    text = message.text or ""
+    parts = text.split(maxsplit=1)
+    idea_text = parts[1].strip() if len(parts) > 1 else ""
+
+    if not idea_text:
+        await message.answer(
+            "💡 <b>Предложения и идеи</b>\n\n"
+                "Есть идея, как улучшить бот или расписание?\n"
+                "Напишите её после команды:\n\n"
+                "<code>/suggest Ваша идея здесь</code>\n\n"
+                "<i>Например: /suggest Добавить уведомление за 10 минут до пары</i>",
+            parse_mode="HTML",
+        )
+        return
+
+    user, _ = await _get_or_create_user(tg_user)
+
+    ticket = SupportTicket(
+        tg_id=tg_user.id,
+        username=tg_user.username,
+        first_name=tg_user.first_name or "",
+        message=idea_text,
+        source="bot",
+        category="suggestion",
+        status="open",
+    )
+    await ticket.insert()
+
+    # Notify admin if configured
+    from app.core.config import settings as _s
+    if _s.support_bot_token and _s.support_admin_chat_id:
+        try:
+            import httpx
+            uname = f"@{tg_user.username}" if tg_user.username else f"tg:{tg_user.id}"
+            tid = str(ticket.id)
+            notify_text = (
+                f"💡 <b>Новое предложение</b>\n"
+                    f"От: {tg_user.first_name} {uname} (tg_id={tg_user.id})\n"
+                    f"ID: <code>{tid}</code>\n\n"
+                    f"{idea_text[:500]}\n\n"
+                    f"Ответить:\n"
+                    f"<code>/reply {tid} Ваш ответ здесь</code>"
+            )
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(
+                    f"https://api.telegram.org/bot{_s.support_bot_token}/sendMessage",
+                    json={
+                        "chat_id": _s.support_admin_chat_id,
+                        "text": notify_text,
+                        "parse_mode": "HTML",
+                    },
+                )
+        except Exception as exc:
+            logger.warning(f"suggest notify failed: {exc}")
+
+    await message.answer(
+        "✅ <b>Предложение принято!</b>\n\n"
+            "Спасибо, ваша идея поможет сделать бот лучше.\n"
+            f"Номер: <code>{str(ticket.id)[:8]}</code>\n\n"
+            "<i>Мы рассмотрим предложение и можем написать вам, если потребуются уточнения.</i>",
+        parse_mode="HTML",
+    )
+
+
+# ── /about ────────────────────────────────────────────────────────────────────
+
+async def cmd_about(message: Message) -> None:
+    """Show information about the bot, version, and links."""
+    miniapp_url = f"{settings.webhook_base_url}/miniapp"
+    await message.answer(
+        "🎓 <b>Бот расписания СКФУ</b>\n\n"
+            "Умный помощник для студентов и преподавателей "
+            "Северо-Кавказского федерального университета.\n\n"
+            "📌 <b>Возможности:</b>\n"
+            "  • Расписание групп, преподавателей, аудиторий\n"
+            "  • Свободные аудитории в реальном времени\n"
+            "  • Поиск по группам и преподавателям\n"
+            "  • Mini App с полным расписанием 📅\n\n"
+            "🔗 <b>Ссылки:</b>\n"
+            f"  • <a href=\"{miniapp_url}\">Mini App расписания</a>\n"
+            f"  • <a href=\"{settings.webhook_base_url}/dashboard/me\">Личный кабинет</a>\n\n"
+            "🛠 <b>Версия:</b> 2.0\n"
+            "💬 Вопросы и предложения: /support · /suggest",
+        parse_mode="HTML",
+        disable_web_page_preview=True,
+    )
 
 
 # ── /miniapp ───────────────────────────────────────────────────────────────────

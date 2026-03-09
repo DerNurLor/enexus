@@ -234,16 +234,25 @@ from app.auth.models import BotFeedback
 async def list_feedback(
     rating:  Optional[str] = Query(None),   # like | dislike
     status:  Optional[str] = Query(None),   # pending | rated
+    search:  Optional[str] = Query(None),   # full-text search in user_text/bot_text (e.g. ERR-XXXXXX)
     limit:   int            = Query(50, le=200),
     offset:  int            = Query(0),
     _=Depends(require_admin),
 ):
-    """Return paginated bot feedback, optionally filtered by rating and/or status."""
+    """Return paginated bot feedback, optionally filtered by rating, status, or text search."""
     query: dict = {}
     if rating in ('like', 'dislike'):
         query['rating'] = rating
     if status in ('pending', 'rated'):
         query['status'] = status
+    if search:
+        # Search in both user_text and bot_text (case-insensitive)
+        import re as _re
+        pattern = _re.escape(search.strip())
+        query['$or'] = [
+            {'user_text': {'$regex': pattern, '$options': 'i'}},
+            {'bot_text':  {'$regex': pattern, '$options': 'i'}},
+        ]
 
     col   = BotFeedback.get_pymongo_collection()
     total = await col.count_documents(query)
