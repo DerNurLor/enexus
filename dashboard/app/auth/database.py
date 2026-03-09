@@ -16,8 +16,8 @@ _auth_client: AsyncIOMotorClient | None = None
 
 async def connect_auth_db() -> None:
     global _auth_client
-    logger.info(f"Connecting auth DB → {settings.mongo_uri}/{settings.auth_mongo_db}")
-    _auth_client = AsyncIOMotorClient(settings.mongo_uri)
+    logger.info(f"Connecting auth DB → {settings.auth_mongo_uri}/{settings.auth_mongo_db}")
+    _auth_client = AsyncIOMotorClient(settings.auth_mongo_uri)
     await init_beanie(
         database=_auth_client[settings.auth_mongo_db],
         document_models=_get_all_models(),
