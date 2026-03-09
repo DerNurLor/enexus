@@ -343,7 +343,7 @@ async def cb_disambig(cb: CallbackQuery) -> None:
 
     # Determine the chosen label (for storing the user's choice as a message)
     _id_field = "room_id" if intent_type == "room_schedule" else "group_id"
-    chosen = next((c for c in candidates if c.get(_id_field) == item_id), None)
+    chosen = next((c for c in candidates if str(c.get(_id_field, "")) == str(item_id)), None)
     chosen_label = (chosen.get("name") or str(item_id)) if chosen else str(item_id)
 
     # Save user's choice as a message in conversations
@@ -372,6 +372,16 @@ async def cb_disambig(cb: CallbackQuery) -> None:
         elif intent_type == "group_now":
             group_id  = item_id
             group_name = chosen["name"] if chosen else None
+            # Fallback: lookup name by id if not found in candidates
+            if not group_name and group_id:
+                from app.bot.handlers.ai_handler import _gql as _gql2, _GQL_SEARCH
+                try:
+                    sr = await _gql2(_GQL_SEARCH, {"q": str(group_id)})
+                    hits = sr.get("search", {}).get("groups", [])
+                    if hits:
+                        group_name = hits[0].get("name")
+                except Exception:
+                    pass
             tr_raw = params.get("time_ref")
             at = _resolve_time(TimeRef(**tr_raw) if tr_raw else None)
             day = at.date().isoformat()
