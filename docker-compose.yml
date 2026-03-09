@@ -204,7 +204,7 @@ services:
 
   dashboard:
     build:
-      context: ./dashboard2
+      context: ./dashboard
       dockerfile: Dockerfile
       target: runtime
     image: ncfu_dashboard:latest
@@ -312,4 +312,3 @@ networks:
   ncfu_net:
     name: ncfu_network
     external: true   # сеть уже существует (создана проектом "all")
-
