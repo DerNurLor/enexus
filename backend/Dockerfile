@@ -1,3 +1,18 @@
+# ─── Stage 0: Node.js — Build React SPA ──────────────────────────────────────
+FROM node:20-alpine AS node-builder
+
+WORKDIR /build
+
+# Install dependencies first (layer cache)
+COPY dashboard/react/package.json dashboard/react/package-lock.json* ./
+RUN npm ci --prefer-offline
+
+# Copy source and build
+COPY dashboard/react/ .
+RUN npm run build
+# Output: /build/dist
+
+
 # ─── Stage 1: Builder ────────────────────────────────────────────────────────
 FROM python:3.12-slim AS builder
 
@@ -7,7 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc libffi-dev libssl-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY requirements.txt .
+COPY backend/requirements.txt .
 
 RUN python -m venv /venv \
     && /venv/bin/pip install --upgrade pip \
@@ -25,11 +40,14 @@ WORKDIR /app
 # Copy the fully-built venv from builder
 COPY --from=builder /venv /venv
 
-# Copy application source (as root first so we can fix perms)
-COPY . .
+# Copy application source
+COPY backend/ .
+
+# Built React SPA → served as static files by FastAPI
+COPY --from=node-builder /build/dist /app/static/spa
 
 # Fix ownership of everything including logs dir
-RUN mkdir -p /app/logs \
+RUN mkdir -p /app/logs /app/static/avatars \
     && chown -R appuser:appgroup /app
 
 # Activate venv; set PYTHONPATH so `import app.xxx` resolves from /app
