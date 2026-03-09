@@ -14,8 +14,8 @@ _client: AsyncIOMotorClient | None = None
 
 async def connect_db() -> None:
     global _client
-    logger.info(f"Connecting schedule DB → {settings.mongo_uri}/{settings.mongo_db}")
-    _client = AsyncIOMotorClient(settings.mongo_uri)
+    logger.info(f"Connecting schedule DB → {settings.auth_mongo_uri}/{settings.mongo_db}")
+    _client = AsyncIOMotorClient(settings.auth_mongo_uri)
     # No beanie init needed — dashboard uses raw Motor for schedule collections
     logger.info("Schedule DB ready (raw Motor).")
 
