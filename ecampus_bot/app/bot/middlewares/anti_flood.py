@@ -24,6 +24,7 @@ NOTE: All settings are read lazily inside __call__ (not at module import time)
 from __future__ import annotations
 
 import time
+from contextvars import ContextVar
 from typing import Any, Awaitable, Callable
 
 from aiogram import BaseMiddleware
@@ -31,6 +32,9 @@ from aiogram.types import TelegramObject, Message
 from loguru import logger
 
 from app.cache.redis import get_redis
+
+# Set to True from handler when bot-side error occurred — middleware will decrement quota
+quota_error_flag: ContextVar[bool] = ContextVar("quota_error_flag", default=False)
 
 # Commands that are always free (never consume quota)
 _EXEMPT_COMMANDS = frozenset({
@@ -227,12 +231,20 @@ class MessageLimitMiddleware(BaseMiddleware):
             logger.warning(f"MessageLimit Redis error chat={chat.id}: {exc}")
             return await handler(event, data)   # fail open
 
+        # Reset flag for this request
+        quota_error_flag.set(False)
+
         # Call handler — if it raises/returns error, decrement quota back
         try:
             result = await handler(event, data)
+            # Handler can signal error via quota_error_flag ContextVar
+            if quota_error_flag.get():
+                try:
+                    await r.decr(key)
+                except Exception:
+                    pass
             return result
         except Exception as handler_exc:
-            # Don't charge the user for a bot-side error
             try:
                 await r.decr(key)
             except Exception:
