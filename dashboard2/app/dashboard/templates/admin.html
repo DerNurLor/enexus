@@ -2522,7 +2522,7 @@
         } catch (e) {toast.err(e.message);}
       }
 
-      return (
+      return ReactDOM.createPortal(
         <div className="detail-panel">
           <div className="detail-header">
             <UserAvatar user={user} size={32} />
@@ -2594,7 +2594,8 @@
               </>
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       );
     }
 
