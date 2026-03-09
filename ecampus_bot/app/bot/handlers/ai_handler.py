@@ -421,8 +421,8 @@ query($q: String!) {
 }"""
 
 _GQL_LESSONS_DAY = """
-query($day: String!, $gn: String, $tn: String, $rn: String, $iname: String) {
-  lessonsOn(date: $day, groupName: $gn, teacherName: $tn, roomName: $rn,
+query($day: String!, $gid: Int, $gn: String, $tn: String, $rn: String, $iname: String) {
+  lessonsOn(date: $day, groupId: $gid, groupName: $gn, teacherName: $tn, roomName: $rn,
                instituteName: $iname, first: 50) {
     nodes { timeStart timeEnd subject lessonType groupName teacherName roomName building instituteName }
     pageInfo { totalCount }

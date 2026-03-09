@@ -403,7 +403,7 @@ async def cb_disambig(cb: CallbackQuery) -> None:
             at = _resolve_time(TimeRef(**tr_raw) if tr_raw else None)
             day = at.date().isoformat()
             data = await _gql(_GQL_LESSONS_DAY, {
-                "day": day, "gn": group_name,
+                "day": day, "gid": group_id, "gn": group_name,
                 "tn": None, "rn": None, "iname": None,
             })
             nodes    = data.get("lessonsOn", {}).get("nodes", [])
