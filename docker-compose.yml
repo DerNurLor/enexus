@@ -48,7 +48,11 @@ services:
     healthcheck:
       test:
         - "CMD-SHELL"
-        - "mongosh --quiet --username $$MONGO_INITDB_ROOT_USERNAME --password $$MONGO_INITDB_ROOT_PASSWORD --eval "db.adminCommand('ping')""
+        - >-
+          mongosh --quiet
+          --username $$MONGO_INITDB_ROOT_USERNAME
+          --password $$MONGO_INITDB_ROOT_PASSWORD
+          --eval "db.adminCommand('ping')"
       interval: 15s
       timeout: 5s
       retries: 5
@@ -276,3 +280,5 @@ networks:
   ncfu_net:
     name: ncfu_network
     external: true   # сеть уже существует (создана проектом "all")
+
+
