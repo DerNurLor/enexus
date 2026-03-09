@@ -1456,7 +1456,8 @@
       right: 0;
       top: var(--header-h);
       bottom: 0;
-      width: 420px;
+      width: 380px;
+      max-width: calc(100vw - var(--sidebar-w));
       background: var(--ink-10);
       border-left: 1px solid var(--line);
       z-index: 100;
@@ -1464,6 +1465,7 @@
       flex-direction: column;
       animation: slideInRight 0.2s ease both;
       overflow: hidden;
+      box-shadow: -4px 0 24px rgba(0,0,0,0.3);
     }
 
     .detail-header {
@@ -1478,7 +1480,9 @@
     .detail-body {
       flex: 1;
       overflow-y: auto;
+      overflow-x: hidden;
       padding: 16px 18px;
+      min-height: 0;
     }
 
     /* ── Misc ── */
