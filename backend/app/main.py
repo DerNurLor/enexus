@@ -110,12 +110,6 @@ def create_app() -> FastAPI:
     os.makedirs(settings.static_dir, exist_ok=True)
     app.mount("/static", StaticFiles(directory=settings.static_dir), name="static")
 
-    # SPA assets (JS/CSS built by Vite under /dashboard/assets/*)
-    # Mounted BEFORE routers so static files are served directly without hitting spa_fallback
-    _spa_assets = "/app/static/spa/assets"
-    if os.path.isdir(_spa_assets):
-        app.mount("/dashboard/assets", StaticFiles(directory=_spa_assets), name="spa-assets")
-
     app.include_router(graphql_router, prefix="/graphql")
 
     from app.auth.router import router as auth_router
