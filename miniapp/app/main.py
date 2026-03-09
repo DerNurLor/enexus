@@ -63,6 +63,11 @@ def create_app() -> FastAPI:
     from app.auth.router import router as auth_router
     app.include_router(auth_router)
 
+    # ── Static assets (React build) ───────────────────────────────────────────
+    _static = os.path.join(os.path.dirname(__file__), "miniapp", "static")
+    if os.path.isdir(_static):
+        app.mount("/assets", StaticFiles(directory=os.path.join(_static, "assets")), name="assets")
+
     # ── Ops ───────────────────────────────────────────────────────────────────
     @app.get("/health", tags=["ops"])
     async def health():
