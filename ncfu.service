@@ -1,0 +1,17 @@
+[Unit]
+Description=NCFU Bot Stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/ncfu
+ExecStart=/bin/bash /opt/ncfu/deploy.sh up
+ExecStop=/bin/bash /opt/ncfu/deploy.sh down
+TimeoutStartSec=300
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target
