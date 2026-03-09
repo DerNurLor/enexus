@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { AnimatePresence } from 'framer-motion'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { api, extractError } from '@/api/client'
 import { useUIStore, toast } from '@/store/ui'
 import { Spinner, EmptyState, SectionHeader, DetailPanel, Pagination } from '@/components/common'
@@ -30,7 +30,7 @@ export function PanelSupport() {
   const { data, isLoading } = useQuery({
     queryKey: ['support', page, status, category, refreshKey],
     queryFn: () => api.getSupportTickets({ status: status || undefined, category: category || undefined, skip: page * PG, limit: PG }),
-    keepPreviousData: true,
+    placeholderData: keepPreviousData,
     staleTime: 15_000,
   })
 
@@ -76,7 +76,7 @@ export function PanelSupport() {
                 ? Array.from({ length: 6 }).map((_, i) => (
                     <tr key={i}><td colSpan={5}><div className="skeleton" style={{ height: 10, margin: '9px 16px' }} /></td></tr>
                   ))
-                : tickets.map((t) => (
+                : tickets.map((t: SupportTicket) => (
                   <tr key={t.id} onClick={() => setSelected(t)} style={{ cursor: 'pointer' }}>
                     <td style={{ paddingLeft: 16 }}>
                       <div style={{ fontSize: 11, color: 'var(--t-80)' }}>{t.first_name || '—'}</div>
