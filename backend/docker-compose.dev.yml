@@ -1,0 +1,22 @@
+version: "3.9"
+
+# Development overrides — use with:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
+
+services:
+  api:
+    build:
+      target: runtime          # runtime stage has the /venv baked in
+    volumes:
+      - .:/app                 # mount source for hot reload
+      - /venv:/venv            # preserve the venv from the image, don't let host override it
+    environment:
+      APP_ENV: development
+      LOG_LEVEL: DEBUG
+      PATH: /venv/bin:/usr/local/bin:/usr/bin:/bin
+    command: >
+      uvicorn app.main:app
+      --host 0.0.0.0
+      --port 8000
+      --reload
+      --log-level debug
