@@ -93,10 +93,18 @@ services:
     container_name: ncfu_backend
     restart: unless-stopped
     environment:
-      MONGO_URI:      "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${MONGO_DB:-ncfu_schedule}?authSource=admin"
-      AUTH_MONGO_URI: "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${AUTH_MONGO_DB:-ncfu_auth}?authSource=admin"
-      REDIS_URL:      "redis://:${REDIS_PASSWORD}@redis:6379/0"
-      APP_ENV:        "${APP_ENV:-production}"
+      MONGO_URI:        "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${MONGO_DB:-ncfu_schedule}?authSource=admin"
+      AUTH_MONGO_URI:   "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${AUTH_MONGO_DB:-ncfu_auth}?authSource=admin"
+      REDIS_URL:        "redis://:${REDIS_PASSWORD}@redis:6379/0"
+      APP_ENV:          "${APP_ENV:-production}"
+      OPENAI_API_KEY:   "${OPENAI_API_KEY}"
+      JWT_SECRET:       "${JWT_SECRET}"
+      DASHBOARD_SECRET: "${DASHBOARD_SECRET}"
+      GRAPHQL_SECRET:   "${GRAPHQL_SECRET}"
+      WEBHOOK_BASE_URL: "${WEBHOOK_BASE_URL}"
+      CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS}"
+      SENTRY_DSN:       "${SENTRY_DSN:-}"
+      ADMIN_PATH:       "${ADMIN_PATH:-admin}"
     expose: ["8000"]
     depends_on:
       mongo: { condition: service_healthy }
@@ -123,11 +131,19 @@ services:
     container_name: ncfu_bot
     restart: unless-stopped
     environment:
-      MONGO_URI:           "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${AUTH_MONGO_DB:-ncfu_auth}?authSource=admin"
-      REDIS_URL:           "redis://:${REDIS_PASSWORD}@redis:6379/0"
-      BACKEND_URL:         "http://backend:8000"
-      BACKEND_GRAPHQL_URL: "http://backend:8000/graphql"
-      APP_ENV:             "${APP_ENV:-production}"
+      MONGO_URI:              "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${AUTH_MONGO_DB:-ncfu_auth}?authSource=admin"
+      REDIS_URL:              "redis://:${REDIS_PASSWORD}@redis:6379/0"
+      BACKEND_URL:            "http://backend:8000"
+      BACKEND_GRAPHQL_URL:    "http://backend:8000/graphql"
+      APP_ENV:                "${APP_ENV:-production}"
+      OPENAI_API_KEY:         "${OPENAI_API_KEY}"
+      JWT_SECRET:             "${JWT_SECRET}"
+      TELEGRAM_BOT_TOKEN:     "${TELEGRAM_BOT_TOKEN}"
+      TELEGRAM_WEBHOOK_SECRET: "${TELEGRAM_WEBHOOK_SECRET}"
+      WEBHOOK_BASE_URL:       "${WEBHOOK_BASE_URL}"
+      SUPPORT_BOT_TOKEN:      "${SUPPORT_BOT_TOKEN:-}"
+      ADMIN_BOT_TOKEN:        "${ADMIN_BOT_TOKEN:-}"
+      SENTRY_DSN:             "${SENTRY_DSN:-}"
     expose: ["8001"]
     depends_on:
       mongo:   { condition: service_healthy }
@@ -155,11 +171,14 @@ services:
     container_name: ncfu_miniapp
     restart: unless-stopped
     environment:
-      MONGO_URI:      "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${MONGO_DB:-ncfu_schedule}?authSource=admin"
-      AUTH_MONGO_URI: "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${AUTH_MONGO_DB:-ncfu_auth}?authSource=admin"
-      REDIS_URL:      "redis://:${REDIS_PASSWORD}@redis:6379/0"
-      BACKEND_URL:    "http://backend:8000"
-      APP_ENV:        "${APP_ENV:-production}"
+      MONGO_URI:        "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${MONGO_DB:-ncfu_schedule}?authSource=admin"
+      AUTH_MONGO_URI:   "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${AUTH_MONGO_DB:-ncfu_auth}?authSource=admin"
+      REDIS_URL:        "redis://:${REDIS_PASSWORD}@redis:6379/0"
+      BACKEND_URL:      "http://backend:8000"
+      APP_ENV:          "${APP_ENV:-production}"
+      JWT_SECRET:       "${JWT_SECRET}"
+      WEBHOOK_BASE_URL: "${WEBHOOK_BASE_URL}"
+      SENTRY_DSN:       "${SENTRY_DSN:-}"
     expose: ["8002"]
     depends_on:
       mongo:   { condition: service_healthy }
@@ -187,10 +206,17 @@ services:
     container_name: ncfu_dashboard
     restart: unless-stopped
     environment:
-      MONGO_URI:      "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${MONGO_DB:-ncfu_schedule}?authSource=admin"
-      AUTH_MONGO_URI: "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${AUTH_MONGO_DB:-ncfu_auth}?authSource=admin"
-      REDIS_URL:      "redis://:${REDIS_PASSWORD}@redis:6379/0"
-      APP_ENV:        "${APP_ENV:-production}"
+      MONGO_URI:        "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${MONGO_DB:-ncfu_schedule}?authSource=admin"
+      AUTH_MONGO_URI:   "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${AUTH_MONGO_DB:-ncfu_auth}?authSource=admin"
+      REDIS_URL:        "redis://:${REDIS_PASSWORD}@redis:6379/0"
+      APP_ENV:          "${APP_ENV:-production}"
+      JWT_SECRET:       "${JWT_SECRET}"
+      DASHBOARD_SECRET: "${DASHBOARD_SECRET}"
+      GRAPHQL_SECRET:   "${GRAPHQL_SECRET}"
+      WEBHOOK_BASE_URL: "${WEBHOOK_BASE_URL}"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
+      ADMIN_PATH:       "${ADMIN_PATH:-admin}"
+      SENTRY_DSN:       "${SENTRY_DSN:-}"
     expose: ["8003"]
     depends_on:
       mongo:   { condition: service_healthy }
@@ -280,5 +306,4 @@ networks:
   ncfu_net:
     name: ncfu_network
     external: true   # сеть уже существует (создана проектом "all")
-
 
