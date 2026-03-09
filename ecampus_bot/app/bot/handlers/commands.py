@@ -243,7 +243,6 @@ async def cmd_about(message: Message) -> None:
             "  • Mini App с полным расписанием 📅\n\n"
             "🔗 <b>Ссылки:</b>\n"
             f"  • <a href=\"{miniapp_url}\">Mini App расписания</a>\n"
-            f"  • <a href=\"{settings.webhook_base_url}/dashboard/me\">Личный кабинет</a>\n\n"
             "🛠 <b>Версия:</b> 2.0\n"
             "💬 Вопросы и предложения: /support · /suggest",
         parse_mode="HTML",
