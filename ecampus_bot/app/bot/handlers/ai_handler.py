@@ -1375,18 +1375,33 @@ async def handle_message(message: Message) -> Message | None:
         _aio.ensure_future(_log_bot_error(eid, exc, getattr(intent, "intent", "unknown"), text))
         reply = f"❌ Ошибка связи с сервером расписания.\n<code>{eid}</code>"
         _is_error_reply = True
+        try:
+            from app.bot.middlewares.anti_flood import quota_error_flag
+            quota_error_flag.set(True)
+        except Exception:
+            pass
     except RuntimeError as exc:
         eid = _make_error_id()
         logger.error(f"[{eid}] GraphQL error: {exc}")
         _aio.ensure_future(_log_bot_error(eid, exc, getattr(intent, "intent", "unknown"), text))
         reply = f"❌ Ошибка запроса: {exc}\n<code>{eid}</code>"
         _is_error_reply = True
+        try:
+            from app.bot.middlewares.anti_flood import quota_error_flag
+            quota_error_flag.set(True)
+        except Exception:
+            pass
     except Exception as exc:
         eid = _make_error_id()
         logger.exception(f"[{eid}] dispatch error: {exc}")
         _aio.ensure_future(_log_bot_error(eid, exc, getattr(intent, "intent", "unknown"), text))
         reply = f"❌ Внутренняя ошибка. Попробуйте позже.\n<code>{eid}</code>"
         _is_error_reply = True
+        try:
+            from app.bot.middlewares.anti_flood import quota_error_flag
+            quota_error_flag.set(True)
+        except Exception:
+            pass
 
     # ── Disambiguation: multiple groups/rooms found ──────────────────────────
     if reply.startswith(_DISAMBIG_SENTINEL):
