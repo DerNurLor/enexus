@@ -290,22 +290,20 @@ def _report_suspicious(
 async def get_quota_status(user_id: int, chat_id: int, chat_type: str) -> dict:
     """
     Return current quota usage for a user/chat.
-
-    Returns:
-        {
-          "used":       int,   # requests used in the current window
-          "cap":        int,   # maximum allowed
-          "ttl_hours":  int,   # window length in hours
-          "ttl_secs":   int,   # seconds until the window resets (Redis TTL)
-          "remaining":  int,   # cap - used (clamped to 0)
-          "exhausted":  bool,
-        }
     """
     from app.core.config import settings as _cfg
 
     if chat_type == "private":
         quota_id    = user_id
         default_cap = _cfg.quota_private
+        # Per-user cap from AuthUser.daily_requests overrides global default
+        try:
+            from app.auth.models import AuthUser as _AuthUser
+            au = await _AuthUser.find_one({"tg_id": user_id})
+            if au and au.daily_requests is not None and au.daily_requests > 0:
+                default_cap = au.daily_requests
+        except Exception:
+            pass
     else:
         quota_id    = chat_id
         default_cap = _cfg.quota_group_large  # conservative estimate
