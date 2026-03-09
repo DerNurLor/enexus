@@ -1,0 +1,79 @@
+# docker-compose.dev.yml — Development overrides
+#
+# Использование:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+#   или сокращённо:
+#   docker compose --profile dev -f docker-compose.yml -f docker-compose.dev.yml up -d
+#
+# Что меняет:
+#   - Публикует порты всех сервисов для прямого доступа
+#   - Включает авто-перезагрузку при изменении кода (volume mount)
+#   - Отключает healthcheck-зависимости (быстрый старт)
+#   - Добавляет /docs (Swagger UI) для всех сервисов
+#   - Mongo и Redis доступны снаружи контейнера
+
+services:
+
+  backend:
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./backend/app:/app/app:ro     # hot-reload source
+    environment:
+      APP_ENV: "development"
+    command: >
+      /venv/bin/uvicorn app.main:app
+      --host 0.0.0.0 --port 8000
+      --reload --reload-dir /app/app
+      --log-level debug
+
+  bot:
+    ports:
+      - "127.0.0.1:8001:8001"
+    volumes:
+      - ./ecampus_bot/app:/app/app:ro
+    environment:
+      APP_ENV: "development"
+    command: >
+      /venv/bin/uvicorn app.main:app
+      --host 0.0.0.0 --port 8001
+      --reload --reload-dir /app/app
+      --log-level debug
+
+  miniapp:
+    ports:
+      - "127.0.0.1:8002:8002"
+    volumes:
+      - ./miniapp/app:/app/app:ro
+    environment:
+      APP_ENV: "development"
+    command: >
+      /venv/bin/uvicorn app.main:app
+      --host 0.0.0.0 --port 8002
+      --reload --reload-dir /app/app
+      --log-level debug
+
+  dashboard:
+    ports:
+      - "127.0.0.1:8003:8003"
+    volumes:
+      - ./dashboard/app:/app/app:ro
+    environment:
+      APP_ENV: "development"
+    command: >
+      /venv/bin/uvicorn app.main:app
+      --host 0.0.0.0 --port 8003
+      --reload --reload-dir /app/app
+      --log-level debug
+
+  mongo:
+    ports:
+      - "127.0.0.1:27017:27017"
+
+  redis:
+    ports:
+      - "127.0.0.1:6379:6379"
+
+  nginx:
+    ports:
+      - "0.0.0.0:8080:80"

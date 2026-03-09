@@ -1,0 +1,26 @@
+# ecampus_bot/docker-compose.yml
+# Standalone compose for the bot service.
+# Expects shared Mongo + Redis to be running (ncfu_network).
+# For running all services together, use the top-level docker-compose.yml.
+
+services:
+  bot:
+    build: { context: ., dockerfile: Dockerfile, target: runtime }
+    container_name: ncfu_bot
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MONGO_URI: "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${AUTH_MONGO_DB:-ncfu_auth}?authSource=admin"
+      REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379/0"
+      BACKEND_GRAPHQL_URL: "${BACKEND_GRAPHQL_URL:-http://backend:8000/graphql}"
+      BACKEND_URL: "${BACKEND_URL:-http://backend:8000}"
+    ports:
+      - "127.0.0.1:8001:8001"
+    networks:
+      - ncfu_net
+
+# Attach to the shared external network created by backend/docker-compose.yml
+networks:
+  ncfu_net:
+    external: true
+    name: ncfu_network

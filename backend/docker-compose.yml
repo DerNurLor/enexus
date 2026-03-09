@@ -1,0 +1,75 @@
+# backend/docker-compose.yml
+# Standalone compose for the backend service + its infrastructure (Mongo, Redis).
+# For running all services together, use the top-level docker-compose.yml.
+
+services:
+  backend:
+    build: { context: ., dockerfile: Dockerfile, target: runtime }
+    container_name: ncfu_backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MONGO_URI: "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${MONGO_DB:-ncfu_schedule}?authSource=admin"
+      REDIS_URL: "redis://:${REDIS_PASSWORD}@redis:6379/0"
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [ncfu_net]
+
+  mongo:
+    image: mongo:7.0
+    container_name: ncfu_mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "${MONGO_USER}"
+      MONGO_INITDB_ROOT_PASSWORD: "${MONGO_PASSWORD}"
+    volumes:
+      - mongo_data:/data/db
+      - ./docker/mongo/init.js:/docker-entrypoint-initdb.d/init.js:ro
+    healthcheck:
+      test: ["CMD","mongosh","--quiet","--username","${MONGO_USER}","--password","${MONGO_PASSWORD}","--eval","db.adminCommand('ping')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [ncfu_net]
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: ncfu_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass "${REDIS_PASSWORD}"
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+    healthcheck:
+      test: ["CMD","redis-cli","-a","${REDIS_PASSWORD}","ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks: [ncfu_net]
+
+  mongo-express:
+    image: mongo-express:1.0.2
+    container_name: ncfu_mongo_express
+    restart: unless-stopped
+    environment:
+      ME_CONFIG_MONGODB_URL: "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/"
+      ME_CONFIG_BASICAUTH_USERNAME: "${MONGO_EXPRESS_USER:-admin}"
+      ME_CONFIG_BASICAUTH_PASSWORD: "${MONGO_EXPRESS_PASSWORD}"
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      mongo: { condition: service_healthy }
+    networks: [ncfu_net]
+    profiles: [dev]
+
+volumes:
+  mongo_data: { name: ncfu_mongo_data }
+
+networks:
+  ncfu_net: { name: ncfu_network, driver: bridge }

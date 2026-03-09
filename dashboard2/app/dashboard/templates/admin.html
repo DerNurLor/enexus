@@ -1,0 +1,4297 @@
+<!DOCTYPE html>
+<html lang="ru">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin · NCFU Dashboard</title>
+  <!-- React + ReactDOM -->
+  <script crossorigin src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script crossorigin
+    src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <!-- Babel for TSX transpilation -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <!-- Chart.js -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link
+    href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500;600&display=swap"
+    rel="stylesheet">
+
+  <style>
+    /* ═══════════════════════════════════════════════════════════════════
+       MONOCHROME PREMIUM DESIGN SYSTEM
+       ═══════════════════════════════════════════════════════════════════ */
+    :root {
+      /* Pure monochrome palette */
+      --void: #000000;
+      --ink-10: #0a0a0a;
+      --ink-15: #111111;
+      --ink-20: #171717;
+      --ink-30: #1c1c1c;
+      --ink-40: #222222;
+      --ink-50: #2a2a2a;
+      --ink-60: #333333;
+      --line: rgba(255, 255, 255, 0.06);
+      --line2: rgba(255, 255, 255, 0.10);
+      --line3: rgba(255, 255, 255, 0.16);
+      --ghost: rgba(255, 255, 255, 0.04);
+      --ghost2: rgba(255, 255, 255, 0.07);
+
+      /* Text */
+      --t-100: #ffffff;
+      --t-80: #cccccc;
+      --t-60: #999999;
+      --t-40: #666666;
+      --t-20: #3a3a3a;
+
+      /* Semantic (monochrome) */
+      --ok: #e8e8e8;
+      --ok-dim: rgba(232, 232, 232, 0.12);
+      --warn: #aaaaaa;
+      --warn-dim: rgba(170, 170, 170, 0.12);
+      --err: #888888;
+      --err-dim: rgba(136, 136, 136, 0.12);
+
+      /* Accent = pure white with controlled presence */
+      --acc: #ffffff;
+      --acc-dim: rgba(255, 255, 255, 0.08);
+      --acc-glow: rgba(255, 255, 255, 0.16);
+
+      /* Typography */
+      --mono: 'DM Mono', monospace;
+      --serif: 'Playfair Display', serif;
+      --sans: 'DM Sans', sans-serif;
+
+      /* Geometry */
+      --rad: 2px;
+      --rad-md: 4px;
+      --rad-lg: 6px;
+
+      /* Sizing */
+      --sidebar-w: 200px;
+      --header-h: 52px;
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0
+    }
+
+    html,
+    body,
+    #root {
+      height: 100%;
+      background: var(--void);
+      color: var(--t-80);
+      font-family: var(--mono);
+      font-size: 12px;
+      -webkit-font-smoothing: antialiased;
+      overflow: hidden;
+    }
+
+    /* ── Scrollbars ── */
+    ::-webkit-scrollbar {
+      width: 3px;
+      height: 3px
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--ink-60);
+      border-radius: 99px
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--t-40)
+    }
+
+    /* ── Selection ── */
+    ::selection {
+      background: rgba(255, 255, 255, 0.15);
+      color: #fff
+    }
+
+    /* ── Animations ── */
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(6px)
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0)
+      }
+    }
+
+    @keyframes fadeUp {
+      from {
+        opacity: 0;
+        transform: translateY(12px)
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0)
+      }
+    }
+
+    @keyframes slideInLeft {
+      from {
+        opacity: 0;
+        transform: translateX(-16px)
+      }
+
+      to {
+        opacity: 1;
+        transform: translateX(0)
+      }
+    }
+
+    @keyframes slideInRight {
+      from {
+        opacity: 0;
+        transform: translateX(16px)
+      }
+
+      to {
+        opacity: 1;
+        transform: translateX(0)
+      }
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: 0.4
+      }
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg)
+      }
+    }
+
+    @keyframes shimmer {
+      0% {
+        background-position: -200% center
+      }
+
+      100% {
+        background-position: 200% center
+      }
+    }
+
+    @keyframes countUp {
+      from {
+        opacity: 0;
+        transform: scale(0.85)
+      }
+
+      to {
+        opacity: 1;
+        transform: scale(1)
+      }
+    }
+
+    @keyframes barGrow {
+      from {
+        transform: scaleX(0)
+      }
+
+      to {
+        transform: scaleX(1)
+      }
+    }
+
+    @keyframes toastIn {
+      from {
+        opacity: 0;
+        transform: translateX(20px)
+      }
+
+      to {
+        opacity: 1;
+        transform: translateX(0)
+      }
+    }
+
+    @keyframes toastOut {
+      from {
+        opacity: 1;
+        transform: translateX(0)
+      }
+
+      to {
+        opacity: 0;
+        transform: translateX(20px)
+      }
+    }
+
+    @keyframes dotBlink {
+
+      0%,
+      80%,
+      100% {
+        transform: scale(0.6);
+        opacity: 0.3
+      }
+
+      40% {
+        transform: scale(1);
+        opacity: 1
+      }
+    }
+
+    .anim-fade {
+      animation: fadeIn 0.25s ease both
+    }
+
+    .anim-up {
+      animation: fadeUp 0.3s ease both
+    }
+
+    .anim-left {
+      animation: slideInLeft 0.25s ease both
+    }
+
+    /* ── Layout ── */
+    .layout {
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       SIDEBAR
+       ═══════════════════════════════════════════════════════════════════ */
+    .sidebar {
+      width: var(--sidebar-w);
+      flex-shrink: 0;
+      background: var(--ink-10);
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      position: relative;
+      z-index: 10;
+    }
+
+    .sidebar-logo {
+      padding: 20px 18px 16px;
+      border-bottom: 1px solid var(--line);
+      flex-shrink: 0;
+    }
+
+    .sidebar-logo-title {
+      font-family: var(--serif);
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--t-100);
+      letter-spacing: 0.02em;
+      line-height: 1;
+    }
+
+    .sidebar-logo-sub {
+      font-family: var(--mono);
+      font-size: 9px;
+      color: var(--t-40);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-top: 4px;
+    }
+
+    .sidebar-nav {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px 0;
+    }
+
+    .nav-group-label {
+      font-size: 8px;
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      color: var(--t-20);
+      padding: 12px 18px 4px;
+      font-family: var(--mono);
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+      padding: 7px 18px;
+      cursor: pointer;
+      color: var(--t-40);
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.02em;
+      transition: color 0.15s, background 0.15s;
+      position: relative;
+      user-select: none;
+      border: none;
+      background: none;
+      width: 100%;
+      text-align: left;
+    }
+
+    .nav-item:hover {
+      color: var(--t-80);
+      background: var(--ghost)
+    }
+
+    .nav-item.active {
+      color: var(--t-100);
+      background: var(--ghost2);
+    }
+
+    .nav-item.active::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 4px;
+      bottom: 4px;
+      width: 2px;
+      background: var(--t-100);
+      border-radius: 0 2px 2px 0;
+    }
+
+    .nav-item-icon {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      opacity: 0.7;
+    }
+
+    .nav-item.active .nav-item-icon {
+      opacity: 1
+    }
+
+    .nav-badge {
+      margin-left: auto;
+      font-size: 9px;
+      background: var(--t-20);
+      color: var(--t-60);
+      padding: 1px 5px;
+      border-radius: 99px;
+      font-family: var(--mono);
+      min-width: 18px;
+      text-align: center;
+    }
+
+    .nav-badge.live {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--t-80);
+    }
+
+    .sidebar-footer {
+      padding: 12px 14px;
+      border-top: 1px solid var(--line);
+      flex-shrink: 0;
+    }
+
+    .sidebar-user {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 0;
+    }
+
+    .sidebar-avatar {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: var(--ink-50);
+      border: 1px solid var(--line3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: var(--t-80);
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+
+    .sidebar-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover
+    }
+
+    .sidebar-user-name {
+      font-size: 11px;
+      color: var(--t-80);
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       MAIN AREA
+       ═══════════════════════════════════════════════════════════════════ */
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-width: 0;
+    }
+
+    .topbar {
+      height: var(--header-h);
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      padding: 0 22px;
+      border-bottom: 1px solid var(--line);
+      background: var(--ink-10);
+      gap: 12px;
+    }
+
+    .topbar-title {
+      font-family: var(--serif);
+      font-size: 14px;
+      color: var(--t-100);
+      font-weight: 700;
+      flex: 1;
+      letter-spacing: 0.01em;
+    }
+
+    .topbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .content {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 22px;
+      background: var(--void);
+    }
+
+    /* ═══════════════════════════════════════════════════════════════════
+       COMPONENTS
+       ═══════════════════════════════════════════════════════════════════ */
+
+    /* ── Button ── */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 6px 14px;
+      border-radius: var(--rad);
+      font-family: var(--mono);
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s;
+      border: 1px solid transparent;
+      white-space: nowrap;
+      user-select: none;
+    }
+
+    .btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed
+    }
+
+    .btn:active:not(:disabled) {
+      transform: scale(0.97)
+    }
+
+    .btn-primary {
+      background: var(--t-100);
+      color: var(--void);
+      border-color: var(--t-100);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: var(--t-80);
+      border-color: var(--t-80)
+    }
+
+    .btn-ghost {
+      background: transparent;
+      color: var(--t-60);
+      border-color: var(--line2);
+    }
+
+    .btn-ghost:hover:not(:disabled) {
+      color: var(--t-100);
+      border-color: var(--line3);
+      background: var(--ghost)
+    }
+
+    .btn-danger {
+      background: transparent;
+      color: var(--t-60);
+      border-color: var(--line2);
+    }
+
+    .btn-danger:hover:not(:disabled) {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--t-80);
+      border-color: var(--t-40);
+    }
+
+    .btn-icon {
+      padding: 5px;
+      width: 28px;
+      height: 28px;
+      justify-content: center;
+    }
+
+    /* ── Input ── */
+    .input {
+      width: 100%;
+      padding: 7px 10px;
+      background: var(--ink-20);
+      border: 1px solid var(--line2);
+      border-radius: var(--rad);
+      color: var(--t-80);
+      font-family: var(--mono);
+      font-size: 11px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .input:focus {
+      border-color: var(--line3);
+    }
+
+    .input::placeholder {
+      color: var(--t-20)
+    }
+
+    .input:disabled {
+      opacity: 0.5
+    }
+
+    textarea.input {
+      resize: vertical;
+      min-height: 60px;
+      line-height: 1.5;
+    }
+
+    select.input {
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23666' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 28px;
+    }
+
+    select.input option {
+      background: var(--ink-30)
+    }
+
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .input-label {
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--t-40);
+    }
+
+    /* ── Card ── */
+    .card {
+      background: var(--ink-15);
+      border: 1px solid var(--line);
+      border-radius: var(--rad-lg);
+      padding: 16px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .card-title {
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--t-40);
+      font-family: var(--mono);
+    }
+
+    /* ── Stat Card ── */
+    .stat-card {
+      background: var(--ink-15);
+      border: 1px solid var(--line);
+      border-radius: var(--rad-lg);
+      padding: 16px 18px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.2s, background 0.2s;
+    }
+
+    .stat-card:hover {
+      border-color: var(--line2);
+      background: var(--ink-20)
+    }
+
+    .stat-label {
+      font-size: 9px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--t-40);
+      margin-bottom: 8px;
+    }
+
+    .stat-value {
+      font-family: var(--serif);
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--t-100);
+      line-height: 1;
+      animation: countUp 0.4s ease both;
+    }
+
+    .stat-delta {
+      font-size: 10px;
+      color: var(--t-40);
+      margin-top: 6px;
+    }
+
+    .stat-delta.up {
+      color: var(--t-60)
+    }
+
+    .stat-delta.down {
+      color: var(--t-40)
+    }
+
+    .stat-bar {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: var(--line);
+    }
+
+    .stat-bar-fill {
+      height: 100%;
+      background: var(--t-20);
+      border-radius: 0 99px 99px 0;
+      animation: barGrow 0.8s ease both;
+      transform-origin: left;
+    }
+
+    /* ── Table ── */
+    .table-wrap {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 11px;
+    }
+
+    thead tr {
+      border-bottom: 1px solid var(--line2)
+    }
+
+    thead th {
+      text-align: left;
+      padding: 8px 10px;
+      font-size: 9px;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--t-40);
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    tbody tr {
+      border-bottom: 1px solid var(--line);
+      transition: background 0.1s;
+    }
+
+    tbody tr:last-child {
+      border-bottom: none
+    }
+
+    tbody tr:hover {
+      background: var(--ghost)
+    }
+
+    tbody td {
+      padding: 9px 10px;
+      color: var(--t-60);
+      vertical-align: middle;
+    }
+
+    tbody td:first-child {
+      color: var(--t-80)
+    }
+
+    /* ── Badge ── */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 7px;
+      border-radius: 99px;
+      font-size: 9px;
+      font-family: var(--mono);
+      letter-spacing: 0.05em;
+      white-space: nowrap;
+    }
+
+    .badge-neutral {
+      background: var(--ink-50);
+      color: var(--t-60);
+      border: 1px solid var(--line2)
+    }
+
+    .badge-white {
+      background: rgba(255, 255, 255, 0.1);
+      color: var(--t-80);
+      border: 1px solid var(--line3)
+    }
+
+    .badge-dark {
+      background: var(--ink-30);
+      color: var(--t-40);
+      border: 1px solid var(--line)
+    }
+
+    /* ── Status dot ── */
+    .dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    .dot-ok {
+      background: var(--t-80);
+      animation: pulse 2.5s ease-in-out infinite
+    }
+
+    .dot-warn {
+      background: var(--t-60)
+    }
+
+    .dot-err {
+      background: var(--t-40)
+    }
+
+    .dot-off {
+      background: var(--t-20)
+    }
+
+    /* ── Spinner ── */
+    .spinner {
+      width: 14px;
+      height: 14px;
+      border: 1.5px solid var(--line2);
+      border-top-color: var(--t-60);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+
+    .spinner-lg {
+      width: 24px;
+      height: 24px;
+      border-width: 2px;
+    }
+
+    /* ── Empty state ── */
+    .empty {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 48px 20px;
+      color: var(--t-20);
+      gap: 8px;
+    }
+
+    .empty-icon {
+      font-size: 24px;
+      opacity: 0.4
+    }
+
+    .empty-text {
+      font-size: 11px;
+      color: var(--t-40)
+    }
+
+    /* ── Toast ── */
+    #toast-root {
+      position: fixed;
+      bottom: 18px;
+      right: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      z-index: 9999;
+      pointer-events: none;
+    }
+
+    .toast-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 13px;
+      background: var(--ink-40);
+      border: 1px solid var(--line3);
+      border-radius: var(--rad-md);
+      font-size: 11px;
+      color: var(--t-80);
+      animation: toastIn 0.2s ease both;
+      pointer-events: all;
+      cursor: pointer;
+      max-width: 320px;
+      font-family: var(--mono);
+    }
+
+    .toast-item.err {
+      border-color: var(--t-20)
+    }
+
+    .toast-item.ok {
+      border-color: var(--t-40)
+    }
+
+    .toast-item.dying {
+      animation: toastOut 0.2s ease forwards
+    }
+
+    /* ── Auth Gate ── */
+    .auth-gate {
+      position: fixed;
+      inset: 0;
+      background: var(--void);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 999;
+    }
+
+    .auth-box {
+      width: 340px;
+      animation: fadeUp 0.4s ease both;
+    }
+
+    .auth-logo {
+      font-family: var(--serif);
+      font-size: 22px;
+      font-weight: 900;
+      color: var(--t-100);
+      margin-bottom: 6px;
+    }
+
+    .auth-sub {
+      font-size: 10px;
+      color: var(--t-40);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 28px;
+    }
+
+    .auth-line {
+      width: 40px;
+      height: 1px;
+      background: var(--line3);
+      margin: 16px 0;
+    }
+
+    .auth-error {
+      color: var(--t-60);
+      font-size: 10px;
+      margin-top: 8px;
+      min-height: 14px;
+    }
+
+    /* ── Grid Layouts ── */
+    .grid-4 {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px
+    }
+
+    .grid-2-1 {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 14px
+    }
+
+    .grid-1-2 {
+      display: grid;
+      grid-template-columns: 1fr 2fr;
+      gap: 14px
+    }
+
+    @media (max-width: 1100px) {
+      .grid-4 {
+        grid-template-columns: repeat(2, 1fr)
+      }
+
+      .grid-3 {
+        grid-template-columns: repeat(2, 1fr)
+      }
+
+      .grid-2-1,
+      .grid-1-2 {
+        grid-template-columns: 1fr
+      }
+    }
+
+    .section-gap {
+      display: flex;
+      flex-direction: column;
+      gap: 14px
+    }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex;
+      gap: 2px;
+      border-bottom: 1px solid var(--line);
+      margin-bottom: 14px;
+      padding-bottom: 0;
+    }
+
+    .tab {
+      padding: 6px 12px 7px;
+      font-size: 10px;
+      color: var(--t-40);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -1px;
+      font-family: var(--mono);
+      letter-spacing: 0.05em;
+      transition: color 0.15s;
+      user-select: none;
+    }
+
+    .tab:hover {
+      color: var(--t-80)
+    }
+
+    .tab.active {
+      color: var(--t-100);
+      border-bottom-color: var(--t-100)
+    }
+
+    /* ── Pagination ── */
+    .pagination {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      justify-content: flex-end;
+      padding-top: 10px;
+    }
+
+    .page-btn {
+      width: 26px;
+      height: 26px;
+      border: 1px solid var(--line2);
+      border-radius: var(--rad);
+      background: transparent;
+      color: var(--t-40);
+      font-size: 10px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.12s;
+      font-family: var(--mono);
+    }
+
+    .page-btn:hover:not(:disabled) {
+      border-color: var(--line3);
+      color: var(--t-80)
+    }
+
+    .page-btn.active {
+      background: var(--t-100);
+      color: var(--void);
+      border-color: var(--t-100)
+    }
+
+    .page-btn:disabled {
+      opacity: 0.3;
+      cursor: not-allowed
+    }
+
+    /* ── Divider ── */
+    .divider {
+      border: none;
+      border-top: 1px solid var(--line);
+      margin: 12px 0
+    }
+
+    /* ── User card ── */
+    .user-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--ink-50);
+      border: 1px solid var(--line2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 10px;
+      color: var(--t-60);
+      flex-shrink: 0;
+      overflow: hidden;
+    }
+
+    .user-avatar img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover
+    }
+
+    /* ── Chat bubble ── */
+    .bubble-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .bubble {
+      max-width: 76%;
+      padding: 8px 12px;
+      border-radius: 14px;
+      font-size: 12px;
+      line-height: 1.55;
+      position: relative;
+      word-break: break-word;
+      font-family: var(--sans);
+    }
+
+    /* USER: left-aligned, dark bg, bright text */
+    .bubble.user {
+      background: rgba(255, 255, 255, 0.10);
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      color: var(--t-100);
+      align-self: flex-start;
+      border-bottom-left-radius: 4px;
+    }
+
+    /* BOT: right-aligned, white bg, black text — maximum contrast */
+    .bubble.bot {
+      background: rgba(255, 255, 255, 0.92);
+      border: none;
+      color: #111;
+      align-self: flex-end;
+      border-bottom-right-radius: 4px;
+    }
+
+    .bubble.bot .media-caption {
+      color: #333;
+    }
+
+    .bubble-label {
+      font-size: 8px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 3px;
+      font-family: var(--mono);
+    }
+
+    .bubble.user .bubble-label {
+      color: rgba(255, 255, 255, 0.35);
+      align-self: flex-start;
+    }
+
+    .bubble.bot .bubble-label {
+      color: rgba(0, 0, 0, 0.35);
+      align-self: flex-end;
+    }
+
+    .bubble-meta {
+      font-size: 9px;
+      color: var(--t-20);
+      font-family: var(--mono);
+      letter-spacing: 0.03em;
+    }
+
+    .bubble-meta.right {
+      text-align: right
+    }
+
+    /* media inside bubble */
+    .bubble-media-img {
+      display: block;
+      max-width: 240px;
+      max-height: 200px;
+      border-radius: 8px;
+      object-fit: cover;
+      cursor: zoom-in;
+      margin-bottom: 4px;
+    }
+
+    .bubble-media-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 8px;
+      background: rgba(255, 255, 255, 0.12);
+      border-radius: 6px;
+      font-size: 10px;
+      margin-bottom: 4px;
+    }
+
+    .bubble.bot .bubble-media-chip {
+      background: rgba(0, 0, 0, 0.08);
+    }
+
+    /* ── Progress ── */
+    .progress-bar {
+      height: 3px;
+      background: var(--line);
+      border-radius: 99px;
+      overflow: hidden;
+    }
+
+    .progress-fill {
+      height: 100%;
+      background: var(--t-60);
+      border-radius: 99px;
+      transition: width 0.6s ease;
+    }
+
+    /* ── Toggle ── */
+    .toggle-wrap {
+      position: relative;
+      width: 32px;
+      height: 18px;
+      flex-shrink: 0;
+    }
+
+    .toggle-input {
+      display: none
+    }
+
+    .toggle-slider {
+      position: absolute;
+      inset: 0;
+      background: var(--ink-50);
+      border: 1px solid var(--line2);
+      border-radius: 99px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .toggle-slider::after {
+      content: '';
+      position: absolute;
+      left: 2px;
+      top: 2px;
+      width: 12px;
+      height: 12px;
+      background: var(--t-40);
+      border-radius: 50%;
+      transition: transform 0.2s, background 0.2s;
+    }
+
+    .toggle-input:checked+.toggle-slider {
+      background: var(--ink-60);
+      border-color: var(--line3)
+    }
+
+    .toggle-input:checked+.toggle-slider::after {
+      transform: translateX(14px);
+      background: var(--t-100);
+    }
+
+    /* ── Skeleton ── */
+    .skeleton {
+      background: linear-gradient(90deg, var(--ink-20) 25%, var(--ink-30) 50%, var(--ink-20) 75%);
+      background-size: 200% 100%;
+      animation: shimmer 1.4s infinite;
+      border-radius: var(--rad);
+    }
+
+    .skel-line {
+      height: 10px;
+      margin-bottom: 6px
+    }
+
+    .skel-sm {
+      width: 60%
+    }
+
+    .skel-md {
+      width: 80%
+    }
+
+    .skel-full {
+      width: 100%
+    }
+
+    /* ── Chat list ── */
+    .chat-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      cursor: pointer;
+      border-radius: var(--rad-md);
+      transition: background 0.1s;
+      user-select: none;
+    }
+
+    .chat-item:hover {
+      background: var(--ghost)
+    }
+
+    .chat-item.active {
+      background: var(--ghost2)
+    }
+
+    .chat-item-info {
+      flex: 1;
+      min-width: 0
+    }
+
+    .chat-item-name {
+      font-size: 11px;
+      color: var(--t-80);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .chat-item-preview {
+      font-size: 10px;
+      color: var(--t-40);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-top: 1px;
+    }
+
+    .chat-item-meta {
+      font-size: 9px;
+      color: var(--t-20);
+      text-align: right;
+      flex-shrink: 0;
+    }
+
+    /* ── Ticket ── */
+    .ticket-item {
+      padding: 12px 14px;
+      border: 1px solid var(--line);
+      border-radius: var(--rad-lg);
+      margin-bottom: 7px;
+      transition: border-color 0.15s, background 0.15s;
+      cursor: pointer;
+    }
+
+    .ticket-item:hover {
+      border-color: var(--line2);
+      background: var(--ghost)
+    }
+
+    .ticket-item.active {
+      border-color: var(--line3);
+      background: var(--ghost)
+    }
+
+    /* ── Log entry ── */
+    .log-entry {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 7px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .log-entry:last-child {
+      border-bottom: none
+    }
+
+    .log-time {
+      font-size: 9px;
+      color: var(--t-20);
+      white-space: nowrap;
+      flex-shrink: 0;
+      width: 52px;
+    }
+
+    .log-action {
+      font-size: 10px;
+      color: var(--t-60);
+      flex: 1;
+    }
+
+    /* ── Chart canvas ── */
+    .chart-container {
+      position: relative;
+      height: 140px;
+    }
+
+    .chart-container-lg {
+      position: relative;
+      height: 200px;
+    }
+
+    /* ── Settings row ── */
+    .setting-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--line);
+      gap: 12px;
+    }
+
+    .setting-row:last-child {
+      border-bottom: none
+    }
+
+    .setting-info {
+      flex: 1
+    }
+
+    .setting-name {
+      font-size: 11px;
+      color: var(--t-80)
+    }
+
+    .setting-desc {
+      font-size: 10px;
+      color: var(--t-40);
+      margin-top: 2px
+    }
+
+    /* ── Inline data ── */
+    .kv {
+      display: flex;
+      align-items: baseline;
+      gap: 6px
+    }
+
+    .kv-key {
+      font-size: 9px;
+      color: var(--t-40);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      flex-shrink: 0
+    }
+
+    .kv-val {
+      font-size: 11px;
+      color: var(--t-80)
+    }
+
+    /* ── Heatmap ── */
+    .heatmap {
+      display: grid;
+      grid-template-columns: repeat(24, 1fr);
+      gap: 2px;
+    }
+
+    .heat-cell {
+      aspect-ratio: 1;
+      border-radius: 2px;
+      background: var(--ink-30);
+    }
+
+    /* ── Role pill ── */
+    .role-pill {
+      display: inline-flex;
+      padding: 1px 6px;
+      border-radius: 2px;
+      font-size: 9px;
+      font-family: var(--mono);
+      letter-spacing: 0.05em;
+      border: 1px solid var(--line2);
+      color: var(--t-60);
+      background: var(--ink-30);
+      text-transform: uppercase;
+    }
+
+    /* ── Panel detail ── */
+    .detail-panel {
+      position: fixed;
+      right: 0;
+      top: 0;
+      bottom: 0;
+      width: 420px;
+      background: var(--ink-10);
+      border-left: 1px solid var(--line);
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      animation: slideInRight 0.2s ease both;
+      overflow: hidden;
+    }
+
+    .detail-header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    .detail-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 18px;
+    }
+
+    /* ── Misc ── */
+    .text-mono {
+      font-family: var(--mono)
+    }
+
+    .text-serif {
+      font-family: var(--serif)
+    }
+
+    .text-100 {
+      color: var(--t-100)
+    }
+
+    .text-80 {
+      color: var(--t-80)
+    }
+
+    .text-60 {
+      color: var(--t-60)
+    }
+
+    .text-40 {
+      color: var(--t-40)
+    }
+
+    .text-20 {
+      color: var(--t-20)
+    }
+
+    .text-sm {
+      font-size: 10px
+    }
+
+    .text-xs {
+      font-size: 9px
+    }
+
+    .truncate {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis
+    }
+
+    .flex {
+      display: flex
+    }
+
+    .flex-col {
+      display: flex;
+      flex-direction: column
+    }
+
+    .items-center {
+      align-items: center
+    }
+
+    .justify-between {
+      justify-content: space-between
+    }
+
+    .gap-4 {
+      gap: 4px
+    }
+
+    .gap-6 {
+      gap: 6px
+    }
+
+    .gap-8 {
+      gap: 8px
+    }
+
+    .gap-10 {
+      gap: 10px
+    }
+
+    .gap-12 {
+      gap: 12px
+    }
+
+    .mt-4 {
+      margin-top: 4px
+    }
+
+    .mt-8 {
+      margin-top: 8px
+    }
+
+    .mt-12 {
+      margin-top: 12px
+    }
+
+    .mt-16 {
+      margin-top: 16px
+    }
+
+    .mb-8 {
+      margin-bottom: 8px
+    }
+
+    .mb-12 {
+      margin-bottom: 12px
+    }
+
+    .w-full {
+      width: 100%
+    }
+
+    /* ── Code block ── */
+    .code-block {
+      background: var(--ink-20);
+      border: 1px solid var(--line);
+      border-radius: var(--rad);
+      padding: 10px 12px;
+      font-family: var(--mono);
+      font-size: 10px;
+      color: var(--t-60);
+      overflow-x: auto;
+      white-space: pre;
+      line-height: 1.6;
+    }
+
+    /* ── Loading overlay ── */
+    .loading-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 30px;
+      gap: 8px;
+      color: var(--t-40);
+      font-size: 10px;
+    }
+
+    /* ── Media preview ── */
+    .media-thumb {
+      width: 48px;
+      height: 48px;
+      border-radius: var(--rad);
+      object-fit: cover;
+      background: var(--ink-30);
+      border: 1px solid var(--line);
+    }
+
+    /* ── Lightbox ── */
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.92);
+      z-index: 9998;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      animation: fadeIn 0.15s ease both;
+    }
+
+    .lightbox img,
+    .lightbox video {
+      max-width: 90vw;
+      max-height: 90vh;
+      border-radius: var(--rad-md);
+    }
+
+    .lightbox-close {
+      position: absolute;
+      top: 18px;
+      right: 18px;
+      background: var(--ink-40);
+      border: 1px solid var(--line2);
+      color: var(--t-80);
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+    }
+
+    /* ── Overview vertical rule ── */
+    .vr {
+      width: 1px;
+      background: var(--line);
+      align-self: stretch;
+    }
+
+    /* ── Search box in topbar ── */
+    .search-input {
+      background: var(--ink-20);
+      border: 1px solid var(--line);
+      border-radius: var(--rad);
+      padding: 5px 10px;
+      color: var(--t-80);
+      font-family: var(--mono);
+      font-size: 11px;
+      outline: none;
+      width: 180px;
+      transition: border-color 0.15s, width 0.2s;
+    }
+
+    .search-input:focus {
+      border-color: var(--line3);
+      width: 220px
+    }
+
+    .search-input::placeholder {
+      color: var(--t-20)
+    }
+  </style>
+</head>
+
+<body>
+  <div id="root"></div>
+  <div id="toast-root"></div>
+
+  <script type="text/babel">
+    /* eslint-disable */
+    const {useState, useEffect, useRef, useCallback, useMemo} = React;
+
+    // ═══════════════════════════════════════
+    //  TOAST
+    // ═══════════════════════════════════════
+    let _toastId = 0;
+    const toastRoot = document.getElementById('toast-root');
+
+    function showToast(msg, type = 'info', ms = 3200) {
+      const el = document.createElement('div');
+      el.className = 'toast-item ' + type;
+      el.textContent = msg;
+      el.onclick = dismiss;
+      toastRoot.appendChild(el);
+      const timer = setTimeout(dismiss, ms);
+      function dismiss() {
+        clearTimeout(timer);
+        el.classList.add('dying');
+        setTimeout(() => el.remove(), 250);
+      }
+    }
+    const toast = {
+      ok: (m) => showToast(m, 'ok'),
+      err: (m) => showToast(m, 'err'),
+      info: (m) => showToast(m, 'info'),
+      wrn: (m) => showToast(m, 'wrn'),
+    };
+
+    // ═══════════════════════════════════════
+    //  API
+    // ═══════════════════════════════════════
+    let TOK = (window.__BOOTSTRAP_TOKEN__ || localStorage.getItem('adm_tok') || '');
+    const PREFIX = (window.__ADMIN_PREFIX__ || '');
+
+    async function api(url, opts = {}, tok) {
+      if (tok === undefined) tok = TOK;
+      const fullUrl = url.startsWith('/dashboard') ? PREFIX + url : url;
+      const r = await fetch(fullUrl, {
+        ...opts,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': tok ? ('Bearer ' + tok) : '',
+          ...(opts.headers || {}),
+        },
+      });
+      if (r.status === 204) return null;
+      const text = await r.text();
+      if (!r.ok) throw new Error(text.slice(0, 300));
+      return JSON.parse(text);
+    }
+
+    // ═══════════════════════════════════════
+    //  UTILS
+    // ═══════════════════════════════════════
+    function fmtDate(iso) {
+      if (!iso) return '—';
+      try {
+        const d = new Date(iso.includes('T') ? iso : iso + 'T00:00:00Z');
+        return d.toLocaleDateString('ru', {day: '2-digit', month: '2-digit', year: '2-digit'});
+      } catch (e) {return iso.slice(0, 10);}
+    }
+    function fmtTime(iso) {
+      if (!iso) return '';
+      try {
+        const d = new Date(iso.includes('T') ? iso : iso + 'T00:00:00Z');
+        return d.toLocaleTimeString('ru', {hour: '2-digit', minute: '2-digit'});
+      } catch (e) {return '';}
+    }
+    function fmtDateTime(iso) {return (fmtDate(iso) + ' ' + fmtTime(iso)).trim();}
+    function timeAgo(iso) {
+      try {
+        const diff = (Date.now() - new Date(iso).getTime()) / 1000;
+        if (diff < 60) return 'только что';
+        if (diff < 3600) return Math.floor(diff / 60) + 'м назад';
+        if (diff < 86400) return Math.floor(diff / 3600) + 'ч назад';
+        return Math.floor(diff / 86400) + 'д назад';
+      } catch (e) {return '—';}
+    }
+    function numFmt(n) {
+      n = Number(n) || 0;
+      if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+      if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+      return String(n);
+    }
+    function initials(name) {
+      return (name || '?').split(' ').slice(0, 2).map(p => p[0] || '').join('').toUpperCase() || '?';
+    }
+
+    // ═══════════════════════════════════════
+    //  ICONS
+    // ═══════════════════════════════════════
+    const Icon = {
+      overview: () => (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" />
+          <rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" />
+        </svg>
+      ),
+      users: () => (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <circle cx="9" cy="7" r="4" /><path d="M3 21c0-4 2.7-7 6-7s6 3 6 7" />
+          <path d="M16 3.1a4 4 0 0 1 0 7.8M21 21c0-3.3-1.8-6-4.5-6.8" />
+        </svg>
+      ),
+      chat: () => (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+      ),
+      allchats: () => (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <path d="M8 12h.01M12 12h.01M16 12h.01" />
+          <path d="M21 12c0 4.4-4 8-9 8a9.8 9.8 0 0 1-4.5-1.1L3 21l1.4-4A8 8 0 0 1 3 12c0-4.4 4-8 9-8s9 3.6 9 8z" />
+        </svg>
+      ),
+      support: () => (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <circle cx="12" cy="12" r="10" />
+          <path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01" />
+        </svg>
+      ),
+      roles: () => (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <path d="M12 2l3.1 6.3 6.9 1-5 4.9 1.2 6.9L12 18l-6.2 3.1L7 14.2 2 9.3l6.9-1z" />
+        </svg>
+      ),
+      activity: () => (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+        </svg>
+      ),
+      errors: () => (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <path d="M10.3 3.6L1.5 18a2 2 0 0 0 1.7 3h17.6a2 2 0 0 0 1.7-3L13.7 3.6a2 2 0 0 0-3.4 0z" />
+          <path d="M12 9v4M12 17h.01" />
+        </svg>
+      ),
+      mongo: () => (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <ellipse cx="12" cy="5" rx="9" ry="3" />
+          <path d="M3 5v6c0 1.7 4 3 9 3s9-1.3 9-3V5M3 11v6c0 1.7 4 3 9 3s9-1.3 9-3v-6" />
+        </svg>
+      ),
+      settings: () => (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg>
+      ),
+      refresh: () => (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <polyline points="23 4 23 10 17 10" />
+          <path d="M20.5 15A9 9 0 1 1 18 6.4L23 10" />
+        </svg>
+      ),
+      logout: () => (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />
+        </svg>
+      ),
+      close: () => (
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M18 6L6 18M6 6l12 12" />
+        </svg>
+      ),
+      send: () => (
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
+        </svg>
+      ),
+      broadcast: () => (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <circle cx="12" cy="12" r="2" />
+          <path d="M16.2 7.8a5.5 5.5 0 0 1 0 8.4M19.8 4.2a10 10 0 0 1 0 15.6M7.8 16.2a5.5 5.5 0 0 1 0-8.4M4.2 19.8a10 10 0 0 1 0-15.6" />
+        </svg>
+      ),
+      feedback: () => (
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+          <path d="M14 9V5a3 3 0 0 0-3-3l-4 9v11h11.3a2 2 0 0 0 2-1.7l1.4-9a2 2 0 0 0-2-2.3H14z" />
+          <path d="M7 22H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h3" />
+        </svg>
+      ),
+    };
+
+    // ═══════════════════════════════════════
+    //  CHART COMPONENTS
+    // ═══════════════════════════════════════
+    function LineChart({data}) {
+      const ref = useRef(null);
+      const chartRef = useRef(null);
+
+      useEffect(() => {
+        if (!ref.current || !data || !data.length) return;
+        if (chartRef.current) chartRef.current.destroy();
+        const ctx = ref.current.getContext('2d');
+        chartRef.current = new Chart(ctx, {
+          type: 'line',
+          data: {
+            labels: data.map(d => d.label),
+            datasets: [{
+              data: data.map(d => d.value),
+              borderColor: 'rgba(255,255,255,0.45)',
+              backgroundColor: 'rgba(255,255,255,0.04)',
+              borderWidth: 1.5,
+              pointRadius: 0,
+              pointHoverRadius: 3,
+              pointHoverBackgroundColor: '#fff',
+              fill: true,
+              tension: 0.4,
+            }],
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            animation: {duration: 600, easing: 'easeOutQuart'},
+            plugins: {
+              legend: {display: false},
+              tooltip: {
+                backgroundColor: '#1c1c1c', borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1,
+                titleColor: '#fff', bodyColor: '#999',
+                titleFont: {family: 'DM Mono', size: 10},
+                bodyFont: {family: 'DM Mono', size: 10},
+              },
+            },
+            scales: {
+              x: {
+                grid: {color: 'rgba(255,255,255,0.04)'},
+                ticks: {color: '#444', font: {family: 'DM Mono', size: 9}, maxRotation: 0, autoSkipPadding: 20},
+                border: {display: false},
+              },
+              y: {
+                grid: {color: 'rgba(255,255,255,0.04)'},
+                ticks: {color: '#444', font: {family: 'DM Mono', size: 9}},
+                border: {display: false},
+                beginAtZero: true,
+              },
+            },
+          },
+        });
+        return () => {if (chartRef.current) chartRef.current.destroy();};
+      }, [data]);
+
+      return <canvas ref={ref} />;
+    }
+
+    function BarChart({data}) {
+      const ref = useRef(null);
+      const chartRef = useRef(null);
+
+      useEffect(() => {
+        if (!ref.current || !data || !data.length) return;
+        if (chartRef.current) chartRef.current.destroy();
+        const ctx = ref.current.getContext('2d');
+        chartRef.current = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: data.map(d => d.label),
+            datasets: [{
+              data: data.map(d => d.value),
+              backgroundColor: 'rgba(255,255,255,0.12)',
+              hoverBackgroundColor: 'rgba(255,255,255,0.28)',
+              borderRadius: 2,
+              borderSkipped: false,
+            }],
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            animation: {duration: 500},
+            plugins: {
+              legend: {display: false},
+              tooltip: {
+                backgroundColor: '#1c1c1c', borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1,
+                titleColor: '#fff', bodyColor: '#999',
+                titleFont: {family: 'DM Mono', size: 10},
+                bodyFont: {family: 'DM Mono', size: 10},
+              },
+            },
+            scales: {
+              x: {
+                grid: {display: false},
+                ticks: {color: '#444', font: {family: 'DM Mono', size: 9}, maxRotation: 0, autoSkipPadding: 10},
+                border: {display: false},
+              },
+              y: {
+                grid: {color: 'rgba(255,255,255,0.04)'},
+                ticks: {color: '#444', font: {family: 'DM Mono', size: 9}},
+                border: {display: false},
+                beginAtZero: true,
+              },
+            },
+          },
+        });
+        return () => {if (chartRef.current) chartRef.current.destroy();};
+      }, [data]);
+
+      return <canvas ref={ref} />;
+    }
+
+    function DonutChart({value, max, label}) {
+      const ref = useRef(null);
+      const chartRef = useRef(null);
+      const safeMax = max > 0 ? max : 1;
+      const pct = Math.round(value / safeMax * 100);
+
+      useEffect(() => {
+        if (!ref.current) return;
+        if (chartRef.current) chartRef.current.destroy();
+        const ctx = ref.current.getContext('2d');
+        chartRef.current = new Chart(ctx, {
+          type: 'doughnut',
+          data: {
+            datasets: [{
+              data: [value, Math.max(0, safeMax - value)],
+              backgroundColor: ['rgba(255,255,255,0.75)', 'rgba(255,255,255,0.06)'],
+              borderWidth: 0,
+            }],
+          },
+          options: {
+            responsive: true, maintainAspectRatio: false,
+            cutout: '75%',
+            animation: {duration: 700, easing: 'easeOutQuart'},
+            plugins: {legend: {display: false}, tooltip: {enabled: false}},
+          },
+        });
+        return () => {if (chartRef.current) chartRef.current.destroy();};
+      }, [value, max]);
+
+      return (
+        <div style={{position: 'relative', height: 90, width: 90}}>
+          <canvas ref={ref} />
+          <div style={{
+            position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column',
+            alignItems: 'center', justifyContent: 'center', gap: 2,
+          }}>
+            <span style={{fontFamily: 'var(--serif)', fontSize: 18, fontWeight: 700, color: 'var(--t-100)', lineHeight: 1}}>{pct}%</span>
+            <span style={{fontSize: 8, color: 'var(--t-40)', letterSpacing: '0.08em', textTransform: 'uppercase'}}>{label}</span>
+          </div>
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════
+    //  UI PRIMITIVES
+    // ═══════════════════════════════════════
+    function Spinner({lg}) {
+      return <div className={'spinner' + (lg ? ' spinner-lg' : '')} />;
+    }
+
+    function UserAvatar({user, size}) {
+      size = size || 28;
+      return (
+        <div className="user-avatar" style={{width: size, height: size, fontSize: Math.round(size * 0.36)}}>
+          {user && user.avatar
+            ? <img src={user.avatar} alt="" onError={e => {e.target.style.display = 'none';}} />
+            : initials((user && user.display) || '?')}
+        </div>
+      );
+    }
+
+    function StatusBadge({blocked}) {
+      return blocked
+        ? <span className="badge badge-dark">заблокирован</span>
+        : <span className="badge badge-neutral">активен</span>;
+    }
+
+    function Pagination({page, total, pageSize, onChange}) {
+      const pages = Math.ceil(total / pageSize);
+      if (pages <= 1) return null;
+      const start = Math.max(0, Math.min(page - 2, pages - 5));
+      const nums = [];
+      for (let i = 0; i < Math.min(5, pages); i++) nums.push(start + i);
+      return (
+        <div className="pagination">
+          <span style={{fontSize: 9, color: 'var(--t-40)'}}>
+            {page * pageSize + 1}–{Math.min((page + 1) * pageSize, total)} / {total}
+          </span>
+          <button className="page-btn" disabled={page === 0} onClick={() => onChange(0)}>«</button>
+          <button className="page-btn" disabled={page === 0} onClick={() => onChange(page - 1)}>‹</button>
+          {nums.map(p => (
+            <button key={p} className={'page-btn' + (p === page ? ' active' : '')} onClick={() => onChange(p)}>{p + 1}</button>
+          ))}
+          <button className="page-btn" disabled={page >= pages - 1} onClick={() => onChange(page + 1)}>›</button>
+          <button className="page-btn" disabled={page >= pages - 1} onClick={() => onChange(pages - 1)}>»</button>
+        </div>
+      );
+    }
+
+    function SkeletonRow() {
+      return (
+        <tr>
+          {[80, 60, 40, 70, 50].map((w, i) => (
+            <td key={i} style={{padding: '9px 10px'}}>
+              <div className="skeleton skel-line" style={{width: w + '%'}} />
+            </td>
+          ))}
+        </tr>
+      );
+    }
+
+    // ═══════════════════════════════════════
+    //  AUTH GATE
+    // ═══════════════════════════════════════
+    function AuthGate({onLogin}) {
+      const [token, setToken] = useState('');
+      const [err, setErr] = useState('');
+      const [loading, setLoading] = useState(false);
+
+      async function doLogin() {
+        const tok = token.trim().replace(/^Bearer /, '');
+        setErr(''); setLoading(true);
+        try {
+          const r = await api('/dashboard/api/me', {}, tok);
+          if (!r.user.roles.includes('admin')) {setErr('Нет прав администратора'); setLoading(false); return;}
+          TOK = tok;
+          localStorage.setItem('adm_tok', TOK);
+          onLogin(r.user);
+        } catch (e) {
+          setErr(e.message || 'Ошибка авторизации');
+        }
+        setLoading(false);
+      }
+
+      return (
+        <div className="auth-gate">
+          <div className="auth-box">
+            <div className="auth-logo">NCFU<br />Admin</div>
+            <div className="auth-sub">Dashboard · Access Control</div>
+            <div className="auth-line" />
+            <div className="input-group">
+              <div className="input-label">Bearer Token</div>
+              <input
+                className="input"
+                type="password"
+                placeholder="eyJ..."
+                value={token}
+                onChange={e => setToken(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && doLogin()}
+                autoFocus
+              />
+            </div>
+            <button
+              className="btn btn-primary w-full mt-12"
+              onClick={doLogin}
+              disabled={loading || !token.trim()}
+            >
+              {loading ? <span style={{display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center'}}><Spinner /> Проверяем...</span> : '→ Войти'}
+            </button>
+            <div className="auth-error">{err}</div>
+          </div>
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════
+    //  OVERVIEW
+    // ═══════════════════════════════════════
+    function PanelOverview() {
+      const [stats, setStats] = useState(null);
+      const [analytics, setAnalytics] = useState(null);
+      const [days, setDays] = useState(7);
+      const [loading, setLoading] = useState(true);
+
+      const load = useCallback(async () => {
+        setLoading(true);
+        try {
+          const [s, a] = await Promise.all([
+            api('/dashboard/api/admin/stats'),
+            api('/dashboard/api/admin/analytics?days=' + days),
+          ]);
+          setStats(s);
+          setAnalytics(a);
+        } catch (e) {toast.err(e.message);}
+        setLoading(false);
+      }, [days]);
+
+      useEffect(() => {load();}, [load]);
+
+      const activityData = useMemo(() => {
+        if (!stats || !stats.daily_activity) return [];
+        return stats.daily_activity.map(d => ({label: d.date.slice(5), value: d.count}));
+      }, [stats]);
+
+      const msgData = useMemo(() => {
+        if (!analytics || !analytics.daily_messages) return [];
+        const byDate = {};
+        analytics.daily_messages.forEach(d => {byDate[d.date] = (byDate[d.date] || 0) + d.count;});
+        return Object.entries(byDate).sort(([a], [b]) => a < b ? -1 : 1).map(([date, value]) => ({label: date.slice(5), value}));
+      }, [analytics]);
+
+      const heatData = useMemo(() => {
+        if (!analytics || !analytics.hourly_heatmap) return new Array(24).fill(0);
+        const max = Math.max(...analytics.hourly_heatmap.map(h => h.count), 1);
+        const cells = new Array(24).fill(0);
+        analytics.hourly_heatmap.forEach(h => {cells[h.hour] = h.count / max;});
+        return cells;
+      }, [analytics]);
+
+      if (loading && !stats) {
+        return <div className="loading-row" style={{padding: 60}}><Spinner lg={true} /><span>Загрузка данных...</span></div>;
+      }
+
+      const t = (stats && stats.totals) || {};
+
+      return (
+        <div className="section-gap anim-up">
+          {/* KPI */}
+          <div className="grid-4">
+            {[
+              {label: 'Пользователи', value: t.users || 0},
+              {label: 'Активны сегодня', value: t.active_today || 0},
+              {label: 'Занятий в БД', value: t.total_lessons || 0},
+              {label: 'Открытые тикеты', value: t.open_tickets || 0},
+            ].map((s, i) => (
+              <div key={i} className="stat-card" style={{animationDelay: (i * 0.07) + 's'}}>
+                <div className="stat-label">{s.label}</div>
+                <div className="stat-value">{numFmt(s.value)}</div>
+                <div className="stat-bar">
+                  <div className="stat-bar-fill" style={{width: Math.min(100, Math.max(5, (s.value / (Math.max(t.users || 1, 1)) * 100))) + '%', animationDelay: (0.2 + i * 0.1) + 's'}} />
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Charts */}
+          <div className="grid-2">
+            <div className="card">
+              <div className="card-header">
+                <span className="card-title">Активность API · 7 дней</span>
+                {loading && <Spinner />}
+              </div>
+              <div className="chart-container">
+                {activityData.length > 0 ? <LineChart data={activityData} /> : <div className="empty"><div className="empty-icon">∅</div></div>}
+              </div>
+            </div>
+            <div className="card">
+              <div className="card-header">
+                <div style={{display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap'}}>
+                  <span className="card-title">Сообщения</span>
+                  {[7, 14, 30].map(d => (
+                    <button key={d} onClick={() => setDays(d)}
+                      style={{padding: '2px 8px', fontSize: 9, border: '1px solid var(--line2)', borderRadius: 'var(--rad)', background: days === d ? 'var(--t-100)' : 'transparent', color: days === d ? 'var(--void)' : 'var(--t-40)', cursor: 'pointer', fontFamily: 'var(--mono)'}}>
+                      {d}д
+                    </button>
+                  ))}
+                </div>
+                {loading && <Spinner />}
+              </div>
+              <div className="chart-container">
+                {msgData.length > 0 ? <BarChart data={msgData} /> : <div className="empty"><div className="empty-icon">∅</div></div>}
+              </div>
+            </div>
+          </div>
+
+          {/* Heatmap + right column */}
+          <div className="grid-2-1">
+            <div className="section-gap">
+              <div className="card">
+                <div className="card-header"><span className="card-title">Активность по часам</span></div>
+                <div className="heatmap">
+                  {heatData.map((v, i) => (
+                    <div key={i} className="heat-cell" title={i + ':00'}
+                      style={{background: v > 0 ? 'rgba(255,255,255,' + (0.07 + v * 0.55) + ')' : 'var(--ink-30)'}} />
+                  ))}
+                </div>
+                <div style={{display: 'flex', justifyContent: 'space-between', marginTop: 4}}>
+                  {[0, 6, 12, 18, 23].map(h => (
+                    <span key={h} style={{fontSize: 9, color: 'var(--t-20)'}}>{h}:00</span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="card">
+                <div className="card-header"><span className="card-title">Последние события</span></div>
+                {(stats && stats.recent_events || []).slice(0, 8).map((ev, i) => (
+                  <div key={i} className="log-entry">
+                    <span className="log-time">{fmtTime(ev.timestamp)}</span>
+                    <span className="log-action">{ev.action}</span>
+                    <span style={{fontSize: 9, color: 'var(--t-20)', flexShrink: 0}}>{ev.tg_id || '—'}</span>
+                  </div>
+                ))}
+                {!(stats && stats.recent_events && stats.recent_events.length) &&
+                  <div className="empty"><div className="empty-text">Нет событий</div></div>}
+              </div>
+            </div>
+
+            <div className="section-gap">
+              <div className="card" style={{textAlign: 'center'}}>
+                <div className="card-title" style={{marginBottom: 12}}>Отзывы · {days}д</div>
+                <div style={{display: 'flex', justifyContent: 'center'}}>
+                  <DonutChart
+                    value={(analytics && analytics.totals && analytics.totals.fb_likes) || 0}
+                    max={(analytics && analytics.totals && analytics.totals.fb_total) || 1}
+                    label="позитив"
+                  />
+                </div>
+                <div style={{display: 'flex', justifyContent: 'space-around', marginTop: 12}}>
+                  <div style={{textAlign: 'center'}}>
+                    <div style={{fontSize: 16, fontFamily: 'var(--serif)', color: 'var(--t-80)'}}>{(analytics && analytics.totals && analytics.totals.fb_likes) || 0}</div>
+                    <div style={{fontSize: 9, color: 'var(--t-40)'}}>👍</div>
+                  </div>
+                  <div style={{textAlign: 'center'}}>
+                    <div style={{fontSize: 16, fontFamily: 'var(--serif)', color: 'var(--t-80)'}}>{(analytics && analytics.totals && analytics.totals.fb_dislikes) || 0}</div>
+                    <div style={{fontSize: 9, color: 'var(--t-40)'}}>👎</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="card">
+                <div className="card-title" style={{marginBottom: 10}}>Статус системы</div>
+                {[
+                  {label: 'MongoDB', ok: !!(t.users)},
+                  {label: 'Расписание DB', ok: (t.total_lessons || 0) > 0},
+                  {label: 'Пользователи', ok: (t.users || 0) > 0},
+                ].map((s, i) => (
+                  <div key={i} className="setting-row" style={{padding: '6px 0'}}>
+                    <span style={{fontSize: 11, color: 'var(--t-60)'}}>{s.label}</span>
+                    <div style={{display: 'flex', alignItems: 'center', gap: 5}}>
+                      <div className={'dot ' + (s.ok ? 'dot-ok' : 'dot-off')} />
+                      <span style={{fontSize: 10, color: s.ok ? 'var(--t-80)' : 'var(--t-40)'}}>{s.ok ? 'online' : 'offline'}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="card">
+                <div className="card-title" style={{marginBottom: 10}}>Последний парсинг</div>
+                {(stats && stats.scrape_stats && stats.scrape_stats.recent || []).slice(0, 3).map((s, i) => (
+                  <div key={i} style={{paddingBottom: 8, marginBottom: 8, borderBottom: '1px solid var(--line)'}}>
+                    <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: 3}}>
+                      <span style={{fontSize: 10, color: 'var(--t-80)'}}>{s.mode}</span>
+                      <span className={'badge ' + (s.status === 'done' ? 'badge-neutral' : 'badge-dark')}>{s.status}</span>
+                    </div>
+                    <div style={{fontSize: 10, color: 'var(--t-40)'}}>{s.groups_scraped} групп · {numFmt(s.lessons_upserted)} занятий</div>
+                    <div style={{fontSize: 9, color: 'var(--t-20)', marginTop: 2}}>{fmtDateTime(s.started_at)}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Action breakdown */}
+          {stats && stats.action_breakdown && stats.action_breakdown.length > 0 && (
+            <div className="card">
+              <div className="card-header"><span className="card-title">Топ действий · 7 дней</span></div>
+              <div style={{display: 'flex', flexDirection: 'column', gap: 6}}>
+                {stats.action_breakdown.slice(0, 8).map((a, i) => {
+                  const max = stats.action_breakdown[0].count || 1;
+                  const pct = Math.round(a.count / max * 100);
+                  return (
+                    <div key={i} style={{display: 'grid', gridTemplateColumns: '180px 1fr 40px', alignItems: 'center', gap: 10}}>
+                      <span style={{fontSize: 10, color: 'var(--t-60)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{a.action}</span>
+                      <div className="progress-bar"><div className="progress-fill" style={{width: pct + '%'}} /></div>
+                      <span style={{fontSize: 10, color: 'var(--t-40)', textAlign: 'right'}}>{numFmt(a.count)}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════
+    //  USERS
+    // ═══════════════════════════════════════
+    function PanelUsers() {
+      const [users, setUsers] = useState([]);
+      const [total, setTotal] = useState(0);
+      const [page, setPage] = useState(0);
+      const [q, setQ] = useState('');
+      const [blockedOnly, setBlockedOnly] = useState(false);
+      const [loading, setLoading] = useState(true);
+      const [selected, setSelected] = useState(null);
+      const PG = 50;
+
+      const load = useCallback(async (p) => {
+        if (p === undefined) p = 0;
+        setLoading(true);
+        try {
+          const params = new URLSearchParams({skip: String(p * PG), limit: String(PG)});
+          if (q.trim()) params.set('q', q.trim());
+          if (blockedOnly) params.set('blocked_only', 'true');
+          const d = await api('/dashboard/api/admin/users?' + params);
+          setUsers(d.users || []);
+          setTotal(d.total || 0);
+        } catch (e) {toast.err(e.message);}
+        setLoading(false);
+      }, [q, blockedOnly]);
+
+      useEffect(() => {setPage(0); load(0);}, [load]);
+
+      async function toggleBlock(u) {
+        try {
+          const updated = await api('/dashboard/api/admin/users/' + u.id, {
+            method: 'PATCH',
+            body: JSON.stringify({is_blocked: !u.is_blocked}),
+          });
+          setUsers(prev => prev.map(x => x.id === u.id ? Object.assign({}, x, {is_blocked: updated.is_blocked}) : x));
+          if (selected && selected.id === u.id) setSelected(Object.assign({}, selected, {is_blocked: updated.is_blocked}));
+          toast.ok(updated.is_blocked ? 'Пользователь заблокирован' : 'Разблокирован');
+        } catch (e) {toast.err(e.message);}
+      }
+
+      return (
+        <div className="anim-up">
+          <div style={{display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center'}}>
+            <input className="input" style={{width: 220}} placeholder="Поиск..." value={q}
+              onChange={e => setQ(e.target.value)} onKeyDown={e => e.key === 'Enter' && load(0)} />
+            <label style={{display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', userSelect: 'none'}}>
+              <input type="checkbox" checked={blockedOnly} onChange={e => setBlockedOnly(e.target.checked)} style={{accentColor: 'var(--t-80)'}} />
+              <span style={{fontSize: 11, color: 'var(--t-60)'}}>Только заблокированные</span>
+            </label>
+            <span style={{marginLeft: 'auto', fontSize: 10, color: 'var(--t-40)'}}>{total} пользователей</span>
+            {loading && <Spinner />}
+          </div>
+
+          <div className="card" style={{padding: 0}}>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th style={{paddingLeft: 16}}>Пользователь</th>
+                    <th>Роли</th>
+                    <th>Активность</th>
+                    <th>Запросов/день</th>
+                    <th>Статус</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loading && !users.length
+                    ? [0, 1, 2, 3, 4, 5, 6, 7].map(i => <SkeletonRow key={i} />)
+                    : users.map(u => (
+                      <tr key={u.id} onClick={() => setSelected(u)} style={{cursor: 'pointer'}}>
+                        <td style={{paddingLeft: 16}}>
+                          <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+                            <UserAvatar user={u} />
+                            <div>
+                              <div style={{fontSize: 11, color: 'var(--t-100)'}}>{u.display}</div>
+                              {u.username && <div style={{fontSize: 9, color: 'var(--t-40)'}}>@{u.username}</div>}
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <div style={{display: 'flex', gap: 3, flexWrap: 'wrap'}}>
+                            {(u.roles || []).map(r => <span key={r} className="role-pill">{r}</span>)}
+                          </div>
+                        </td>
+                        <td style={{fontSize: 10, color: 'var(--t-40)'}}>{u.last_active ? timeAgo(u.last_active) : '—'}</td>
+                        <td style={{fontSize: 11}}>{u.daily_requests || 0}</td>
+                        <td><StatusBadge blocked={u.is_blocked} /></td>
+                      </tr>
+                    ))
+                  }
+                </tbody>
+              </table>
+            </div>
+            {!loading && !users.length && (
+              <div className="empty"><div className="empty-icon">∅</div><div className="empty-text">Пользователи не найдены</div></div>
+            )}
+          </div>
+
+          <Pagination page={page} total={total} pageSize={PG} onChange={p => {setPage(p); load(p);}} />
+
+          {selected && (
+            <UserDetailPanel user={selected} onClose={() => setSelected(null)}
+              onToggleBlock={() => toggleBlock(selected)}
+              onUpdate={u => {setSelected(u); setUsers(prev => prev.map(x => x.id === u.id ? u : x));}} />
+          )}
+        </div>
+      );
+    }
+
+    function UserDetailPanel({user, onClose, onToggleBlock, onUpdate}) {
+      const [detail, setDetail] = useState(null);
+      const [saving, setSaving] = useState(false);
+      const [roles, setRoles] = useState((user.roles || []).join(', '));
+
+      useEffect(() => {
+        api('/dashboard/api/admin/users/' + user.id).then(setDetail).catch(() => { });
+      }, [user.id]);
+
+      async function saveRoles() {
+        setSaving(true);
+        try {
+          const newRoles = roles.split(',').map(r => r.trim()).filter(Boolean);
+          const updated = await api('/dashboard/api/admin/users/' + user.id, {
+            method: 'PATCH',
+            body: JSON.stringify({roles: newRoles}),
+          });
+          onUpdate(updated);
+          toast.ok('Роли обновлены');
+        } catch (e) {toast.err(e.message);}
+        setSaving(false);
+      }
+
+      async function revokeAllKeys() {
+        try {
+          await api('/dashboard/api/admin/users/' + user.id + '/revoke-all-keys', {method: 'POST'});
+          toast.ok('Все ключи отозваны');
+        } catch (e) {toast.err(e.message);}
+      }
+
+      return (
+        <div className="detail-panel">
+          <div className="detail-header">
+            <UserAvatar user={user} size={32} />
+            <div style={{flex: 1, minWidth: 0}}>
+              <div style={{fontSize: 12, color: 'var(--t-100)'}}>{user.display}</div>
+              {user.username && <div style={{fontSize: 10, color: 'var(--t-40)'}}>@{user.username} · #{user.tg_id}</div>}
+            </div>
+            <button className="btn btn-ghost btn-icon" onClick={onClose}><Icon.close /></button>
+          </div>
+
+          <div className="detail-body">
+            <div style={{display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap'}}>
+              <StatusBadge blocked={user.is_blocked} />
+              {(user.roles || []).map(r => <span key={r} className="role-pill">{r}</span>)}
+            </div>
+            <div style={{display: 'flex', gap: 6, marginBottom: 16}}>
+              <button className="btn btn-danger" onClick={onToggleBlock}>
+                {user.is_blocked ? '↩ Разблокировать' : '🚫 Заблокировать'}
+              </button>
+              <button className="btn btn-ghost" onClick={revokeAllKeys}>Отозвать ключи</button>
+            </div>
+            <hr className="divider" />
+            <div className="input-group" style={{marginBottom: 12}}>
+              <div className="input-label">Роли (через запятую)</div>
+              <input className="input" value={roles} onChange={e => setRoles(e.target.value)} />
+            </div>
+            <button className="btn btn-ghost w-full" onClick={saveRoles} disabled={saving}>
+              {saving ? <span style={{display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center'}}><Spinner /> Сохранение...</span> : '✓ Сохранить роли'}
+            </button>
+            <hr className="divider" />
+            <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14}}>
+              {[
+                {k: 'Запросов/день', v: user.daily_requests || 0},
+                {k: 'AI токенов/мес', v: numFmt(user.monthly_ai_tokens || 0)},
+                {k: 'Создан', v: user.created_at ? fmtDate(user.created_at) : '—'},
+                {k: 'Активность', v: user.last_active ? timeAgo(user.last_active) : '—'},
+              ].map((s, i) => (
+                <div key={i} style={{padding: '8px 10px', background: 'var(--ink-20)', borderRadius: 'var(--rad-md)', border: '1px solid var(--line)'}}>
+                  <div style={{fontSize: 9, color: 'var(--t-40)', marginBottom: 3}}>{s.k}</div>
+                  <div style={{fontSize: 13, fontFamily: 'var(--serif)', color: 'var(--t-100)'}}>{s.v}</div>
+                </div>
+              ))}
+            </div>
+            {detail && detail.activity && detail.activity.length > 0 && (
+              <>
+                <div className="card-title" style={{marginBottom: 8}}>Последняя активность</div>
+                {detail.activity.slice(0, 10).map((a, i) => (
+                  <div key={i} className="log-entry">
+                    <span className="log-time">{fmtTime(a.timestamp)}</span>
+                    <span className="log-action">{a.action}</span>
+                  </div>
+                ))}
+              </>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════
+    //  ALL CHATS
+    // ═══════════════════════════════════════
+    // Chat type icons and labels
+    const CHAT_TYPE_META = {
+      private: {label: 'ЛС', icon: '👤', color: 'rgba(255,255,255,0.5)'},
+      group: {label: 'Группа', icon: '👥', color: 'rgba(255,255,255,0.5)'},
+      supergroup: {label: 'Супергруппа', icon: '🏛️', color: 'rgba(255,255,255,0.5)'},
+      channel: {label: 'Канал', icon: '📢', color: 'rgba(255,255,255,0.5)'},
+    };
+    const CHAT_TYPE_TABS = [
+      {key: '', label: 'Все'},
+      {key: 'private', label: 'Личные'},
+      {key: 'group', label: 'Группы'},
+      {key: 'supergroup', label: 'Супергруппы'},
+      {key: 'channel', label: 'Каналы'},
+    ];
+
+    function PanelAllChats() {
+      const [allChats, setAllChats] = useState([]);    // private chats from /admin/chats
+      const [groupChats, setGroupChats] = useState([]); // groups/channels from /chats
+      const [typeFilter, setTypeFilter] = useState('');
+      const [q, setQ] = useState('');
+      const [selected, setSelected] = useState(null);
+      const [loading, setLoading] = useState(true);
+
+      // Load both sources in parallel
+      useEffect(() => {
+        setLoading(true);
+        Promise.all([
+          // source 1: private bot conversations (old endpoint, has tg_id)
+          api('/dashboard/api/admin/chats').then(d => (d.chats || []).map(c => ({
+            ...c,
+            chat_id: c.tg_id,
+            chat_type: c.chat_type || 'private',
+            display: c.display,
+            title: c.display,
+            last_msg: c.last_ts,
+          }))).catch(() => []),
+          // source 2: group/channel chats (api_chats.py)
+          api('/dashboard/api/chats').then(d => Array.isArray(d) ? d : []).catch(() => []),
+        ]).then(([priv, groups]) => {
+          // Merge: avoid duplicates by chat_id
+          const seen = new Set();
+          const merged = [];
+          for (const c of [...groups, ...priv]) {
+            const key = String(c.chat_id || c.tg_id);
+            if (!seen.has(key)) {seen.add(key); merged.push(c);}
+          }
+          merged.sort((a, b) => {
+            const ta = new Date(a.last_msg || a.last_ts || 0).getTime();
+            const tb = new Date(b.last_msg || b.last_ts || 0).getTime();
+            return tb - ta;
+          });
+          setAllChats(merged);
+        }).finally(() => setLoading(false));
+      }, []);
+
+      // Filtered list
+      const filtered = useMemo(() => {
+        let list = allChats;
+        if (typeFilter) list = list.filter(c => (c.chat_type || 'private') === typeFilter);
+        if (q.trim()) {
+          const lower = q.toLowerCase();
+          list = list.filter(c =>
+            (c.display || c.title || '').toLowerCase().includes(lower) ||
+            (c.username && c.username.toLowerCase().includes(lower)) ||
+            String(c.chat_id || c.tg_id || '').includes(lower)
+          );
+        }
+        return list;
+      }, [allChats, typeFilter, q]);
+
+      // Count by type
+      const counts = useMemo(() => {
+        const m = {'': allChats.length};
+        allChats.forEach(c => {const t = c.chat_type || 'private'; m[t] = (m[t] || 0) + 1;});
+        return m;
+      }, [allChats]);
+
+      return (
+        <div style={{display: 'grid', gridTemplateColumns: '300px 1fr', height: 'calc(100vh - 96px)', gap: 0}} className="anim-up">
+          {/* Sidebar */}
+          <div style={{borderRight: '1px solid var(--line)', display: 'flex', flexDirection: 'column', minHeight: 0}}>
+            {/* Search */}
+            <div style={{padding: '8px 12px', borderBottom: '1px solid var(--line)', flexShrink: 0}}>
+              <input className="input" placeholder="Поиск по имени, @username, ID..." value={q}
+                onChange={e => setQ(e.target.value)} style={{fontSize: 10, width: '100%'}} />
+            </div>
+            {/* Type tabs */}
+            <div style={{display: 'flex', overflowX: 'auto', padding: '6px 8px', gap: 4, borderBottom: '1px solid var(--line)', flexShrink: 0}}>
+              {CHAT_TYPE_TABS.map(t => (
+                <button key={t.key}
+                  onClick={() => setTypeFilter(t.key)}
+                  style={{
+                    flexShrink: 0, padding: '3px 8px', fontSize: 9, whiteSpace: 'nowrap',
+                    border: '1px solid var(--line2)', borderRadius: 'var(--rad)',
+                    background: typeFilter === t.key ? 'var(--t-100)' : 'transparent',
+                    color: typeFilter === t.key ? 'var(--void)' : 'var(--t-40)',
+                    cursor: 'pointer', fontFamily: 'var(--mono)', transition: 'all .12s',
+                  }}>
+                  {t.label}{counts[t.key] != null ? ' ' + counts[t.key] : ''}
+                </button>
+              ))}
+            </div>
+            {/* List */}
+            <div style={{flex: 1, overflowY: 'auto'}}>
+              {loading && <div className="loading-row"><Spinner /><span>Загрузка...</span></div>}
+              {!loading && !filtered.length && (
+                <div className="empty" style={{padding: 20}}><div className="empty-text">Чаты не найдены</div></div>
+              )}
+              {filtered.map(c => {
+                const cid = c.chat_id || c.tg_id;
+                const isActive = selected && (selected.chat_id || selected.tg_id) === cid;
+                const tm = CHAT_TYPE_META[c.chat_type || 'private'] || CHAT_TYPE_META.private;
+                return (
+                  <div key={String(cid)} className={'chat-item' + (isActive ? ' active' : '')}
+                    onClick={() => setSelected(c)}>
+                    <div style={{position: 'relative', flexShrink: 0}}>
+                      <UserAvatar user={{display: c.display || c.title, avatar: c.avatar}} size={30} />
+                      <div style={{
+                        position: 'absolute', bottom: -2, right: -2, fontSize: 8, lineHeight: 1,
+                        background: 'var(--void)', borderRadius: '50%', padding: 1,
+                      }} title={tm.label}>{tm.icon}</div>
+                    </div>
+                    <div className="chat-item-info">
+                      <div className="chat-item-name" style={{display: 'flex', alignItems: 'center', gap: 4}}>
+                        {c.display || c.title}
+                        {c.is_blocked && <span className="badge badge-dark" style={{fontSize: 7}}>блок</span>}
+                      </div>
+                      <div className="chat-item-preview">
+                        {c.last_text ? c.last_text.slice(0, 50) : '—'}
+                      </div>
+                    </div>
+                    <div className="chat-item-meta">
+                      <div style={{fontSize: 8, color: 'var(--t-40)'}}>{c.last_msg || c.last_ts ? fmtTime(c.last_msg || c.last_ts) : ''}</div>
+                      <div style={{fontSize: 9, marginTop: 2}}>{numFmt(c.msg_count || 0)}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Chat window */}
+          {selected
+            ? <ChatWindow chat={selected} key={String(selected.chat_id || selected.tg_id)} />
+            : <div className="empty" style={{height: '100%'}}>
+              <div className="empty-icon">💬</div>
+              <div className="empty-text">Выберите чат</div>
+            </div>
+          }
+        </div>
+      );
+    }
+
+    function MediaBubble({m, isBot, onLightbox}) {
+      const mt = m.media_type;
+      // Photo / animation / video_note
+      if ((mt === 'photo' || mt === 'animation' || mt === 'video_note') && m.media_url) {
+        return (
+          <div>
+            <img src={m.media_url} alt={mt} className="bubble-media-img"
+              onClick={() => onLightbox({url: m.media_url, type: 'image'})}
+              onError={e => {e.target.style.display = 'none';}} />
+            {m.text && <div style={{marginTop: 4, fontSize: 12}}>{m.text}</div>}
+          </div>
+        );
+      }
+      // Video
+      if (mt === 'video' && m.media_url) {
+        return (
+          <div>
+            <div className="bubble-media-chip" style={{cursor: 'pointer'}}
+              onClick={() => onLightbox({url: m.media_url, type: 'video'})}>
+              <span>▶</span>
+              <span>{m.file_name || 'Видео'}</span>
+              {m.duration && <span style={{color: 'var(--t-40)', fontSize: 9}}>{m.duration}с</span>}
+            </div>
+            {m.text && <div style={{marginTop: 4, fontSize: 12}}>{m.text}</div>}
+          </div>
+        );
+      }
+      // Audio / Voice
+      if ((mt === 'audio' || mt === 'voice') && m.media_url) {
+        return (
+          <div>
+            <div style={{marginBottom: m.text ? 6 : 0}}>
+              <audio controls style={{height: 28, maxWidth: 220}}>
+                <source src={m.media_url} />
+              </audio>
+            </div>
+            {mt === 'audio' && m.title && <div style={{fontSize: 11, fontWeight: 500}}>{m.title}</div>}
+            {m.duration && <div style={{fontSize: 9, color: isBot ? '#555' : 'var(--t-40)'}}>{m.duration}с</div>}
+            {m.text && <div style={{marginTop: 4, fontSize: 12}}>{m.text}</div>}
+          </div>
+        );
+      }
+      // Sticker
+      if (mt === 'sticker') {
+        return <div style={{fontSize: 28}}>{m.sticker_emoji || '🖼️'}</div>;
+      }
+      // Document / other with URL
+      if (mt === 'document' || (mt && m.file_name)) {
+        return (
+          <div>
+            <div className="bubble-media-chip">
+              <span>📎</span>
+              <span style={{maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                {m.file_name || mt || 'Файл'}
+              </span>
+              {m.file_size && <span style={{fontSize: 9, flexShrink: 0}}>
+                {m.file_size > 1048576 ? (m.file_size / 1048576).toFixed(1) + 'МБ' : Math.round(m.file_size / 1024) + 'КБ'}
+              </span>}
+            </div>
+            {m.text && <div style={{marginTop: 4, fontSize: 12}}>{m.text}</div>}
+          </div>
+        );
+      }
+      // Media present but URL not resolved yet
+      if (mt && !m.media_url) {
+        return (
+          <div>
+            <div className="bubble-media-chip">
+              <span>{mt === 'photo' ? '🖼' : mt === 'video' ? '🎬' : mt === 'animation' ? '🎞' : mt === 'audio' ? '🎵' : mt === 'voice' ? '🎤' : mt === 'sticker' ? '🩹' : '📎'}</span>
+              <span style={{color: isBot ? '#777' : 'var(--t-40)', fontSize: 10}}>[{mt}]</span>
+            </div>
+            {m.text && <div style={{marginTop: 4, fontSize: 12}}>{m.text}</div>}
+          </div>
+        );
+      }
+      // Plain text fallback
+      return <span>{m.text || m.html_text || ''}</span>;
+    }
+
+    function ChatWindow({chat}) {
+      const chatId = chat.chat_id || chat.tg_id;
+      const isPrivate = !chat.chat_type || chat.chat_type === 'private';
+
+      const [msgs, setMsgs] = useState([]);
+      const [total, setTotal] = useState(0);
+      const [offset, setOffset] = useState(0);
+      const [loading, setLoading] = useState(true);
+      const [loadingMore, setLoadingMore] = useState(false);
+      const [reply, setReply] = useState('');
+      const [sending, setSending] = useState(false);
+      const [lightbox, setLightbox] = useState(null);   // { url, type }
+      const [searchQ, setSearchQ] = useState('');
+      const [searching, setSearching] = useState(false);
+      const [mediaFilter, setMediaFilter] = useState('');
+      const [threads, setThreads] = useState([]);
+      const [threadId, setThreadId] = useState(null);
+      const bottomRef = useRef(null);
+      const LIMIT = 50;
+
+      // Build API URL based on chat type
+      const buildUrl = useCallback((off, mediaF, tId) => {
+        if (isPrivate) {
+          // Private: /admin/chat/{tg_id}
+          const p = new URLSearchParams({offset: String(off || 0), limit: String(LIMIT)});
+          if (mediaF) p.set('media_type', mediaF);
+          return '/dashboard/api/admin/chat/' + chatId + '?' + p;
+        } else {
+          // Group/channel: /chats/{chat_id}/messages
+          const p = new URLSearchParams({offset: String(off || 0), limit: String(LIMIT)});
+          if (mediaF) p.set('msg_type', mediaF);
+          if (tId) p.set('thread_id', String(tId));
+          return '/dashboard/api/chats/' + chatId + '/messages?' + p;
+        }
+      }, [chatId, isPrivate]);
+
+      const normalizeMsg = useCallback((m) => {
+        // api_chats.py returns slightly different shape than admin chat endpoint
+        if (!isPrivate) {
+          return {
+            id: m.id || String(m.message_id || ''),
+            role: m.role || (m.from_bot ? 'bot' : 'user'),
+            text: m.text || '',
+            html_text: m.html_text || m.text || '',
+            timestamp: m.timestamp,
+            media_type: m.media_type,
+            media_url: m.media_url,
+            file_id: m.file_id,
+            file_name: m.file_name,
+            file_size: m.file_size,
+            duration: m.duration,
+            title: m.title,
+            sticker_emoji: m.sticker_emoji,
+            first_name: m.first_name || m.user_name,
+            tg_id: m.tg_id,
+          };
+        }
+        return m;
+      }, [isPrivate]);
+
+      const load = useCallback(async (off, append) => {
+        if (!append) setLoading(true); else setLoadingMore(true);
+        try {
+          const url = buildUrl(off, mediaFilter, threadId);
+          const d = await api(url);
+          const raw = d.messages || d.items || [];
+          const normalized = raw.map(normalizeMsg);
+          // For /admin/chat endpoint, backend returns newest-first, we need to reverse
+          const ordered = isPrivate ? [...normalized].reverse() : normalized.reverse();
+          if (append) {
+            setMsgs(prev => [...ordered, ...prev]);
+          } else {
+            setMsgs(ordered);
+            setTimeout(() => {if (bottomRef.current) bottomRef.current.scrollIntoView({behavior: 'auto'});}, 50);
+          }
+          setTotal(d.total || 0);
+        } catch (e) {toast.err(e.message);}
+        if (!append) setLoading(false); else setLoadingMore(false);
+      }, [buildUrl, isPrivate, mediaFilter, threadId, normalizeMsg]);
+
+      useEffect(() => {setOffset(0); load(0, false);}, [mediaFilter, threadId]);
+
+      // Load threads for supergroups
+      useEffect(() => {
+        if (chat.chat_type === 'supergroup') {
+          api('/dashboard/api/chats/' + chatId + '/threads').then(t => setThreads(Array.isArray(t) ? t : [])).catch(() => { });
+        }
+      }, [chat.chat_type, chatId]);
+
+      function loadMore() {
+        const newOff = offset + LIMIT;
+        setOffset(newOff);
+        load(newOff, true);
+      }
+
+      async function doSearch() {
+        if (!searchQ.trim()) {load(0, false); return;}
+        setSearching(true);
+        try {
+          let d;
+          if (isPrivate) {
+            d = await api('/dashboard/api/admin/chat/' + chatId + '/search?q=' + encodeURIComponent(searchQ));
+            setMsgs((d.messages || []).reverse());
+          } else {
+            const p = new URLSearchParams({search: searchQ, limit: '50'});
+            d = await api('/dashboard/api/chats/' + chatId + '/messages?' + p);
+            setMsgs((d.items || []).map(normalizeMsg).reverse());
+          }
+        } catch (e) {toast.err(e.message);}
+        setSearching(false);
+      }
+
+      async function sendMsg() {
+        if (!reply.trim()) return;
+        setSending(true);
+        try {
+          await api('/dashboard/api/admin/chat/send', {
+            method: 'POST',
+            body: JSON.stringify({tg_id: isPrivate ? chatId : (chat.tg_id || chatId), text: reply}),
+          });
+          setReply('');
+          await load(0, false);
+          toast.ok('Отправлено');
+        } catch (e) {toast.err(e.message);}
+        setSending(false);
+      }
+
+      const MEDIA_FILTERS = [
+        {key: '', label: 'Все'},
+        {key: 'photo', label: '🖼 Фото'},
+        {key: 'video', label: '🎬 Видео'},
+        {key: 'audio', label: '🎵 Аудио'},
+        {key: 'voice', label: '🎤 Голос'},
+        {key: 'document', label: '📎 Файлы'},
+        {key: 'sticker', label: '😀 Стик.'},
+        {key: 'link', label: '🔗 Ссылки'},
+      ];
+
+      return (
+        <div style={{display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden'}}>
+          {/* Header */}
+          <div style={{padding: '10px 16px', borderBottom: '1px solid var(--line)', flexShrink: 0}}>
+            <div style={{display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8}}>
+              <UserAvatar user={{display: chat.display || chat.title, avatar: chat.avatar}} size={32} />
+              <div style={{flex: 1, minWidth: 0}}>
+                <div style={{fontSize: 12, color: 'var(--t-100)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                  {chat.display || chat.title}
+                  <span style={{fontSize: 9, color: 'var(--t-40)', marginLeft: 6}}>
+                    {(CHAT_TYPE_META[chat.chat_type || 'private'] || {}).label || ''}
+                  </span>
+                </div>
+                <div style={{fontSize: 9, color: 'var(--t-40)'}}>
+                  {chat.username ? '@' + chat.username + ' · ' : ''}ID: {chatId} · {numFmt(chat.msg_count || total)} сообщений
+                </div>
+              </div>
+              {loading && <Spinner />}
+            </div>
+            {/* Search bar */}
+            <div style={{display: 'flex', gap: 6}}>
+              <input className="input" placeholder="Поиск в чате..." value={searchQ}
+                onChange={e => setSearchQ(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && doSearch()}
+                style={{flex: 1, fontSize: 10}} />
+              {searchQ && (
+                <button className="btn btn-ghost" style={{fontSize: 10, padding: '4px 8px'}}
+                  onClick={() => {setSearchQ(''); load(0, false);}}>✕</button>
+              )}
+              {searching && <Spinner />}
+            </div>
+            {/* Media filter pills */}
+            <div style={{display: 'flex', gap: 4, marginTop: 6, overflowX: 'auto', paddingBottom: 2}}>
+              {MEDIA_FILTERS.map(f => (
+                <button key={f.key}
+                  onClick={() => setMediaFilter(f.key)}
+                  style={{
+                    flexShrink: 0, padding: '2px 8px', fontSize: 9,
+                    border: '1px solid var(--line2)', borderRadius: 'var(--rad)',
+                    background: mediaFilter === f.key ? 'var(--t-100)' : 'transparent',
+                    color: mediaFilter === f.key ? 'var(--void)' : 'var(--t-40)',
+                    cursor: 'pointer', fontFamily: 'var(--mono)', whiteSpace: 'nowrap',
+                  }}>
+                  {f.label}
+                </button>
+              ))}
+            </div>
+            {/* Thread selector for supergroups */}
+            {threads.length > 0 && (
+              <div style={{display: 'flex', gap: 4, marginTop: 6, overflowX: 'auto'}}>
+                <button
+                  onClick={() => setThreadId(null)}
+                  style={{
+                    flexShrink: 0, padding: '2px 8px', fontSize: 9, border: '1px solid var(--line2)', borderRadius: 'var(--rad)',
+                    background: threadId == null ? 'var(--t-80)' : 'transparent', color: threadId == null ? 'var(--void)' : 'var(--t-40)',
+                    cursor: 'pointer', fontFamily: 'var(--mono)'
+                  }}>Общий</button>
+                {threads.map(t => (
+                  <button key={t.thread_id}
+                    onClick={() => setThreadId(t.thread_id)}
+                    style={{
+                      flexShrink: 0, padding: '2px 8px', fontSize: 9, border: '1px solid var(--line2)', borderRadius: 'var(--rad)',
+                      background: threadId === t.thread_id ? 'var(--t-80)' : 'transparent', color: threadId === t.thread_id ? 'var(--void)' : 'var(--t-40)',
+                      cursor: 'pointer', fontFamily: 'var(--mono)', whiteSpace: 'nowrap'
+                    }}>
+                    {t.title} · {t.msg_count}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Messages */}
+          <div style={{flex: 1, overflowY: 'auto', padding: '12px 16px', display: 'flex', flexDirection: 'column', gap: 2}}>
+            {/* Load more */}
+            {!loading && msgs.length > 0 && msgs.length < total && (
+              <div style={{textAlign: 'center', marginBottom: 8}}>
+                <button className="btn btn-ghost" style={{fontSize: 10}} onClick={loadMore} disabled={loadingMore}>
+                  {loadingMore ? <span style={{display: 'flex', alignItems: 'center', gap: 6}}><Spinner />Загрузка</span> : '↑ Загрузить ещё (' + (total - msgs.length) + ')'}
+                </button>
+              </div>
+            )}
+            {loading && !msgs.length
+              ? <div className="loading-row" style={{flex: 1, justifyContent: 'center'}}><Spinner lg={true} /><span>Загрузка...</span></div>
+              : msgs.map((m, idx) => {
+                const isBot = m.role === 'bot' || m.role === 'assistant';
+                const prevM = msgs[idx - 1];
+                const showSender = !isPrivate && !isBot && m.first_name && (!prevM || prevM.tg_id !== m.tg_id || prevM.role !== m.role);
+                return (
+                  <div key={m.id || idx}>
+                    {/* Date separator */}
+                    {idx === 0 || fmtDate(m.timestamp) !== fmtDate(msgs[idx - 1].timestamp) ? (
+                      <div style={{textAlign: 'center', fontSize: 9, color: 'var(--t-20)', margin: '8px 0 4px', fontFamily: 'var(--mono)'}}>
+                        {fmtDate(m.timestamp)}
+                      </div>
+                    ) : null}
+                    {showSender && (
+                      <div style={{fontSize: 9, color: 'var(--t-40)', marginBottom: 2, marginLeft: 4, fontFamily: 'var(--mono)'}}>
+                        {m.first_name}{m.tg_id ? ' · ' + m.tg_id : ''}
+                      </div>
+                    )}
+                    {isBot && (
+                      <div style={{fontSize: 8, color: 'rgba(255,255,255,0.25)', textAlign: 'right', marginBottom: 2, fontFamily: 'var(--mono)', letterSpacing: '0.08em', textTransform: 'uppercase'}}>
+                        ≡ бот
+                      </div>
+                    )}
+                    <div className={'bubble-wrap'}>
+                      <div className={'bubble ' + (isBot ? 'bot' : 'user')}>
+                        <MediaBubble m={m} isBot={isBot} onLightbox={setLightbox} />
+                      </div>
+                      <div className={'bubble-meta' + (isBot ? ' right' : '')}>{fmtTime(m.timestamp)}</div>
+                    </div>
+                  </div>
+                );
+              })
+            }
+            {!loading && !msgs.length && (
+              <div className="empty" style={{flex: 1}}><div className="empty-icon">✉️</div><div className="empty-text">Нет сообщений</div></div>
+            )}
+            <div ref={bottomRef} />
+          </div>
+
+          {/* Reply input (only for private chats where we can send) */}
+          {isPrivate && (
+            <div style={{padding: '10px 14px', borderTop: '1px solid var(--line)', display: 'flex', gap: 8, flexShrink: 0}}>
+              <input className="input" placeholder="Написать сообщение..." value={reply}
+                onChange={e => setReply(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && !e.shiftKey && sendMsg()}
+                style={{flex: 1}} />
+              <button className="btn btn-primary" onClick={sendMsg} disabled={sending || !reply.trim()}>
+                {sending ? <Spinner /> : <Icon.send />}
+              </button>
+            </div>
+          )}
+
+          {/* Lightbox */}
+          {lightbox && (
+            <div className="lightbox" onClick={() => setLightbox(null)}>
+              <div className="lightbox-close" onClick={() => setLightbox(null)}>✕</div>
+              {lightbox.type === 'video'
+                ? <video src={lightbox.url} controls style={{maxWidth: '90vw', maxHeight: '85vh'}} onClick={e => e.stopPropagation()} />
+                : <img src={lightbox.url} alt="" />
+              }
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════
+    //  SUPPORT
+    // ═══════════════════════════════════════
+    function PanelSupport() {
+      const [tickets, setTickets] = useState([]);
+      const [total, setTotal] = useState(0);
+      const [status, setStatus] = useState('');
+      const [page, setPage] = useState(0);
+      const [loading, setLoading] = useState(true);
+      const [selected, setSelected] = useState(null);
+      const [reply, setReply] = useState('');
+      const [sending, setSending] = useState(false);
+      const PG = 30;
+
+      const load = useCallback(async (p) => {
+        if (p === undefined) p = 0;
+        setLoading(true);
+        try {
+          const params = new URLSearchParams({skip: String(p * PG), limit: String(PG)});
+          if (status) params.set('status', status);
+          const d = await api('/dashboard/api/admin/support?' + params);
+          setTickets(d.tickets || []);
+          setTotal(d.total || 0);
+        } catch (e) {toast.err(e.message);}
+        setLoading(false);
+      }, [status]);
+
+      useEffect(() => {setPage(0); load(0);}, [load]);
+
+      async function sendReply(t) {
+        if (!reply.trim()) return;
+        setSending(true);
+        try {
+          await api('/dashboard/api/admin/support/' + t.id + '/reply', {
+            method: 'POST', body: JSON.stringify({reply}),
+          });
+          setReply('');
+          toast.ok('Ответ отправлен');
+          load(page);
+          setSelected(Object.assign({}, t, {status: 'answered', admin_reply: reply}));
+        } catch (e) {toast.err(e.message);}
+        setSending(false);
+      }
+
+      async function closeTicket(t) {
+        const reason = prompt('Причина закрытия:');
+        if (!reason || !reason.trim()) return;
+        try {
+          await api('/dashboard/api/admin/support/' + t.id + '/close', {
+            method: 'POST', body: JSON.stringify({reason}),
+          });
+          toast.ok('Тикет закрыт');
+          load(page);
+          setSelected(null);
+        } catch (e) {toast.err(e.message);}
+      }
+
+      return (
+        <div className="anim-up" style={{display: 'grid', gridTemplateColumns: '1fr 400px', gap: 14, alignItems: 'start'}}>
+          <div>
+            <div style={{display: 'flex', gap: 6, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap'}}>
+              {['', 'open', 'answered', 'closed'].map(s => (
+                <button key={s}
+                  style={{padding: '4px 12px', fontSize: 10, border: '1px solid var(--line2)', borderRadius: 'var(--rad)', background: status === s ? 'var(--t-100)' : 'transparent', color: status === s ? 'var(--void)' : 'var(--t-40)', cursor: 'pointer', fontFamily: 'var(--mono)', transition: 'all .12s'}}
+                  onClick={() => setStatus(s)}>
+                  {s || 'Все'}
+                </button>
+              ))}
+              <span style={{marginLeft: 'auto', fontSize: 10, color: 'var(--t-40)'}}>{total}</span>
+              {loading && <Spinner />}
+            </div>
+            {tickets.map(t => (
+              <div key={t.id} className={'ticket-item' + (selected && selected.id === t.id ? ' active' : '')}
+                onClick={() => {setSelected(t); setReply('');}}>
+                <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 5}}>
+                  <span style={{fontSize: 11, color: 'var(--t-80)'}}>
+                    {t.first_name || ('tg:' + t.tg_id)}
+                    {t.username && <span style={{color: 'var(--t-40)', marginLeft: 4}}>@{t.username}</span>}
+                  </span>
+                  <div style={{display: 'flex', gap: 4}}>
+                    <span className="badge badge-neutral">{t.category}</span>
+                    <span className="badge badge-dark">{t.status}</span>
+                  </div>
+                </div>
+                <div style={{fontSize: 11, color: 'var(--t-60)', lineHeight: 1.4}}>
+                  {t.message.length > 120 ? t.message.slice(0, 120) + '...' : t.message}
+                </div>
+                <div style={{fontSize: 9, color: 'var(--t-20)', marginTop: 4}}>{timeAgo(t.created_at)}</div>
+              </div>
+            ))}
+            {!loading && !tickets.length && <div className="empty"><div className="empty-icon">🎫</div><div className="empty-text">Тикеты не найдены</div></div>}
+            <Pagination page={page} total={total} pageSize={PG} onChange={p => {setPage(p); load(p);}} />
+          </div>
+          {selected && (
+            <div className="card" style={{position: 'sticky', top: 0}}>
+              <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: 12}}>
+                <span style={{fontSize: 11, color: 'var(--t-80)'}}>{selected.first_name || ('tg:' + selected.tg_id)}</span>
+                <button className="btn btn-ghost btn-icon" onClick={() => setSelected(null)}><Icon.close /></button>
+              </div>
+              <div style={{padding: 10, background: 'var(--ink-20)', borderRadius: 'var(--rad-md)', marginBottom: 12, lineHeight: 1.5, fontSize: 12, color: 'var(--t-80)', fontFamily: 'var(--sans)'}}>
+                {selected.message}
+              </div>
+              {selected.admin_reply && (
+                <div style={{padding: '8px 10px', background: 'var(--ink-30)', borderRadius: 'var(--rad-md)', marginBottom: 12, fontSize: 11, color: 'var(--t-60)', fontFamily: 'var(--sans)'}}>
+                  <div style={{fontSize: 9, color: 'var(--t-40)', marginBottom: 4}}>Ответ администратора</div>
+                  {selected.admin_reply}
+                </div>
+              )}
+              {selected.status !== 'closed' && (
+                <>
+                  <textarea className="input" style={{marginBottom: 8}} rows={3} placeholder="Ваш ответ..."
+                    value={reply} onChange={e => setReply(e.target.value)} />
+                  <div style={{display: 'flex', gap: 6}}>
+                    <button className="btn btn-primary" style={{flex: 1}} onClick={() => sendReply(selected)} disabled={sending}>
+                      {sending ? <span style={{display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center'}}><Spinner /> Отправка</span> : 'Ответить'}
+                    </button>
+                    <button className="btn btn-ghost" onClick={() => closeTicket(selected)}>Закрыть</button>
+                  </div>
+                </>
+              )}
+              {selected.status === 'closed' && (
+                <div style={{fontSize: 10, color: 'var(--t-40)', textAlign: 'center', padding: '8px 0'}}>
+                  Тикет закрыт {selected.closed_at ? fmtDate(selected.closed_at) : ''}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════
+    //  BROADCAST
+    // ═══════════════════════════════════════
+    function PanelBroadcast() {
+      const [text, setText] = useState('');
+      const [audience, setAudience] = useState('all');
+      const [sending, setSending] = useState(false);
+      const [jobs, setJobs] = useState([]);
+      const [loadingJobs, setLoadingJobs] = useState(true);
+
+      useEffect(() => {
+        api('/dashboard/api/admin/broadcasts')
+          .then(d => setJobs(d.broadcasts || []))
+          .catch(() => { })
+          .finally(() => setLoadingJobs(false));
+      }, []);
+
+      async function send() {
+        if (!text.trim()) return;
+        if (!confirm('Отправить рассылку для аудитории "' + audience + '"?')) return;
+        setSending(true);
+        try {
+          const r = await api('/dashboard/api/admin/broadcast', {
+            method: 'POST',
+            body: JSON.stringify({text, audience}),
+          });
+          toast.ok('Рассылка в очереди · ' + (r.job_id || '').slice(-8));
+          setText('');
+          const d = await api('/dashboard/api/admin/broadcasts');
+          setJobs(d.broadcasts || []);
+        } catch (e) {toast.err(e.message);}
+        setSending(false);
+      }
+
+      return (
+        <div className="anim-up section-gap">
+          <div className="grid-2">
+            <div className="card">
+              <div className="card-header"><span className="card-title">Новая рассылка</span></div>
+              <div className="input-group" style={{marginBottom: 10}}>
+                <div className="input-label">Аудитория</div>
+                <select className="input" value={audience} onChange={e => setAudience(e.target.value)}>
+                  <option value="all">Все пользователи</option>
+                  <option value="active">Активные (7 дней)</option>
+                  <option value="role">По роли</option>
+                </select>
+              </div>
+              <div className="input-group" style={{marginBottom: 12}}>
+                <div className="input-label">Текст сообщения</div>
+                <textarea className="input" rows={5} placeholder="Введите текст рассылки..."
+                  value={text} onChange={e => setText(e.target.value)} />
+              </div>
+              <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: 12}}>
+                <span style={{fontSize: 10, color: 'var(--t-40)'}}>{text.length} / 4096</span>
+              </div>
+              <button className="btn btn-primary w-full" onClick={send} disabled={sending || !text.trim()}>
+                {sending ? <span style={{display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center'}}><Spinner /> Отправка...</span> : 'Отправить рассылку'}
+              </button>
+            </div>
+            <div className="card">
+              <div className="card-header"><span className="card-title">История</span>{loadingJobs && <Spinner />}</div>
+              {!jobs.length && !loadingJobs && <div className="empty"><div className="empty-icon">📭</div><div className="empty-text">Нет рассылок</div></div>}
+              {jobs.map(j => (
+                <div key={j.id} style={{padding: '8px 0', borderBottom: '1px solid var(--line)'}}>
+                  <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: 4}}>
+                    <span style={{fontSize: 10, color: 'var(--t-80)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                      {j.text.slice(0, 60)}{j.text.length > 60 ? '...' : ''}
+                    </span>
+                    <span className="badge badge-neutral">{j.status}</span>
+                  </div>
+                  <div style={{display: 'flex', gap: 8, fontSize: 9, color: 'var(--t-40)'}}>
+                    <span>{j.audience}</span><span>·</span>
+                    <span>{j.sent_count || 0} отправлено</span><span>·</span>
+                    <span>{timeAgo(j.created_at)}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════
+    //  ROLES
+    // ═══════════════════════════════════════
+    function PanelRoles() {
+      const [roles, setRoles] = useState([]);
+      const [perms, setPerms] = useState([]);
+      const [loading, setLoading] = useState(true);
+      const [form, setForm] = useState({name: '', description: '', permsText: ''});
+      const [saving, setSaving] = useState(false);
+
+      const load = useCallback(async () => {
+        setLoading(true);
+        try {
+          const [r, p] = await Promise.all([
+            api('/dashboard/api/admin/roles'),
+            api('/dashboard/api/admin/permissions'),
+          ]);
+          setRoles(Array.isArray(r) ? r : []);
+          setPerms((p && p.permissions) || []);
+        } catch (e) {toast.err(e.message);}
+        setLoading(false);
+      }, []);
+
+      useEffect(() => {load();}, [load]);
+
+      async function createRole() {
+        if (!form.name.trim()) return;
+        setSaving(true);
+        try {
+          await api('/dashboard/api/admin/roles', {
+            method: 'POST',
+            body: JSON.stringify({
+              name: form.name,
+              description: form.description,
+              permissions: form.permsText.split(',').map(p => p.trim()).filter(Boolean),
+            }),
+          });
+          toast.ok('Роль создана');
+          setForm({name: '', description: '', permsText: ''});
+          load();
+        } catch (e) {toast.err(e.message);}
+        setSaving(false);
+      }
+
+      async function deleteRole(id) {
+        if (!confirm('Удалить роль?')) return;
+        try {
+          await api('/dashboard/api/admin/roles/' + id, {method: 'DELETE'});
+          toast.ok('Роль удалена'); load();
+        } catch (e) {toast.err(e.message);}
+      }
+
+      // Group permissions
+      const grouped = {};
+      perms.forEach(p => {(grouped[p.group] = grouped[p.group] || []).push(p);});
+
+      return (
+        <div className="anim-up section-gap">
+          <div className="grid-2-1">
+            <div className="card">
+              <div className="card-header"><span className="card-title">Роли ({roles.length})</span>{loading && <Spinner />}</div>
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Роль</th><th>Разрешения</th><th>Создана</th><th></th></tr></thead>
+                  <tbody>
+                    {roles.map(r => (
+                      <tr key={r.id}>
+                        <td style={{color: 'var(--t-100)', fontWeight: 500, fontSize: 11}}>{r.name}</td>
+                        <td>
+                          <div style={{display: 'flex', flexWrap: 'wrap', gap: 3}}>
+                            {(r.permissions || []).slice(0, 4).map(p => <span key={p} className="badge badge-dark">{p}</span>)}
+                            {(r.permissions || []).length > 4 && <span className="badge badge-dark">+{r.permissions.length - 4}</span>}
+                          </div>
+                        </td>
+                        <td style={{fontSize: 10, color: 'var(--t-40)'}}>{fmtDate(r.created_at)}</td>
+                        <td><button className="btn btn-ghost btn-icon" onClick={() => deleteRole(r.id)}><Icon.close /></button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <div className="section-gap">
+              <div className="card">
+                <div className="card-title" style={{marginBottom: 12}}>Создать роль</div>
+                {[
+                  {label: 'Название', key: 'name', placeholder: 'moderator'},
+                  {label: 'Описание', key: 'description', placeholder: 'Описание роли'},
+                  {label: 'Разрешения (через запятую)', key: 'permsText', placeholder: 'users:read, logs:read'},
+                ].map(f => (
+                  <div key={f.key} className="input-group" style={{marginBottom: 8}}>
+                    <div className="input-label">{f.label}</div>
+                    <input className="input" value={form[f.key]} placeholder={f.placeholder}
+                      onChange={e => setForm(prev => Object.assign({}, prev, {[f.key]: e.target.value}))} />
+                  </div>
+                ))}
+                <button className="btn btn-primary w-full mt-8" onClick={createRole} disabled={saving || !form.name.trim()}>
+                  {saving ? <span style={{display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center'}}><Spinner /> Создание</span> : '+ Создать'}
+                </button>
+              </div>
+              <div className="card">
+                <div className="card-title" style={{marginBottom: 10}}>Разрешения системы</div>
+                {Object.entries(grouped).map(([group, ps]) => (
+                  <div key={group} style={{marginBottom: 10}}>
+                    <div style={{fontSize: 9, color: 'var(--t-40)', marginBottom: 4, letterSpacing: '0.1em', textTransform: 'uppercase'}}>{group}</div>
+                    <div style={{display: 'flex', flexWrap: 'wrap', gap: 4}}>
+                      {ps.map(p => <span key={p.perm} className="badge badge-neutral" title={p.description} style={{cursor: 'help'}}>{p.perm}</span>)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════
+    //  ACTIVITY LOG
+    // ═══════════════════════════════════════
+    function PanelActivity() {
+      const [logs, setLogs] = useState([]);
+      const [total, setTotal] = useState(0);
+      const [page, setPage] = useState(0);
+      const [action, setAction] = useState('');
+      const [loading, setLoading] = useState(true);
+      const PG = 50;
+
+      const load = useCallback(async (p) => {
+        if (p === undefined) p = 0;
+        setLoading(true);
+        try {
+          const params = new URLSearchParams({skip: String(p * PG), limit: String(PG)});
+          if (action.trim()) params.set('action', action);
+          const d = await api('/dashboard/api/admin/logs/activity?' + params);
+          setLogs(d.logs || []);
+          setTotal(d.total || 0);
+        } catch (e) {toast.err(e.message);}
+        setLoading(false);
+      }, [action]);
+
+      useEffect(() => {setPage(0); load(0);}, [load]);
+
+      return (
+        <div className="anim-up">
+          <div style={{display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center'}}>
+            <input className="input" style={{width: 200}} placeholder="Фильтр действий..."
+              value={action} onChange={e => setAction(e.target.value)} onKeyDown={e => e.key === 'Enter' && load(0)} />
+            <span style={{marginLeft: 'auto', fontSize: 10, color: 'var(--t-40)'}}>{total} записей</span>
+            {loading && <Spinner />}
+          </div>
+          <div className="card" style={{padding: 0}}>
+            <div className="table-wrap">
+              <table>
+                <thead><tr>
+                  <th style={{paddingLeft: 16}}>Время</th>
+                  <th>Действие</th>
+                  <th>TG ID</th>
+                  <th>IP</th>
+                  <th>Детали</th>
+                </tr></thead>
+                <tbody>
+                  {loading && !logs.length
+                    ? [0, 1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => <SkeletonRow key={i} />)
+                    : logs.map(l => (
+                      <tr key={l.id}>
+                        <td style={{paddingLeft: 16, fontSize: 10, color: 'var(--t-40)', whiteSpace: 'nowrap'}}>{fmtDateTime(l.timestamp)}</td>
+                        <td style={{fontSize: 10}}>{l.action}</td>
+                        <td style={{fontSize: 10, color: 'var(--t-40)'}}>{l.tg_id || '—'}</td>
+                        <td style={{fontSize: 10, color: 'var(--t-40)'}}>{l.ip || '—'}</td>
+                        <td style={{fontSize: 10, color: 'var(--t-40)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                          {l.details ? JSON.stringify(l.details).slice(0, 80) : '—'}
+                        </td>
+                      </tr>
+                    ))
+                  }
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <Pagination page={page} total={total} pageSize={PG} onChange={p => {setPage(p); load(p);}} />
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════
+    //  ERROR LOG
+    // ═══════════════════════════════════════
+    function PanelErrors() {
+      const [logs, setLogs] = useState([]);
+      const [total, setTotal] = useState(0);
+      const [page, setPage] = useState(0);
+      const [search, setSearch] = useState('');
+      const [level, setLevel] = useState('');
+      const [loading, setLoading] = useState(true);
+      const [expanded, setExpanded] = useState(null);
+      const PG = 50;
+
+      const load = useCallback(async (p) => {
+        if (p === undefined) p = 0;
+        setLoading(true);
+        try {
+          const params = new URLSearchParams({skip: String(p * PG), limit: String(PG)});
+          if (search.trim()) params.set('search', search);
+          if (level) params.set('level', level);
+          const d = await api('/dashboard/api/admin/logs/errors?' + params);
+          setLogs(d.logs || []);
+          setTotal(d.total || 0);
+        } catch (e) {toast.err(e.message);}
+        setLoading(false);
+      }, [search, level]);
+
+      useEffect(() => {setPage(0); load(0);}, [load]);
+
+      return (
+        <div className="anim-up">
+          <div style={{display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap'}}>
+            <input className="input" style={{width: 220}} placeholder="Поиск..."
+              value={search} onChange={e => setSearch(e.target.value)} onKeyDown={e => e.key === 'Enter' && load(0)} />
+            <select className="input" style={{width: 120}} value={level} onChange={e => setLevel(e.target.value)}>
+              <option value="">Все уровни</option>
+              <option value="ERROR">ERROR</option>
+              <option value="CRITICAL">CRITICAL</option>
+              <option value="WARNING">WARNING</option>
+            </select>
+            <span style={{marginLeft: 'auto', fontSize: 10, color: 'var(--t-40)'}}>{total}</span>
+            {loading && <Spinner />}
+          </div>
+          <div className="section-gap">
+            {loading && !logs.length && <div className="loading-row"><Spinner lg={true} /><span>Загрузка...</span></div>}
+            {logs.map(l => (
+              <div key={l.id} style={{border: '1px solid var(--line)', borderRadius: 'var(--rad-lg)', overflow: 'hidden'}}>
+                <div style={{padding: '10px 14px', display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', background: 'var(--ink-15)'}}
+                  onClick={() => setExpanded(expanded === l.id ? null : l.id)}>
+                  <span className={'badge ' + (l.level === 'CRITICAL' ? 'badge-white' : l.level === 'ERROR' ? 'badge-neutral' : 'badge-dark')}>{l.level}</span>
+                  <span style={{fontSize: 11, color: 'var(--t-80)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{l.message}</span>
+                  <span style={{fontSize: 9, color: 'var(--t-40)', flexShrink: 0}}>{fmtDateTime(l.timestamp)}</span>
+                  <span style={{fontSize: 10, color: 'var(--t-40)'}}>{expanded === l.id ? '▲' : '▼'}</span>
+                </div>
+                {expanded === l.id && (
+                  <div style={{padding: '10px 14px', background: 'var(--ink-10)', borderTop: '1px solid var(--line)'}}>
+                    <div style={{display: 'flex', gap: 16, marginBottom: 10, flexWrap: 'wrap'}}>
+                      {l.path && <div style={{display: 'flex', gap: 6}}><span style={{fontSize: 9, color: 'var(--t-40)', textTransform: 'uppercase'}}>path</span><span style={{fontSize: 11}}>{l.path}</span></div>}
+                      {l.intent && <div style={{display: 'flex', gap: 6}}><span style={{fontSize: 9, color: 'var(--t-40)', textTransform: 'uppercase'}}>intent</span><span style={{fontSize: 11}}>{l.intent}</span></div>}
+                      {l.error_id && <div style={{display: 'flex', gap: 6}}><span style={{fontSize: 9, color: 'var(--t-40)', textTransform: 'uppercase'}}>id</span><span style={{fontSize: 11}}>{l.error_id}</span></div>}
+                    </div>
+                    {l.traceback && (
+                      <div className="code-block">{l.traceback.slice(0, 1200)}{l.traceback.length > 1200 ? '\n...' : ''}</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+            {!loading && !logs.length && <div className="empty"><div className="empty-icon">✓</div><div className="empty-text">Ошибок не найдено</div></div>}
+          </div>
+          <Pagination page={page} total={total} pageSize={PG} onChange={p => {setPage(p); load(p);}} />
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════
+    //  MONGODB VIEWER
+    // ═══════════════════════════════════════
+    const ALLOWED_COLS = [
+      'auth_users', 'auth_activity_log', 'auth_error_logs', 'auth_roles', 'auth_api_keys',
+      'support_tickets', 'bot_conversations', 'broadcast_jobs',
+      'lessons', 'groups', 'teachers', 'rooms', 'institutes', 'scrape_logs',
+    ];
+
+    function PanelMongo() {
+      const [col, setCol] = useState('auth_users');
+      const [filter, setFilter] = useState('');
+      const [sortStr, setSortStr] = useState('');
+      const [docs, setDocs] = useState([]);
+      const [total, setTotal] = useState(0);
+      const [page, setPage] = useState(0);
+      const [loading, setLoading] = useState(false);
+      const [expandedDoc, setExpandedDoc] = useState(null);
+      const PG = 20;
+
+      async function load(p) {
+        if (p === undefined) p = 0;
+        setLoading(true);
+        try {
+          const params = new URLSearchParams({collection: col, skip: String(p * PG), limit: String(PG)});
+          if (filter.trim()) params.set('filter', filter);
+          if (sortStr.trim()) params.set('sort', sortStr);
+          const d = await api('/dashboard/api/admin/mongo?' + params);
+          setDocs(d.documents || []);
+          setTotal(d.total || 0);
+        } catch (e) {toast.err(e.message);}
+        setLoading(false);
+      }
+
+      const colKeys = docs[0] ? Object.keys(docs[0]).slice(0, 6) : [];
+
+      return (
+        <div className="anim-up section-gap">
+          <div className="card">
+            <div style={{display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end'}}>
+              <div className="input-group" style={{flex: '0 0 160px'}}>
+                <div className="input-label">Коллекция</div>
+                <select className="input" value={col} onChange={e => setCol(e.target.value)}>
+                  {ALLOWED_COLS.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div className="input-group" style={{flex: 1}}>
+                <div className="input-label">Фильтр JSON</div>
+                <input className="input" value={filter} onChange={e => setFilter(e.target.value)} placeholder='{"is_blocked": true}' />
+              </div>
+              <div className="input-group" style={{flex: '0 0 150px'}}>
+                <div className="input-label">Сортировка</div>
+                <input className="input" value={sortStr} onChange={e => setSortStr(e.target.value)} placeholder="timestamp:-1" />
+              </div>
+              <button className="btn btn-primary" onClick={() => {setPage(0); load(0);}} disabled={loading}>
+                {loading ? <Spinner /> : '▶ Запрос'}
+              </button>
+            </div>
+            {total > 0 && <div style={{fontSize: 10, color: 'var(--t-40)', marginTop: 8}}>{total} документов</div>}
+          </div>
+
+          {docs.length > 0 && (
+            <div className="card" style={{padding: 0}}>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      {colKeys.map((c, ci) => <th key={c} style={{paddingLeft: ci === 0 ? 16 : 10}}>{c}</th>)}
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {docs.map((doc, i) => (
+                      <tr key={i} style={{cursor: 'pointer'}} onClick={() => setExpandedDoc(doc)}>
+                        {colKeys.map((c, ci) => (
+                          <td key={c} style={{paddingLeft: ci === 0 ? 16 : 10, fontSize: 10}}>
+                            <span style={{display: 'inline-block', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                              {typeof doc[c] === 'object' && doc[c] !== null ? JSON.stringify(doc[c]).slice(0, 40) : String(doc[c] == null ? '—' : doc[c])}
+                            </span>
+                          </td>
+                        ))}
+                        <td><button className="btn btn-ghost" style={{padding: '2px 6px', fontSize: 10}}>›</button></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{padding: '8px 16px'}}>
+                <Pagination page={page} total={total} pageSize={PG} onChange={p => {setPage(p); load(p);}} />
+              </div>
+            </div>
+          )}
+
+          {expandedDoc && (
+            <div className="detail-panel">
+              <div className="detail-header">
+                <span style={{fontSize: 11, color: 'var(--t-80)'}}>Документ · {col}</span>
+                <button className="btn btn-ghost btn-icon" style={{marginLeft: 'auto'}} onClick={() => setExpandedDoc(null)}><Icon.close /></button>
+              </div>
+              <div className="detail-body">
+                <div className="code-block">{JSON.stringify(expandedDoc, null, 2)}</div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════
+    //  SETTINGS
+    // ═══════════════════════════════════════
+    const WRITABLE_KEYS = new Set([
+      'scrape_interval_hours', 'scraper_concurrency', 'scraper_request_delay',
+      'scrape_mode', 'rate_limit_user_rpm', 'rate_limit_anon_rpm', 'rate_limit_bot_rpm',
+      'cache_ttl_now', 'cache_ttl_day', 'cache_ttl_week', 'log_level', 'activity_log_ttl_days',
+    ]);
+
+    const SETTINGS_GROUPS = {
+      'Состояние системы': ['telegram_bot_configured', 'openai_configured', 'sentry_configured', 'redis_password_configured', 'mongo_auth_configured'],
+      'Парсер': ['scrape_interval_hours', 'scraper_concurrency', 'scraper_request_delay', 'scrape_mode'],
+      'Rate Limiting': ['rate_limit_user_rpm', 'rate_limit_anon_rpm', 'rate_limit_bot_rpm', 'rate_limit_window'],
+      'Кэш (TTL в сек)': ['cache_ttl_now', 'cache_ttl_day', 'cache_ttl_week', 'cache_ttl_search', 'cache_ttl_meta'],
+      'Логи': ['log_level', 'activity_log_ttl_days', 'cleanup_hour_utc'],
+    };
+
+    function PanelSettings() {
+      const [cfg, setCfg] = useState({});
+      const [edited, setEdited] = useState({});
+      const [loading, setLoading] = useState(true);
+      const [saving, setSaving] = useState(false);
+
+      useEffect(() => {
+        api('/dashboard/api/admin/settings').then(d => setCfg(d || {})).catch(() => { }).finally(() => setLoading(false));
+      }, []);
+
+      function getVal(key) {return edited[key] !== undefined ? edited[key] : cfg[key];}
+
+      async function save() {
+        if (!Object.keys(edited).length) return;
+        setSaving(true);
+        try {
+          await api('/dashboard/api/admin/settings', {method: 'POST', body: JSON.stringify(edited)});
+          setCfg(c => Object.assign({}, c, edited));
+          setEdited({});
+          toast.ok('Сохранено. Перезапустите контейнер для применения.');
+        } catch (e) {toast.err(e.message);}
+        setSaving(false);
+      }
+
+      if (loading) return <div className="loading-row" style={{padding: 60}}><Spinner lg={true} /><span>Загрузка...</span></div>;
+
+      return (
+        <div className="anim-up section-gap">
+          {Object.entries(SETTINGS_GROUPS).map(([group, keys]) => {
+            const visibleKeys = keys.filter(k => k in cfg);
+            if (!visibleKeys.length) return null;
+            return (
+              <div key={group} className="card">
+                <div className="card-title" style={{marginBottom: 10}}>{group}</div>
+                {visibleKeys.map(k => {
+                  const v = getVal(k);
+                  const editable = WRITABLE_KEYS.has(k);
+                  const isFlag = typeof v === 'boolean';
+                  return (
+                    <div key={k} className="setting-row">
+                      <div style={{flex: 1}}>
+                        <div style={{fontSize: 11, color: 'var(--t-80)'}}>{k}</div>
+                      </div>
+                      {isFlag ? (
+                        <div style={{display: 'flex', alignItems: 'center', gap: 5}}>
+                          <div className={'dot ' + (v ? 'dot-ok' : 'dot-off')} />
+                          <span style={{fontSize: 10, color: v ? 'var(--t-80)' : 'var(--t-40)'}}>{v ? 'да' : 'нет'}</span>
+                        </div>
+                      ) : editable ? (
+                        <input className="input" style={{width: 160}}
+                          value={String(getVal(k) == null ? '' : getVal(k))}
+                          onChange={e => setEdited(p => Object.assign({}, p, {[k]: e.target.value}))} />
+                      ) : (
+                        <span style={{fontSize: 11, color: 'var(--t-60)'}}>{String(v == null ? '—' : v)}</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })}
+
+          {Object.keys(edited).length > 0 && (
+            <div style={{position: 'sticky', bottom: 14, display: 'flex', gap: 8, justifyContent: 'flex-end'}}>
+              <button className="btn btn-ghost" onClick={() => setEdited({})}>Сбросить</button>
+              <button className="btn btn-primary" onClick={save} disabled={saving}>
+                {saving ? <span style={{display: 'flex', alignItems: 'center', gap: 6}}><Spinner /> Сохранение</span> : '✓ Сохранить (' + Object.keys(edited).length + ')'}
+              </button>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════
+    //  FEEDBACK / ANALYTICS
+    // ═══════════════════════════════════════
+    function PanelFeedback() {
+      const [days, setDays] = useState(30);
+      const [fromDate, setFromDate] = useState('');
+      const [toDate, setToDate] = useState('');
+      const [analytics, setAnalytics] = useState(null);
+      const [loading, setLoading] = useState(true);
+      const [activeTab, setActiveTab] = useState('overview');
+
+      const load = useCallback(async () => {
+        setLoading(true);
+        try {
+          const params = new URLSearchParams({days: String(days)});
+          if (fromDate) params.set('from_date', fromDate);
+          if (toDate) params.set('to_date', toDate);
+          const d = await api('/dashboard/api/admin/analytics?' + params);
+          setAnalytics(d);
+        } catch (e) {toast.err(e.message);}
+        setLoading(false);
+      }, [days, fromDate, toDate]);
+
+      useEffect(() => {load();}, [load]);
+
+      // ── Derived chart data ───────────────────────────────────────────────────────
+      const msgsByRoleData = useMemo(() => {
+        if (!analytics) return {user: [], bot: []};
+        const byDate = {};
+        (analytics.daily_messages || []).forEach(d => {
+          if (!byDate[d.date]) byDate[d.date] = {user: 0, bot: 0};
+          if (d.role === 'user') byDate[d.date].user += d.count;
+          else byDate[d.date].bot += d.count;
+        });
+        const dates = Object.keys(byDate).sort();
+        return {
+          user: dates.map(d => ({label: d.slice(5), value: byDate[d].user})),
+          bot: dates.map(d => ({label: d.slice(5), value: byDate[d].bot})),
+          dates,
+        };
+      }, [analytics]);
+
+      const feedbackLineData = useMemo(() => {
+        if (!analytics) return [];
+        const byDate = {};
+        (analytics.daily_feedback || []).forEach(d => {
+          if (!byDate[d.date]) byDate[d.date] = {likes: 0, dislikes: 0};
+          if (d.rating === 'like') byDate[d.date].likes += d.count;
+          if (d.rating === 'dislike') byDate[d.date].dislikes += d.count;
+        });
+        return Object.entries(byDate).sort(([a], [b]) => a < b ? -1 : 1)
+          .map(([date, v]) => ({label: date.slice(5), value: v.likes, value2: v.dislikes}));
+      }, [analytics]);
+
+      const errorsLineData = useMemo(() => {
+        if (!analytics) return [];
+        return (analytics.daily_errors || []).map(d => ({label: d.date.slice(5), value: d.count}));
+      }, [analytics]);
+
+      const newUsersData = useMemo(() => {
+        if (!analytics) return [];
+        return (analytics.new_users_daily || []).map(d => ({label: d.date.slice(5), value: d.count}));
+      }, [analytics]);
+
+      const intentData = useMemo(() => {
+        if (!analytics) return [];
+        return (analytics.intent_breakdown || []).slice(0, 12).map(d => ({
+          label: d.intent.replace('bot.', '').slice(0, 18),
+          value: d.count,
+        }));
+      }, [analytics]);
+
+      const errorIntentData = useMemo(() => {
+        if (!analytics) return [];
+        return (analytics.error_by_intent || []).slice(0, 10).map(d => ({
+          label: (d.intent || 'unknown').slice(0, 18),
+          value: d.count,
+        }));
+      }, [analytics]);
+
+      const heatData = useMemo(() => {
+        if (!analytics || !analytics.hourly_heatmap) return new Array(24).fill(0);
+        const maxV = Math.max(...(analytics.hourly_heatmap.map(h => h.count)), 1);
+        const cells = new Array(24).fill(0);
+        analytics.hourly_heatmap.forEach(h => {cells[h.hour] = h.count / maxV;});
+        return cells;
+      }, [analytics]);
+
+      const t = (analytics && analytics.totals) || {};
+      const period = analytics && analytics.period;
+
+      const TABS = [
+        {key: 'overview', label: 'Обзор'},
+        {key: 'messages', label: 'Сообщения'},
+        {key: 'feedback', label: 'Отзывы'},
+        {key: 'intents', label: 'Интенты'},
+        {key: 'errors', label: 'Ошибки'},
+        {key: 'users', label: 'Пользователи'},
+        {key: 'miniapp', label: 'MiniApp'},
+      ];
+
+      const tabBtnStyle = (k) => ({
+        padding: '5px 14px', fontSize: 10, border: '1px solid var(--line2)',
+        borderRadius: 'var(--rad)', cursor: 'pointer', fontFamily: 'var(--mono)',
+        background: activeTab === k ? 'var(--t-100)' : 'transparent',
+        color: activeTab === k ? 'var(--void)' : 'var(--t-40)',
+        transition: 'all .12s', whiteSpace: 'nowrap',
+      });
+
+      return (
+        <div className="anim-up section-gap">
+          {/* Filters */}
+          <div className="card">
+            <div style={{display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end'}}>
+              <div className="input-group" style={{flex: '0 0 auto'}}>
+                <div className="input-label">Период</div>
+                <div style={{display: 'flex', gap: 4}}>
+                  {[7, 14, 30, 60, 90].map(d => (
+                    <button key={d}
+                      style={{...tabBtnStyle(d === days && !fromDate ? 'period_' + d : '_x'), padding: '4px 10px'}}
+                      onClick={() => {setDays(d); setFromDate(''); setToDate('');}}>
+                      {d}д
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="input-group" style={{flex: '0 0 auto'}}>
+                <div className="input-label">Дата от</div>
+                <input className="input" type="date" style={{width: 130}} value={fromDate} onChange={e => setFromDate(e.target.value)} />
+              </div>
+              <div className="input-group" style={{flex: '0 0 auto'}}>
+                <div className="input-label">Дата до</div>
+                <input className="input" type="date" style={{width: 130}} value={toDate} onChange={e => setToDate(e.target.value)} />
+              </div>
+              <button className="btn btn-primary" onClick={load} disabled={loading}>
+                {loading ? <span style={{display: 'flex', alignItems: 'center', gap: 6}}><Spinner />Загрузка</span> : '▶ Применить'}
+              </button>
+              {period && (
+                <span style={{fontSize: 9, color: 'var(--t-40)', marginLeft: 4, fontFamily: 'var(--mono)'}}>
+                  {fmtDate(period.from)} — {fmtDate(period.to)}
+                </span>
+              )}
+            </div>
+          </div>
+
+          {/* KPI row */}
+          <div style={{display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8}}>
+            {[
+              {label: 'Сообщений', value: numFmt(t.messages || 0), sub: 'за период'},
+              {label: 'Ошибок', value: numFmt(t.errors || 0), sub: 'ERROR+CRIT'},
+              {label: '👍 Лайков', value: numFmt(t.fb_likes || 0), sub: (t.fb_pct_like || 0) + '% позитив'},
+              {label: '👎 Дизлайков', value: numFmt(t.fb_dislikes || 0), sub: 'всего ' + numFmt(t.fb_total || 0)},
+              {label: 'Ожидают', value: numFmt(t.fb_pending || 0), sub: 'без оценки'},
+            ].map((s, i) => (
+              <div key={i} className="stat-card" style={{animationDelay: (i * 0.05) + 's'}}>
+                <div className="stat-label">{s.label}</div>
+                <div className="stat-value" style={{fontSize: 22}}>{s.value}</div>
+                <div style={{fontSize: 9, color: 'var(--t-40)', marginTop: 2}}>{s.sub}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Tabs */}
+          <div style={{display: 'flex', gap: 4, overflowX: 'auto', paddingBottom: 2}}>
+            {TABS.map(t => <button key={t.key} style={tabBtnStyle(t.key)} onClick={() => setActiveTab(t.key)}>{t.label}</button>)}
+          </div>
+
+          {/* Tab content */}
+          {activeTab === 'overview' && (
+            <div className="section-gap">
+              <div className="grid-2">
+                <div className="card">
+                  <div className="card-header"><span className="card-title">Сообщения пользователей</span></div>
+                  <div className="chart-container">
+                    {msgsByRoleData.user.length > 0 ? <LineChart data={msgsByRoleData.user} /> : <div className="empty"><div className="empty-text">Нет данных</div></div>}
+                  </div>
+                </div>
+                <div className="card">
+                  <div className="card-header"><span className="card-title">Ответы бота</span></div>
+                  <div className="chart-container">
+                    {msgsByRoleData.bot.length > 0 ? <LineChart data={msgsByRoleData.bot} /> : <div className="empty"><div className="empty-text">Нет данных</div></div>}
+                  </div>
+                </div>
+              </div>
+              <div className="card">
+                <div className="card-header"><span className="card-title">Активность по часам</span></div>
+                <div className="heatmap">
+                  {heatData.map((v, i) => (
+                    <div key={i} className="heat-cell" title={i + ':00 · ' + Math.round(v * 100) + '%'}
+                      style={{background: v > 0 ? 'rgba(255,255,255,' + (0.07 + v * 0.55) + ')' : 'var(--ink-30)', cursor: 'help'}} />
+                  ))}
+                </div>
+                <div style={{display: 'flex', justifyContent: 'space-between', marginTop: 6}}>
+                  {[0, 3, 6, 9, 12, 15, 18, 21, 23].map(h => (
+                    <span key={h} style={{fontSize: 9, color: 'var(--t-20)'}}>{h}:00</span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'messages' && (
+            <div className="section-gap">
+              <div className="card">
+                <div className="card-header"><span className="card-title">Все сообщения (user + bot)</span></div>
+                <div className="chart-container" style={{height: 200}}>
+                  {msgsByRoleData.user.length > 0
+                    ? <BarChart data={msgsByRoleData.user.map((d, i) => ({
+                      label: d.label,
+                      value: d.value + (msgsByRoleData.bot[i] ? msgsByRoleData.bot[i].value : 0),
+                    }))} />
+                    : <div className="empty"><div className="empty-text">Нет данных</div></div>}
+                </div>
+              </div>
+              <div className="grid-2">
+                <div className="card">
+                  <div className="card-header"><span className="card-title">Только пользователи</span></div>
+                  <div className="chart-container"><BarChart data={msgsByRoleData.user} /></div>
+                </div>
+                <div className="card">
+                  <div className="card-header"><span className="card-title">Только бот</span></div>
+                  <div className="chart-container"><BarChart data={msgsByRoleData.bot} /></div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'feedback' && (
+            <div className="section-gap">
+              <div className="grid-2">
+                <div className="card">
+                  <div style={{display: 'flex', justifyContent: 'center', marginBottom: 16}}>
+                    <DonutChart value={t.fb_likes || 0} max={t.fb_total || 1} label="позитив" />
+                  </div>
+                  <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8}}>
+                    {[
+                      {label: '👍 Лайков', value: t.fb_likes || 0},
+                      {label: '👎 Дизлайков', value: t.fb_dislikes || 0},
+                      {label: '⏳ Ожидают', value: t.fb_pending || 0},
+                    ].map((s, i) => (
+                      <div key={i} style={{textAlign: 'center', padding: '8px', background: 'var(--ink-20)', borderRadius: 'var(--rad-md)', border: '1px solid var(--line)'}}>
+                        <div style={{fontSize: 16, fontFamily: 'var(--serif)'}}>{numFmt(s.value)}</div>
+                        <div style={{fontSize: 9, color: 'var(--t-40)'}}>{s.label}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="card">
+                  <div className="card-header"><span className="card-title">Лайки по дням</span></div>
+                  <div className="chart-container">
+                    {feedbackLineData.length > 0 ? <BarChart data={feedbackLineData.map(d => ({label: d.label, value: d.value}))} /> : <div className="empty"><div className="empty-text">Нет данных</div></div>}
+                  </div>
+                </div>
+              </div>
+              <div className="card">
+                <div className="card-header"><span className="card-title">Дизлайки по дням</span></div>
+                <div className="chart-container">
+                  {feedbackLineData.length > 0 ? <BarChart data={feedbackLineData.map(d => ({label: d.label, value: d.value2 || 0}))} /> : <div className="empty"><div className="empty-text">Нет данных</div></div>}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'intents' && (
+            <div className="section-gap">
+              <div className="card">
+                <div className="card-header"><span className="card-title">Топ интентов бота</span></div>
+                <div className="chart-container" style={{height: 220}}>
+                  {intentData.length > 0 ? <BarChart data={intentData} /> : <div className="empty"><div className="empty-text">Нет данных</div></div>}
+                </div>
+              </div>
+              <div className="card">
+                <div style={{display: 'flex', flexDirection: 'column', gap: 5}}>
+                  {(analytics && analytics.intent_breakdown || []).slice(0, 15).map((d, i) => {
+                    const max = (analytics.intent_breakdown[0] || {}).count || 1;
+                    return (
+                      <div key={i} style={{display: 'grid', gridTemplateColumns: '220px 1fr 50px', alignItems: 'center', gap: 10}}>
+                        <span style={{fontSize: 10, color: 'var(--t-60)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}} title={d.intent}>{d.intent}</span>
+                        <div className="progress-bar"><div className="progress-fill" style={{width: Math.round(d.count / max * 100) + '%'}} /></div>
+                        <span style={{fontSize: 10, color: 'var(--t-40)', textAlign: 'right', fontFamily: 'var(--mono)'}}>{numFmt(d.count)}</span>
+                      </div>
+                    );
+                  })}
+                  {!(analytics && analytics.intent_breakdown && analytics.intent_breakdown.length) &&
+                    <div className="empty"><div className="empty-text">Нет данных</div></div>}
+                </div>
+              </div>
+              {(analytics && analytics.top_error_queries || []).length > 0 && (
+                <div className="card">
+                  <div className="card-header"><span className="card-title">Топ запросов с ошибками</span></div>
+                  <div style={{display: 'flex', flexDirection: 'column', gap: 6}}>
+                    {analytics.top_error_queries.slice(0, 10).map((q, i) => (
+                      <div key={i} style={{display: 'flex', gap: 10, alignItems: 'center'}}>
+                        <span style={{fontSize: 9, color: 'var(--t-20)', fontFamily: 'var(--mono)', width: 16, textAlign: 'right'}}>{i + 1}</span>
+                        <span style={{fontSize: 11, color: 'var(--t-80)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>{q.query}</span>
+                        <span className="badge badge-dark">{q.count}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'errors' && (
+            <div className="section-gap">
+              <div className="card">
+                <div className="card-header"><span className="card-title">Ошибки по дням</span></div>
+                <div className="chart-container">
+                  {errorsLineData.length > 0 ? <LineChart data={errorsLineData} /> : <div className="empty"><div className="empty-text">Нет данных</div></div>}
+                </div>
+              </div>
+              {errorIntentData.length > 0 && (
+                <div className="card">
+                  <div className="card-header"><span className="card-title">Ошибки по интенту</span></div>
+                  <div className="chart-container"><BarChart data={errorIntentData} /></div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'users' && (
+            <div className="section-gap">
+              <div className="card">
+                <div className="card-header"><span className="card-title">Новые пользователи по дням</span></div>
+                <div className="chart-container" style={{height: 200}}>
+                  {newUsersData.length > 0 ? <BarChart data={newUsersData} /> : <div className="empty"><div className="empty-text">Нет данных</div></div>}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'miniapp' && (
+            <div className="card">
+              <div className="card-header"><span className="card-title">MiniApp — действия за период</span></div>
+              {(analytics && analytics.miniapp_actions || []).length > 0
+                ? (
+                  <>
+                    <div className="chart-container" style={{marginBottom: 16}}>
+                      <BarChart data={(analytics.miniapp_actions || []).slice(0, 12).map(a => ({
+                        label: a.action.replace('miniapp.', '').slice(0, 16),
+                        value: a.count,
+                      }))} />
+                    </div>
+                    <div style={{display: 'flex', flexDirection: 'column', gap: 5}}>
+                      {(analytics.miniapp_actions || []).map((a, i) => {
+                        const max = analytics.miniapp_actions[0].count || 1;
+                        return (
+                          <div key={i} style={{display: 'grid', gridTemplateColumns: '220px 1fr 50px', alignItems: 'center', gap: 10}}>
+                            <span style={{fontSize: 10, color: 'var(--t-60)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}>
+                              {a.action.replace('miniapp.', '')}
+                            </span>
+                            <div className="progress-bar"><div className="progress-fill" style={{width: Math.round(a.count / max * 100) + '%'}} /></div>
+                            <span style={{fontSize: 10, color: 'var(--t-40)', textAlign: 'right', fontFamily: 'var(--mono)'}}>{numFmt(a.count)}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </>
+                )
+                : <div className="empty"><div className="empty-icon">📱</div><div className="empty-text">Нет данных за период</div></div>
+              }
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════
+    //  SIDEBAR
+    // ═══════════════════════════════════════
+    const NAV_ITEMS = [
+      {group: 'Обзор', items: [{id: 'overview', label: 'Обзор', icon: Icon.overview}]},
+      {
+        group: 'Пользователи', items: [
+          {id: 'users', label: 'Пользователи', icon: Icon.users},
+          {id: 'roles', label: 'Роли', icon: Icon.roles},
+        ]
+      },
+      {
+        group: 'Коммуникации', items: [
+          {id: 'allchats', label: 'Все чаты', icon: Icon.allchats},
+          {id: 'chat', label: 'Рассылка', icon: Icon.broadcast},
+          {id: 'support', label: 'Поддержка', icon: Icon.support},
+          {id: 'feedback', label: 'Аналитика', icon: Icon.feedback},
+        ]
+      },
+      {
+        group: 'Система', items: [
+          {id: 'activity', label: 'Активность', icon: Icon.activity},
+          {id: 'errors', label: 'Ошибки', icon: Icon.errors},
+          {id: 'mongo', label: 'MongoDB', icon: Icon.mongo},
+          {id: 'settings', label: 'Настройки', icon: Icon.settings},
+        ]
+      },
+    ];
+
+    const PANEL_TITLES = {
+      overview: 'Обзор системы',
+      users: 'Пользователи',
+      roles: 'Роли и права',
+      allchats: 'Все чаты',
+      chat: 'Рассылка',
+      support: 'Поддержка',
+      feedback: 'Аналитика & Отзывы',
+      activity: 'Журнал активности',
+      errors: 'Журнал ошибок',
+      mongo: 'MongoDB Viewer',
+      settings: 'Настройки системы',
+    };
+
+    function Sidebar({active, onNav, user, onLogout}) {
+      return (
+        <div className="sidebar">
+          <div className="sidebar-logo">
+            <div className="sidebar-logo-title">NCFU</div>
+            <div className="sidebar-logo-sub">Admin · Control</div>
+          </div>
+          <nav className="sidebar-nav">
+            {NAV_ITEMS.map(group => (
+              <div key={group.group}>
+                <div className="nav-group-label">{group.group}</div>
+                {group.items.map(item => (
+                  <button key={item.id}
+                    className={'nav-item' + (active === item.id ? ' active' : '')}
+                    onClick={() => onNav(item.id)}>
+                    <span className="nav-item-icon"><item.icon /></span>
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </nav>
+          <div className="sidebar-footer">
+            <div className="sidebar-user">
+              <UserAvatar user={user} size={26} />
+              <div className="sidebar-user-name">{user.display || user.first_name}</div>
+              <button className="btn btn-ghost btn-icon" onClick={onLogout} title="Выйти" style={{padding: 3}}>
+                <Icon.logout />
+              </button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════
+    //  ROOT APP
+    // ═══════════════════════════════════════
+    function App() {
+      const [user, setUser] = useState(null);
+      const [panel, setPanel] = useState('overview');
+      const [refreshKey, setRefreshKey] = useState(0);
+      const [refreshing, setRefreshing] = useState(false);
+
+      // Auto-login from stored token
+      useEffect(() => {
+        const storedTok = localStorage.getItem('adm_tok');
+        const bootstrapTok = window.__BOOTSTRAP_TOKEN__;
+        const tok = bootstrapTok || storedTok;
+        if (!tok) return;
+        TOK = tok;
+        api('/dashboard/api/me', {}, tok)
+          .then(r => {
+            if (r && r.user && r.user.roles && r.user.roles.includes('admin')) {
+              localStorage.setItem('adm_tok', tok);
+              setUser(r.user);
+            } else {
+              TOK = '';
+              localStorage.removeItem('adm_tok');
+            }
+          })
+          .catch(() => {TOK = ''; localStorage.removeItem('adm_tok');});
+      }, []);
+
+      function handleLogin(u) {setUser(u);}
+
+      function handleLogout() {
+        TOK = '';
+        localStorage.removeItem('adm_tok');
+        setUser(null);
+      }
+
+      async function handleRefresh() {
+        setRefreshing(true);
+        try {
+          await api('/dashboard/api/admin/cache/invalidate', {method: 'POST'});
+          toast.ok('Кэш сброшен');
+        } catch (e) { /* ignore */}
+        setRefreshKey(k => k + 1);
+        setRefreshing(false);
+      }
+
+      function renderPanel() {
+        const key = panel + '-' + refreshKey;
+        switch (panel) {
+          case 'overview': return <PanelOverview key={key} />;
+          case 'users': return <PanelUsers key={key} />;
+          case 'roles': return <PanelRoles key={key} />;
+          case 'allchats': return <PanelAllChats key={key} />;
+          case 'chat': return <PanelBroadcast key={key} />;
+          case 'support': return <PanelSupport key={key} />;
+          case 'feedback': return <PanelFeedback key={key} />;
+          case 'activity': return <PanelActivity key={key} />;
+          case 'errors': return <PanelErrors key={key} />;
+          case 'mongo': return <PanelMongo key={key} />;
+          case 'settings': return <PanelSettings key={key} />;
+          default: return null;
+        }
+      }
+
+      if (!user) return <AuthGate onLogin={handleLogin} />;
+
+      return (
+        <div className="layout">
+          <Sidebar active={panel} onNav={setPanel} user={user} onLogout={handleLogout} />
+          <div className="main">
+            <div className="topbar">
+              <div className="topbar-title">{PANEL_TITLES[panel] || panel}</div>
+              <div className="topbar-actions">
+                <button className="btn btn-ghost" onClick={handleRefresh} disabled={refreshing} title="Обновить">
+                  {refreshing
+                    ? <span style={{display: 'flex', alignItems: 'center', gap: 5}}><Spinner /> Обновление...</span>
+                    : <span style={{display: 'flex', alignItems: 'center', gap: 5}}><Icon.refresh /> Обновить</span>
+                  }
+                </button>
+              </div>
+            </div>
+            <div className="content">{renderPanel()}</div>
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+
+</html>
