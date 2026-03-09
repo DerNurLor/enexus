@@ -1454,7 +1454,7 @@
     .detail-panel {
       position: fixed;
       right: 0;
-      top: 0;
+      top: var(--header-h);
       bottom: 0;
       width: 420px;
       background: var(--ink-10);
@@ -2474,9 +2474,13 @@
       const [detail, setDetail] = useState(null);
       const [saving, setSaving] = useState(false);
       const [roles, setRoles] = useState((user.roles || []).join(', '));
+      const [dailyLimit, setDailyLimit] = useState(String(user.daily_requests ?? ''));
+      const [savingLimit, setSavingLimit] = useState(false);
 
       useEffect(() => {
         api('/dashboard/api/admin/users/' + user.id).then(setDetail).catch(() => { });
+        setRoles((user.roles || []).join(', '));
+        setDailyLimit(String(user.daily_requests ?? ''));
       }, [user.id]);
 
       async function saveRoles() {
@@ -2491,6 +2495,20 @@
           toast.ok('Роли обновлены');
         } catch (e) {toast.err(e.message);}
         setSaving(false);
+      }
+
+      async function saveDailyLimit() {
+        setSavingLimit(true);
+        try {
+          const val = dailyLimit.trim() === '' ? null : parseInt(dailyLimit, 10);
+          const updated = await api('/dashboard/api/admin/users/' + user.id, {
+            method: 'PATCH',
+            body: JSON.stringify({daily_requests: val}),
+          });
+          onUpdate(updated);
+          toast.ok('Лимит обновлён');
+        } catch (e) {toast.err(e.message);}
+        setSavingLimit(false);
       }
 
       async function revokeAllKeys() {
@@ -2529,6 +2547,22 @@
             </div>
             <button className="btn btn-ghost w-full" onClick={saveRoles} disabled={saving}>
               {saving ? <span style={{display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center'}}><Spinner /> Сохранение...</span> : '✓ Сохранить роли'}
+            </button>
+            <hr className="divider" />
+            <div className="input-group" style={{marginBottom: 12}}>
+              <div className="input-label">Лимит запросов в день (0 = без лимита)</div>
+              <input
+                className="input"
+                type="number"
+                min="0"
+                max="100000"
+                placeholder="Не задан (глобальный лимит)"
+                value={dailyLimit}
+                onChange={e => setDailyLimit(e.target.value)}
+              />
+            </div>
+            <button className="btn btn-ghost w-full" onClick={saveDailyLimit} disabled={savingLimit}>
+              {savingLimit ? <span style={{display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center'}}><Spinner /> Сохранение...</span> : '✓ Сохранить лимит'}
             </button>
             <hr className="divider" />
             <div style={{display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 14}}>
