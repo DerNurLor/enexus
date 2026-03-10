@@ -2,13 +2,11 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { CalendarDays, Map, Newspaper, User, GraduationCap } from 'lucide-react'
+import { CalendarDays, User, GraduationCap } from 'lucide-react'
 import clsx from 'clsx'
 
 const NAV_ITEMS = [
   { href: '/schedule', label: 'Расписание', icon: CalendarDays },
-  { href: '/map',      label: 'Карта',      icon: Map },
-  { href: '/news',     label: 'Новости',    icon: Newspaper },
   { href: '/profile',  label: 'Профиль',    icon: User },
 ]
 
@@ -16,19 +14,11 @@ export function DesktopSidebar() {
   const pathname = usePathname()
 
   return (
-    <aside
-      className="fixed left-0 top-0 bottom-0 w-64 z-50 flex flex-col"
-      style={{
-        background: 'var(--surface)',
-        borderRight: '1px solid var(--border)',
-      }}
-    >
-      {/* Logo */}
+    <aside className="fixed left-0 top-0 bottom-0 w-64 z-50 flex flex-col"
+      style={{ background: 'var(--surface)', borderRight: '1px solid var(--border)' }}>
       <div className="p-6 flex items-center gap-3" style={{ borderBottom: '1px solid var(--border)' }}>
-        <div
-          className="w-9 h-9 rounded-xl flex items-center justify-center"
-          style={{ background: 'var(--cyan-dim)', border: '1px solid rgba(92,225,230,0.3)' }}
-        >
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center"
+          style={{ background: 'var(--cyan-dim)', border: '1px solid rgba(92,225,230,0.3)' }}>
           <GraduationCap size={18} style={{ color: 'var(--cyan)' }} />
         </div>
         <div>
@@ -37,27 +27,15 @@ export function DesktopSidebar() {
         </div>
       </div>
 
-      {/* Nav items */}
       <nav className="flex-1 p-3 flex flex-col gap-1">
         {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || pathname.startsWith(href + '/')
           return (
-            <Link
-              key={href}
-              href={href}
-              className={clsx(
-                'flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200',
-                active
-                  ? 'text-black'
-                  : 'hover:bg-white/5'
-              )}
-              style={active ? {
-                background: 'var(--cyan)',
-                color: '#000',
-              } : {
-                color: 'var(--t-secondary)',
-              }}
-            >
+            <Link key={href} href={href}
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200"
+              style={active
+                ? { background: 'var(--cyan)', color: '#000' }
+                : { color: 'var(--t-secondary)' }}>
               <Icon size={18} strokeWidth={active ? 2.5 : 1.8} />
               {label}
             </Link>
@@ -65,11 +43,8 @@ export function DesktopSidebar() {
         })}
       </nav>
 
-      {/* Footer */}
       <div className="p-4" style={{ borderTop: '1px solid var(--border)' }}>
-        <div className="text-[10px] text-center" style={{ color: 'var(--t-muted)' }}>
-          © 2026 НЦФУ
-        </div>
+        <div className="text-[10px] text-center" style={{ color: 'var(--t-muted)' }}>© 2026 НЦФУ</div>
       </div>
     </aside>
   )

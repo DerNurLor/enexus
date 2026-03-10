@@ -1,16 +1,17 @@
 import { MapPin, User } from 'lucide-react'
-import clsx from 'clsx'
 
 export type LessonType = 'lab' | 'lecture' | 'seminar' | 'practice'
 
-export interface Lesson {
-  id: string
-  subject: string
-  type: LessonType
-  teacher: string
-  room: string
+export interface LessonCardData {
+  id:        string
+  subject:   string
+  type:      LessonType
+  teacher:   string
+  room:      string
   timeStart: string
-  timeEnd: string
+  timeEnd:   string
+  subgroup?: string
+  note?:     string
 }
 
 const TYPE_CONFIG: Record<LessonType, { label: string; color: string; bg: string }> = {
@@ -20,14 +21,12 @@ const TYPE_CONFIG: Record<LessonType, { label: string; color: string; bg: string
   practice: { label: 'Практика', color: '#a78bfa', bg: 'rgba(167,139,250,0.12)' },
 }
 
-export function LessonCard({ lesson }: { lesson: Lesson }) {
+export function LessonCard({ lesson }: { lesson: LessonCardData }) {
   const cfg = TYPE_CONFIG[lesson.type]
 
   return (
-    <div
-      className="card flex gap-0 overflow-hidden"
-      style={{ borderLeft: `3px solid ${cfg.color}` }}
-    >
+    <div className="card flex gap-0 overflow-hidden"
+      style={{ borderLeft: `3px solid ${cfg.color}` }}>
       {/* Time */}
       <div className="flex flex-col justify-center px-4 py-4 min-w-[72px]">
         <span className="text-sm font-bold tabular-nums" style={{ color: 'var(--t-primary)' }}>
@@ -44,13 +43,18 @@ export function LessonCard({ lesson }: { lesson: Lesson }) {
       {/* Content */}
       <div className="flex-1 px-4 py-4 min-w-0">
         <div className="flex items-start justify-between gap-2 mb-2">
-          <span className="text-sm font-semibold leading-tight" style={{ color: 'var(--t-primary)' }}>
-            {lesson.subject}
-          </span>
-          <span
-            className="text-[10px] font-semibold px-2 py-0.5 rounded-md whitespace-nowrap flex-shrink-0"
-            style={{ color: cfg.color, background: cfg.bg }}
-          >
+          <div className="flex-1 min-w-0">
+            <span className="text-sm font-semibold leading-tight" style={{ color: 'var(--t-primary)' }}>
+              {lesson.subject}
+            </span>
+            {lesson.subgroup && (
+              <span className="ml-2 text-[10px]" style={{ color: 'var(--t-muted)' }}>
+                {lesson.subgroup}
+              </span>
+            )}
+          </div>
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-md whitespace-nowrap flex-shrink-0"
+            style={{ color: cfg.color, background: cfg.bg }}>
             {cfg.label}
           </span>
         </div>
@@ -64,6 +68,9 @@ export function LessonCard({ lesson }: { lesson: Lesson }) {
             <span className="text-xs" style={{ color: 'var(--t-secondary)' }}>{lesson.room}</span>
           </div>
         </div>
+        {lesson.note && (
+          <div className="mt-1.5 text-xs" style={{ color: 'var(--t-muted)' }}>{lesson.note}</div>
+        )}
       </div>
     </div>
   )
