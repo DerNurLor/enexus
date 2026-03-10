@@ -2,11 +2,11 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { CalendarDays, User } from 'lucide-react'
-import clsx from 'clsx'
+import { CalendarDays, User, DoorOpen } from 'lucide-react'
 
 const NAV_ITEMS = [
   { href: '/schedule', label: 'Расписание', icon: CalendarDays },
+  { href: '/rooms',    label: 'Аудитории',  icon: DoorOpen },
   { href: '/profile',  label: 'Профиль',    icon: User },
 ]
 
@@ -26,7 +26,7 @@ export function MobileNav() {
         {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || pathname.startsWith(href + '/')
           return (
-            <Link key={href} href={href} className="nav-btn" style={{ minWidth: 80 }}>
+            <Link key={href} href={href} className="nav-btn" style={{ minWidth: 72 }}>
               <Icon size={22} strokeWidth={active ? 2.5 : 1.8}
                 style={{ color: active ? 'var(--cyan)' : 'var(--t-muted)', transition: 'color 0.2s' }} />
               <span className="text-[10px] font-medium tracking-wide"

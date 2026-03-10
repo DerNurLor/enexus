@@ -1,7 +1,7 @@
 const BASE = (process.env.NEXT_PUBLIC_API_URL || '') + '/api'
 
 async function get<T>(path: string, params?: Record<string, string | number>): Promise<T> {
-  const url = new URL(`${BASE}${path}`)
+  const url = new URL(`${BASE}${path}`, typeof window !== 'undefined' ? window.location.origin : 'http://localhost')
   if (params) {
     Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)))
   }
@@ -30,4 +30,29 @@ export const api = {
 
   getRoomDay: (roomId: number, date: string) =>
     get<import('./types').DayResponse>(`/schedules/room/${roomId}/day`, { day: date }),
+
+  // Week schedules
+  getGroupWeek: (groupId: number, week: number) =>
+    get<import('./types').WeekResponse>(`/schedules/group/${groupId}/week`, { week }),
+
+  getTeacherWeek: (teacherId: number, week: number) =>
+    get<import('./types').WeekResponse>(`/teachers/${teacherId}/week`, { week }),
+
+  getRoomWeek: (roomId: number, week: number) =>
+    get<import('./types').WeekResponse>(`/rooms/${roomId}/week`, { week }),
+
+  // Free rooms
+  getFreeRooms: (at: string, duration?: number, building?: string) => {
+    const params: Record<string, string | number> = { at, duration: duration ?? 90 }
+    if (building) params.building = building
+    return get<import('./types').FreeRoomsResponse>('/rooms/free', params)
+  },
+
+  // Institutes with buildings
+  getInstitutesWithBuildings: () =>
+    get<{ institutes: import('./types').InstituteMeta[]; all_buildings: string[] }>('/institutes/with-buildings'),
+
+  getBuildings: () =>
+    get<{ buildings: string[] }>('/rooms/buildings-list'),
 }
+
