@@ -1,844 +1,764 @@
 """
-/api/v1/search — Flexible search across all entities and schedules.
+Aiogram router — registers all message/command handlers.
 
-Endpoints:
-  GET /search/                       — universal search across groups/teachers/rooms
-  GET /search/teachers               — rich teacher search
-  GET /search/rooms                  — rich room search
-  GET /search/groups                 — rich group search
-  GET /search/lessons                — search lessons by subject/type/teacher/room across all entities
-  GET /search/now                    — what's happening right now (all entity types)
-  GET /search/at                     — what's happening at a specific datetime
-  GET /search/day                    — full schedule for all entities on a date
-  GET /search/week                   — full schedule for all entities in a week
-  GET /search/range                  — schedule in a date range
-  GET /search/next                   — next upcoming lesson(s) for a teacher/room/group
-  GET /search/free-rooms             — rooms with no lessons at a given time
-  GET /search/teacher-groups         — which groups does a teacher teach (with schedule)
-  GET /search/conflicts              — find scheduling conflicts (same teacher/room at same time)
+Every message type (text, photo, video, animation, sticker, voice,
+video_note, audio, document) is stored to the conversations collection
+via store_message().  This is done inside a dedicated catch-all
+handler so media-only messages (no caption text) are still persisted
+even if they don't trigger the AI handler.
 """
+from __future__ import annotations
 
-from fastapi import APIRouter, Query, HTTPException
-from datetime import date as date_type, datetime, time as time_type, timedelta
-from typing import Optional
-from loguru import logger
+import asyncio
 
-from app.models.group import Group, Lesson
-from app.models.teacher import Teacher
-from app.models.room import Room
+from aiogram import Router, F
+from aiogram.filters import CommandStart, Command
+from aiogram.types import (BotCommand, ChatMemberUpdated,
+    InlineKeyboardMarkup, InlineKeyboardButton, WebAppInfo,
+    Message as TelegramMessage, CallbackQuery)
+from aiogram.filters.chat_member_updated import ChatMemberUpdatedFilter, MEMBER, ADMINISTRATOR, CREATOR
+from app.core.config import settings
+from app.models.conversation import Message as MessageModel
 
-router = APIRouter(prefix="/search", tags=["Search"])
+from app.bot.handlers.ai_handler import handle_message
+from app.bot.handlers.commands  import cmd_roles, cmd_miniapp, cmd_limit
+from app.bot.message_store import store_message, store_callback_choice, store_bot_reply, _entities_to_html
+from datetime import datetime, timezone
+import logging
+
+router = Router(name="ncfu_bot")
+logger = logging.getLogger(__name__)
 
 
-# ── Shared helpers ────────────────────────────────────────────────────────────
+# ── Bot added to a group — send welcome message ────────────────────────────────
 
-def _parse_time(s: str) -> time_type:
-    """Parse HH:MM string into time object."""
-    h, m = s.split(":")
-    return time_type(int(h), int(m))
-
-
-def _lesson_active_at(lesson: dict, check_time: time_type) -> bool:
+@router.my_chat_member(ChatMemberUpdatedFilter(member_status_changed=MEMBER | ADMINISTRATOR | CREATOR))
+async def bot_added_to_group(event: ChatMemberUpdated) -> None:
+    """Greet the group when the bot is added, explain commands and show Mini App button."""
+    if event.chat.type not in ('group', 'supergroup'):
+        return
     try:
-        return _parse_time(lesson["time_start"]) <= check_time <= _parse_time(lesson["time_end"])
-    except Exception:
+        chat    = event.chat
+        inviter = event.from_user
+
+        # ── Reset group quota so re-invited bot starts with a fresh counter ──
+        try:
+            from app.cache.redis import get_redis
+            r = get_redis()
+            await r.delete(f'quota:{chat.id}')
+        except Exception as _re:
+            logger.warning(f'quota reset on group add failed: {_re}')
+
+        # ── Upsert ChatSettings with the group's real title/username ─────────
+        try:
+            from app.bot.message_store import _upsert_chat_meta
+            await _upsert_chat_meta(
+                chat_id=chat.id,
+                chat_key=f'{chat.id}:0',
+                chat_type=str(chat.type),
+                title=chat.title,
+                username=getattr(chat, 'username', None),  # group @username only
+            )
+        except Exception as _ce:
+            logger.warning(f'chat meta upsert on add failed: {_ce}')
+
+        # ── Upsert inviter's AuthUser profile ─────────────────────────────────
+        if inviter:
+            try:
+                from app.bot.handlers.ai_handler import _upsert_user
+                await _upsert_user(inviter)
+            except Exception as _ue:
+                logger.warning(f'user upsert on group add failed: {_ue}')
+
+        bot_username = (await event.bot.get_me()).username
+        miniapp_url  = f"{settings.webhook_base_url}/miniapp"
+        kb = InlineKeyboardMarkup(inline_keyboard=[[
+            InlineKeyboardButton(text="📅 Открыть расписание", web_app=WebAppInfo(url=miniapp_url))
+        ]])
+        chat_title = chat.title or "эту группу"
+        await event.bot.send_message(
+            chat_id=chat.id,
+            text=(
+                f"👋 Привет! Рад присоединиться к <b>{chat_title}</b>!\n\n"
+                "📌 <b>Что я умею:</b>\n"
+                "  • Расписание группы, преподавателя, аудитории\n"
+                "  • Свободные аудитории прямо сейчас\n"
+                "  • Поиск по преподавателям и группам\n\n"
+                "💬 <b>Как обращаться:</b>\n"
+                f"  Упомяните меня: <code>@{bot_username} расписание ИСС-б-о-22-3</code>\n"
+                "  Или используйте команды:\n"
+                "  /help — все возможности\n"
+                "  /miniapp — расписание в приложении 📅\n\n"
+                "🔕 <i>Я не слежу за общим чатом — отвечаю только на упоминания и команды.</i>"
+            ),
+            parse_mode="HTML",
+            reply_markup=kb,
+        )
+    except Exception as exc:
+        logger.warning(f"bot_added_to_group welcome failed: {exc}")
+
+
+# ── /start ─────────────────────────────────────────────────────────────────────
+
+@router.message(CommandStart())
+async def cmd_start(message: TelegramMessage) -> None:
+    from app.bot.handlers.commands import _get_or_create_user
+    if message.from_user:
+        await _get_or_create_user(message.from_user)
+    # Сохраняем входящее сообщение пользователя (/start)
+    asyncio.ensure_future(store_message(message, role="user"))
+
+    sent = await message.answer(
+        "👋 Привет! Я бот расписания СКФУ.\n\n"
+            "Спрашивай на естественном русском языке:\n"
+            "  • <i>Расписание ИСС-б-о-22-3 на эту неделю</i>\n"
+            "  • <i>Где пара через 5 минут у Подзолко?</i>\n"
+            "  • <i>Свободные аудитории в корпусе 11</i>\n"
+            "  • <i>Что сейчас у группы АИС-б-о-25-1?</i>\n\n"
+            "📋 <b>Команды:</b>\n"
+            "  /help    — полная справка по возможностям\n"
+            "  /miniapp — расписание в приложении 📅\n"
+            "  /limit   — ваш лимит запросов\n"
+            "  /roles   — ваши роли и привилегии\n"
+            "  /support — написать в поддержку\n"
+            "  /suggest — предложить улучшение\n"
+            "  /about   — о боте",
+        parse_mode="HTML",
+    )
+    # Сохраняем ответ бота — Telegram не присылает Update на исходящие сообщения
+    asyncio.ensure_future(store_message(sent, role="bot"))
+
+
+# ── /help ──────────────────────────────────────────────────────────────────────
+
+@router.message(Command("help"))
+async def cmd_help(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message, role="user"))
+    sent = await message.answer(
+        "📖 <b>Справка по боту расписания СКФУ</b>\n\n"
+            "Просто напиши запрос на естественном языке:\n\n"
+            "📅 <b>Расписание группы:</b>\n"
+            "  <i>Расписание ИСС-б-о-22-3</i>\n"
+            "  <i>Что у группы АИС25 завтра?</i>\n"
+            "  <i>Пары на эту неделю у группы МАТ-22</i>\n\n"
+            "👤 <b>Преподаватель:</b>\n"
+            "  <i>Где Подзолко сейчас?</i>\n"
+            "  <i>Расписание Иванова на завтра</i>\n\n"
+            "🚪 <b>Аудитории:</b>\n"
+            "  <i>Свободные аудитории прямо сейчас</i>\n"
+            "  <i>Что сейчас в аудитории 305 корпуса 2?</i>\n"
+            "  <i>Свободные аудитории в корпусе 11 с 14:00</i>\n\n"
+            "🔍 <b>Поиск:</b>\n"
+            "  <i>Найди группу ИСС</i>  ·  <i>Найди Петрова</i>\n\n"
+            "📋 <b>Команды:</b>\n"
+            "  /miniapp — открыть расписание в приложении 📅\n"
+            "  /limit   — узнать остаток лимита запросов\n"
+            "  /roles   — ваши роли и права доступа\n"
+            "  /support — написать в поддержку\n"
+            "  /suggest — предложить идею или улучшение\n"
+            "  /about   — информация о боте\n"
+            "  /start   — начало работы\n"
+            "  /help    — эта справка\n\n"
+            "💡 <i>В группах обращайтесь к боту через упоминание: @botname запрос</i>",
+        parse_mode="HTML",
+    )
+    asyncio.ensure_future(store_message(sent, role="bot"))
+
+
+# ── Other commands ─────────────────────────────────────────────────────────────
+
+@router.message(Command("mykey"))
+async def handle_mykey(message: TelegramMessage) -> None:
+    # /mykey is disabled
+    await message.answer("Команда /mykey отключена.")
+
+
+@router.message(Command("roles"))
+async def handle_roles(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message, role="user"))
+    sent = await cmd_roles(message)
+    if sent:
+        asyncio.ensure_future(store_message(sent, role="bot"))
+
+
+@router.message(Command("miniapp"))
+async def handle_miniapp(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message, role="user"))
+    sent = await cmd_miniapp(message)
+    if sent:
+        asyncio.ensure_future(store_message(sent, role="bot"))
+
+
+@router.message(Command("limit"))
+async def handle_limit(message: TelegramMessage) -> None:
+    await cmd_limit(message)
+
+
+@router.message(F.chat.type.in_({'group', 'supergroup'}))
+async def handle_group_message(message: TelegramMessage) -> None:
+    """
+    Store every group message, but only respond when the bot is
+    explicitly addressed — via mention, reply-to-bot, or a command.
+    This avoids the bot flooding active group chats with unsolicited answers.
+    """
+    asyncio.ensure_future(store_message(message, role='user'))
+    if message.from_user:
+        from app.bot.handlers.ai_handler import _upsert_user
+        asyncio.ensure_future(_upsert_user(message.from_user))
+
+    text = message.text or message.caption or ''
+    if not text.strip():
+        return   # media-only with no caption — just store, never respond
+
+    # Lazy-fetch bot username once per process
+    bot_me = await message.bot.get_me()
+    bot_username = (bot_me.username or '').lower()
+
+    def _is_addressed() -> bool:
+        t = text.lower()
+        # 1. Direct command (/help, /start, /help@botname)
+        if t.startswith('/'):
+            return True
+        # 2. @mention anywhere in message
+        if bot_username and f'@{bot_username}' in t:
+            return True
+        # 3. Reply to a bot message
+        if message.reply_to_message and message.reply_to_message.from_user:
+            if message.reply_to_message.from_user.id == bot_me.id:
+                return True
+        # 4. Entity-based mention (catches @BotName even mid-sentence)
+        for ent in (message.entities or message.caption_entities or []):
+            if ent.type.value in ('mention', 'bot_command'):
+                chunk = text[ent.offset: ent.offset + ent.length].lower()
+                if bot_username and bot_username in chunk:
+                    return True
+                if ent.type.value == 'bot_command':
+                    return True   # any /command in group is addressed to bot
         return False
 
+    if _is_addressed():
+        # Strip the bot mention from text so the AI gets clean input
+        clean_text = text.replace(f'@{bot_me.username}', '').strip() if bot_me.username else text
+        if clean_text:
+            message._text_override = clean_text  # noqa: used by handle_message below
+        await handle_message(message)
 
-def _lesson_starts_after(lesson: dict, after_time: time_type) -> bool:
+@router.channel_post()
+async def handle_channel_post(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message, role='channel'))
+
+@router.edited_message()
+async def handle_edited(message: TelegramMessage) -> None:
+    # Обновить текст существующего документа вместо создания нового
+    asyncio.ensure_future(_update_edited_message(message))
+
+# В message_store.py — обновление отредактированного сообщения
+async def _update_edited_message(msg: TelegramMessage) -> None:
     try:
-        return _parse_time(lesson["time_start"]) >= after_time
+        doc = await MessageModel.find_one(
+            MessageModel.chat_id == msg.chat.id,
+            MessageModel.message_id == msg.message_id
+        )
+        if doc:
+            doc.text = msg.text or msg.caption or ''
+            doc.html_text = _entities_to_html(
+                doc.text, msg.entities or [])
+            doc.edited_at = datetime.utcnow()
+            await doc.save()
+    except Exception as exc:
+        logger.warning(f'_update_edited_message failed: {exc}')
+
+
+# ── Inline keyboard callback — page navigation ─────────────────────────────────
+
+@router.callback_query(F.data.startswith("pg:"))
+async def cb_page_nav(cb: CallbackQuery) -> None:
+    """Handle ◀/▶ buttons for paged schedule responses."""
+    await cb.answer()
+    # callback_data format: "pg:{page_key}:{idx}:{total}"
+    # page_key itself contains colons (e.g. "bot:pages:123:abc"), so we can't
+    # naively split on ":" — instead strip the "pg:" prefix then rsplit from the right.
+    data = cb.data[3:]  # strip leading "pg:"
+    try:
+        rest, total_str = data.rsplit(":", 1)
+        page_key, idx_str = rest.rsplit(":", 1)
+        idx   = int(idx_str)
+        total = int(total_str)
+    except (ValueError, AttributeError):
+        return
+
+    from app.bot.handlers.ai_handler import _load_pages, _make_nav_kb, _add_feedback_row
+    pages = await _load_pages(page_key)
+    if not pages:
+        await cb.message.edit_text("⏱ Данные устарели. Повторите запрос.", reply_markup=None)
+        return
+
+    idx = max(0, min(idx, len(pages) - 1))
+    kb  = _make_nav_kb(page_key, idx, len(pages))
+
+    # Re-attach feedback row if it was present before (check existing kb)
+    current_kb = cb.message.reply_markup
+    has_feedback = current_kb and any(
+        any(btn.callback_data and btn.callback_data.startswith("fb:") for btn in row)
+        for row in (current_kb.inline_keyboard or [])
+    )
+    if has_feedback:
+        kb = _add_feedback_row(kb, cb.message.chat.id, cb.message.message_id)
+
+    text = pages[idx] + f"\n\n<i>День {idx+1} из {len(pages)}</i>"
+    try:
+        await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
     except Exception:
-        return False
+        pass  # message unchanged — ignore
 
 
-def _day_data_to_dict(day_data) -> dict:
-    """DaySchedule model or plain dict → plain dict with lessons as list of dicts."""
-    if hasattr(day_data, "model_dump"):
-        return day_data.model_dump()
-    return day_data
+@router.callback_query(F.data == "pg_noop")
+async def cb_noop(cb: CallbackQuery) -> None:
+    await cb.answer()
 
 
-def _lesson_to_dict(lesson) -> dict:
-    if hasattr(lesson, "model_dump"):
-        return lesson.model_dump()
-    return lesson
-
-
-def _iter_schedule(schedule: dict):
-    """Yield (iso_date_str, day_dict) from any schedule dict."""
-    for iso, day in schedule.items():
-        yield iso, _day_data_to_dict(day)
-
-
-def _matches_lesson_filters(
-    lesson: dict,
-    subject: Optional[str],
-    lesson_type: Optional[str],
-    teacher_name: Optional[str],
-    room_name: Optional[str],
-) -> bool:
-    if subject and subject.lower() not in (lesson.get("subject") or "").lower():
-        return False
-    if lesson_type and lesson_type.lower() not in (lesson.get("lesson_type") or "").lower():
-        return False
-    if teacher_name and teacher_name.lower() not in (lesson.get("teacher_name") or "").lower():
-        return False
-    if room_name and room_name.lower() not in (lesson.get("classroom") or "").lower():
-        return False
-    return True
-
-
-# ── 1. Universal search ───────────────────────────────────────────────────────
-
-@router.get("/", summary="Universal search across groups, teachers, and rooms")
-async def universal_search(
-    q: str = Query(..., min_length=1, description="Search query"),
-    limit: int = Query(20, ge=1, le=100),
-):
+@router.callback_query(F.data.startswith("dis:"))
+async def cb_disambig(cb: CallbackQuery) -> None:
     """
-    Search all entity types simultaneously.
-    Returns matched groups, teachers, and rooms in one response.
+    Handle group/room disambiguation button press.
+    callback_data: "dis:{redis_key}:{item_id}"
     """
-    regex = {"$regex": q, "$options": "i"}
+    await cb.answer()
+    try:
+        # callback_data: "dis:{redis_key}:{item_id}"
+        # redis_key contains colons, so we must split from the RIGHT.
+        after_prefix = cb.data[4:]   # strip "dis:"
+        key, id_str  = after_prefix.rsplit(":", 1)
+        # id_str should be a plain integer (group_id or room_id).
+        # Guard against accidental "None" strings if a candidate had a null id.
+        if not id_str or id_str == "None":
+            raise ValueError(f"invalid item_id: {id_str!r}")
+        item_id = int(id_str)
+    except (ValueError, AttributeError) as _parse_err:
+        logger.warning(f"cb_disambig parse error: {_parse_err!r}  data={cb.data!r}")
+        await cb.message.edit_text("⚠️ Устаревшая кнопка. Повторите запрос.")
+        return
 
-    groups = await Group.find({"name": regex}).limit(limit).to_list()
-    teachers = await Teacher.find({"$or": [
-        {"full_name": regex},
-        {"subjects": regex},
-    ]}).limit(limit).to_list()
-    rooms = await Room.find({"$or": [
-        {"name": regex},
-        {"building": regex},
-    ]}).limit(limit).to_list()
+    from app.bot.handlers.ai_handler import (
+        _load_disambig, _gql, _GQL_GROUP_SCHEDULE, _GQL_LESSONS_DAY, _GQL_ROOM_SCHEDULE,
+        _fmt_days_paged, _fmt_now, _make_nav_kb, _add_feedback_row,
+        _store_pages, _page_key, _resolve_time, _now_moscow, TimeRef,
+    )
+    import json as _json
 
-    return {
-        "query": q,
-        "results": {
-            "groups": [
-                {"group_id": g.group_id, "name": g.name, "institute_name": g.institute_name,
-                 "speciality_name": g.speciality_name, "course": g.course}
-                for g in groups
-            ],
-            "teachers": [
-                {"teacher_id": t.teacher_id, "full_name": t.full_name,
-                 "subjects": t.subjects[:5], "institute_names": t.institute_names}
-                for t in teachers
-            ],
-            "rooms": [
-                {"room_id": r.room_id, "name": r.name, "building": r.building,
-                 "subjects": r.subjects[:5]}
-                for r in rooms
-            ],
-        },
-        "counts": {
-            "groups": len(groups),
-            "teachers": len(teachers),
-            "rooms": len(rooms),
-        }
-    }
+    payload = await _load_disambig(key)
+    if payload is None:
+        await cb.message.edit_text("⏱ Время выбора истекло. Повторите запрос.")
+        return
 
+    intent_type = payload["intent_type"]
+    params      = payload["params"]
+    candidates  = payload.get("candidates", [])
 
-# ── 2. Teacher search ─────────────────────────────────────────────────────────
+    # Identify the user who pressed the button
+    user_tg_id = cb.from_user.id if cb.from_user else 0
 
-@router.get("/teachers", summary="Search teachers with rich filters")
-async def search_teachers(
-    q:            Optional[str] = Query(None, description="Name substring"),
-    subject:      Optional[str] = Query(None, description="Subject they teach"),
-    lesson_type:  Optional[str] = Query(None, description="Lesson type (Лекция, Практика...)"),
-    institute_id: Optional[int] = Query(None),
-    group_id:     Optional[int] = Query(None, description="Teachers who teach this group"),
-    has_schedule: Optional[bool] = Query(None, description="Only teachers with scraped schedule"),
-    limit:        int            = Query(50, ge=1, le=500),
-):
-    filters: dict = {}
-    if q:            filters["full_name"]    = {"$regex": q, "$options": "i"}
-    if subject:      filters["subjects"]     = {"$regex": subject, "$options": "i"}
-    if lesson_type:  filters["lesson_types"] = {"$regex": lesson_type, "$options": "i"}
-    if institute_id: filters["institute_ids"] = institute_id
-    if group_id:     filters["group_ids"]    = group_id
-    if has_schedule is True:
-        filters["schedule_scraped_at"] = {"$ne": None}
-    elif has_schedule is False:
-        filters["schedule_scraped_at"] = None
+    # Determine the chosen label (for storing the user's choice as a message)
+    _id_field = "room_id" if intent_type == "room_schedule" else "group_id"
+    chosen = next((c for c in candidates if str(c.get(_id_field, "")) == str(item_id)), None)
+    chosen_label = (chosen.get("name") or str(item_id)) if chosen else str(item_id)
 
-    teachers = await Teacher.find(filters).sort("full_name").limit(limit).to_list()
+    # Save user's choice as a message in conversations
+    asyncio.ensure_future(store_callback_choice(cb, chosen_label))
 
-    return {
-        "total": len(teachers),
-        "teachers": [
-            {
-                "teacher_id":      t.teacher_id,
-                "full_name":       t.full_name,
-                "short_name":      t.short_name,
-                "institute_names": t.institute_names,
-                "subjects":        t.subjects,
-                "lesson_types":    t.lesson_types,
-                "group_count":     len(t.group_ids),
-                "has_schedule":    bool(t.schedule),
-                "schedule_scraped_at": t.schedule_scraped_at,
-            }
-            for t in teachers
-        ]
-    }
+    # Remove the disambiguation keyboard
+    await cb.message.edit_reply_markup(reply_markup=None)
+    # Show progress
+    progress = await cb.message.answer("⏳ Загружаю расписание…")
 
-
-# ── 3. Room search ────────────────────────────────────────────────────────────
-
-@router.get("/rooms", summary="Search rooms with rich filters")
-async def search_rooms(
-    q:            Optional[str] = Query(None, description="Room name substring"),
-    building:     Optional[str] = Query(None),
-    subject:      Optional[str] = Query(None, description="Subject taught here"),
-    teacher_id:   Optional[int] = Query(None, description="Rooms used by this teacher"),
-    group_id:     Optional[int] = Query(None, description="Rooms used by this group"),
-    has_schedule: Optional[bool] = Query(None),
-    limit:        int            = Query(50, ge=1, le=500),
-):
-    filters: dict = {}
-    if q:          filters["name"]       = {"$regex": q, "$options": "i"}
-    if building:   filters["building"]   = {"$regex": building, "$options": "i"}
-    if subject:    filters["subjects"]   = {"$regex": subject, "$options": "i"}
-    if teacher_id: filters["teacher_ids"] = teacher_id
-    if group_id:   filters["group_ids"]  = group_id
-    if has_schedule is True:
-        filters["schedule_scraped_at"] = {"$ne": None}
-    elif has_schedule is False:
-        filters["schedule_scraped_at"] = None
-
-    rooms = await Room.find(filters).sort("name").limit(limit).to_list()
-
-    return {
-        "total": len(rooms),
-        "rooms": [
-            {
-                "room_id":      r.room_id,
-                "name":         r.name,
-                "building":     r.building,
-                "subjects":     r.subjects,
-                "group_count":  len(r.group_ids),
-                "teacher_count": len(r.teacher_ids),
-                "has_schedule": bool(r.schedule),
-                "schedule_scraped_at": r.schedule_scraped_at,
-            }
-            for r in rooms
-        ]
-    }
-
-
-# ── 4. Group search ───────────────────────────────────────────────────────────
-
-@router.get("/groups", summary="Search groups with rich filters")
-async def search_groups(
-    q:            Optional[str] = Query(None, description="Group name substring"),
-    institute_id: Optional[int] = Query(None),
-    speciality:   Optional[str] = Query(None, description="Speciality name substring"),
-    course:       Optional[int] = Query(None, ge=1, le=6),
-    has_schedule: Optional[bool] = Query(None),
-    limit:        int            = Query(50, ge=1, le=500),
-):
-    filters: dict = {}
-    if q:            filters["name"]           = {"$regex": q, "$options": "i"}
-    if institute_id: filters["institute_id"]   = institute_id
-    if speciality:   filters["speciality_name"] = {"$regex": speciality, "$options": "i"}
-    if course:       filters["course"]         = course
-    if has_schedule is True:
-        filters["schedule_scraped_at"] = {"$ne": None}
-    elif has_schedule is False:
-        filters["schedule_scraped_at"] = None
-
-    groups = await Group.find(filters).sort("name").limit(limit).to_list()
-
-    return {
-        "total": len(groups),
-        "groups": [
-            {
-                "group_id":        g.group_id,
-                "name":            g.name,
-                "institute_name":  g.institute_name,
-                "speciality_name": g.speciality_name,
-                "course":          g.course,
-                "academic_year":   g.academic_year,
-                "has_schedule":    bool(g.schedule),
-                "days_count":      len(g.schedule),
-                "schedule_scraped_at": g.schedule_scraped_at,
-            }
-            for g in groups
-        ]
-    }
-
-
-# ── 5. Lesson search (across all schedules) ───────────────────────────────────
-
-@router.get("/lessons", summary="Search lessons by subject, type, teacher, or room across all entities")
-async def search_lessons(
-    subject:      Optional[str]       = Query(None, description="Subject name substring"),
-    lesson_type:  Optional[str]       = Query(None, description="e.g. Лекция"),
-    teacher_name: Optional[str]       = Query(None),
-    room_name:    Optional[str]       = Query(None),
-    from_date:    Optional[date_type] = Query(None),
-    to_date:      Optional[date_type] = Query(None),
-    entity_type:  Optional[str]       = Query(None, description="group | teacher | room — omit for all"),
-    limit:        int                 = Query(100, ge=1, le=1000),
-):
-    """
-    Walk all schedules in DB and return matching lessons with their context
-    (which group/teacher/room, which date and time).
-    """
-    from_iso = from_date.isoformat() if from_date else None
-    to_iso   = to_date.isoformat()   if to_date   else None
-
-    results = []
-
-    async def scan_schedule(schedule: dict, entity_type_str: str, entity_id: int, entity_name: str):
-        for iso, day in _iter_schedule(schedule):
-            if from_iso and iso < from_iso:
-                continue
-            if to_iso and iso > to_iso:
-                continue
-            for lesson in day.get("lessons", []):
-                if not _matches_lesson_filters(lesson, subject, lesson_type, teacher_name, room_name):
-                    continue
-                results.append({
-                    "entity_type": entity_type_str,
-                    "entity_id":   entity_id,
-                    "entity_name": entity_name,
-                    "date":        iso,
-                    "weekday_name": day.get("weekday_name"),
-                    "week_number": day.get("week_number"),
-                    **lesson,
-                })
-                if len(results) >= limit:
-                    return
-
-    if entity_type in (None, "group"):
-        groups = await Group.find({"schedule": {"$ne": {}}}).to_list()
-        for g in groups:
-            if len(results) >= limit:
-                break
-            await scan_schedule(g.schedule, "group", g.group_id, g.name)
-
-    if entity_type in (None, "teacher") and len(results) < limit:
-        teachers = await Teacher.find({"schedule": {"$ne": {}}}).to_list()
-        for t in teachers:
-            if len(results) >= limit:
-                break
-            await scan_schedule(t.schedule, "teacher", t.teacher_id, t.full_name)
-
-    if entity_type in (None, "room") and len(results) < limit:
-        rooms = await Room.find({"schedule": {"$ne": {}}}).to_list()
-        for r in rooms:
-            if len(results) >= limit:
-                break
-            await scan_schedule(r.schedule, "room", r.room_id, r.name)
-
-    results.sort(key=lambda x: (x["date"], x.get("time_start", "")))
-    return {"total": len(results), "lessons": results}
-
-
-# ── 6. What's happening RIGHT NOW ─────────────────────────────────────────────
-
-@router.get("/now", summary="All lessons currently in progress")
-async def lessons_now(
-    entity_type:  Optional[str] = Query(None, description="group | teacher | room"),
-    institute_id: Optional[int] = Query(None),
-):
-    now = datetime.now()
-    today_iso = now.date().isoformat()
-    now_time  = now.time().replace(second=0, microsecond=0)
-
-    return await _lessons_at_time(today_iso, now_time, entity_type, institute_id)
-
-
-# ── 7. What's happening AT a specific datetime ────────────────────────────────
-
-@router.get("/at", summary="All lessons at a specific date and time")
-async def lessons_at(
-    dt:           datetime            = Query(..., description="ISO datetime e.g. 2026-03-10T10:00"),
-    entity_type:  Optional[str]       = Query(None, description="group | teacher | room"),
-    institute_id: Optional[int]       = Query(None),
-):
-    date_iso = dt.date().isoformat()
-    check_time = dt.time().replace(second=0, microsecond=0)
-
-    return await _lessons_at_time(date_iso, check_time, entity_type, institute_id)
-
-
-async def _lessons_at_time(date_iso: str, check_time: time_type, entity_type, institute_id):
-    results = []
-
-    async def scan(schedule: dict, etype: str, eid: int, ename: str):
-        day = schedule.get(date_iso)
-        if not day:
-            return
-        day_dict = _day_data_to_dict(day)
-        for lesson in day_dict.get("lessons", []):
-            if _lesson_active_at(lesson, check_time):
-                results.append({
-                    "entity_type": etype,
-                    "entity_id":   eid,
-                    "entity_name": ename,
-                    "date":        date_iso,
-                    **lesson,
-                })
-
-    if entity_type in (None, "group"):
-        q = {"schedule": {"$ne": {}}}
-        if institute_id:
-            q["institute_id"] = institute_id
-        for g in await Group.find(q).to_list():
-            await scan(g.schedule, "group", g.group_id, g.name)
-
-    if entity_type in (None, "teacher"):
-        for t in await Teacher.find({"schedule": {"$ne": {}}}).to_list():
-            await scan(t.schedule, "teacher", t.teacher_id, t.full_name)
-
-    if entity_type in (None, "room"):
-        for r in await Room.find({"schedule": {"$ne": {}}}).to_list():
-            await scan(r.schedule, "room", r.room_id, r.name)
-
-    results.sort(key=lambda x: x.get("time_start", ""))
-    return {
-        "date":       date_iso,
-        "time":       check_time.strftime("%H:%M"),
-        "total":      len(results),
-        "lessons":    results,
-    }
-
-
-# ── 8. Full day ───────────────────────────────────────────────────────────────
-
-@router.get("/day", summary="All lessons on a specific date across selected entities")
-async def lessons_on_day(
-    day:          date_type          = Query(..., description="YYYY-MM-DD"),
-    entity_type:  Optional[str]      = Query(None, description="group | teacher | room"),
-    institute_id: Optional[int]      = Query(None),
-    subject:      Optional[str]      = Query(None),
-    lesson_type:  Optional[str]      = Query(None),
-    teacher_name: Optional[str]      = Query(None),
-    room_name:    Optional[str]      = Query(None),
-):
-    date_iso = day.isoformat()
-    results  = []
-
-    async def scan(schedule: dict, etype: str, eid: int, ename: str):
-        day_data = schedule.get(date_iso)
-        if not day_data:
-            return
-        day_dict = _day_data_to_dict(day_data)
-        for lesson in day_dict.get("lessons", []):
-            if not _matches_lesson_filters(lesson, subject, lesson_type, teacher_name, room_name):
-                continue
-            results.append({
-                "entity_type":  etype,
-                "entity_id":    eid,
-                "entity_name":  ename,
-                "weekday_name": day_dict.get("weekday_name"),
-                **lesson,
+    try:
+        if intent_type == "group_schedule":
+            group_id  = item_id
+            group_name = chosen["name"] if chosen else None
+            data = await _gql(_GQL_GROUP_SCHEDULE, {
+                "gn": None, "gid": group_id,
+                "from": params.get("from") or _now_moscow().date().isoformat(),
+                "to":   params.get("to"),
+                "week": params.get("week"),
             })
+            days  = data.get("groupSchedule", [])
+            title = group_name or f"группа #{group_id}"
+            reply = _fmt_days_paged(days, f"Расписание · {title}",
+                                    show_teacher=True, show_group=False)
 
-    if entity_type in (None, "group"):
-        q = {"schedule": {"$ne": {}}}
-        if institute_id:
-            q["institute_id"] = institute_id
-        for g in await Group.find(q).to_list():
-            await scan(g.schedule, "group", g.group_id, g.name)
-
-    if entity_type in (None, "teacher"):
-        for t in await Teacher.find({"schedule": {"$ne": {}}}).to_list():
-            await scan(t.schedule, "teacher", t.teacher_id, t.full_name)
-
-    if entity_type in (None, "room"):
-        for r in await Room.find({"schedule": {"$ne": {}}}).to_list():
-            await scan(r.schedule, "room", r.room_id, r.name)
-
-    results.sort(key=lambda x: x.get("time_start", ""))
-    return {
-        "date":    date_iso,
-        "total":   len(results),
-        "lessons": results,
-    }
-
-
-# ── 9. Full week ──────────────────────────────────────────────────────────────
-
-@router.get("/week", summary="All lessons in an ISO week across selected entities")
-async def lessons_in_week(
-    week:         int               = Query(..., ge=1, le=53, description="ISO week number"),
-    year:         int               = Query(datetime.now().year, description="Year (defaults to current)"),
-    entity_type:  Optional[str]     = Query(None, description="group | teacher | room"),
-    institute_id: Optional[int]     = Query(None),
-    subject:      Optional[str]     = Query(None),
-    lesson_type:  Optional[str]     = Query(None),
-):
-    results: dict[str, list] = {}  # keyed by ISO date
-
-    async def scan(schedule: dict, etype: str, eid: int, ename: str):
-        for iso, day in _iter_schedule(schedule):
-            day_dict = _day_data_to_dict(day)
-            if day_dict.get("week_number") != week:
-                continue
-            try:
-                if date_type.fromisoformat(iso).isocalendar()[0] != year:
-                    continue
-            except ValueError:
-                continue
-            for lesson in day_dict.get("lessons", []):
-                if not _matches_lesson_filters(lesson, subject, lesson_type, None, None):
-                    continue
-                results.setdefault(iso, []).append({
-                    "entity_type":  etype,
-                    "entity_id":    eid,
-                    "entity_name":  ename,
-                    "weekday_name": day_dict.get("weekday_name"),
-                    **lesson,
-                })
-
-    if entity_type in (None, "group"):
-        q = {"schedule": {"$ne": {}}}
-        if institute_id:
-            q["institute_id"] = institute_id
-        for g in await Group.find(q).to_list():
-            await scan(g.schedule, "group", g.group_id, g.name)
-
-    if entity_type in (None, "teacher"):
-        for t in await Teacher.find({"schedule": {"$ne": {}}}).to_list():
-            await scan(t.schedule, "teacher", t.teacher_id, t.full_name)
-
-    if entity_type in (None, "room"):
-        for r in await Room.find({"schedule": {"$ne": {}}}).to_list():
-            await scan(r.schedule, "room", r.room_id, r.name)
-
-    # Sort each day's lessons by time
-    for iso in results:
-        results[iso].sort(key=lambda x: x.get("time_start", ""))
-
-    days = [{"date": iso, "lessons": lessons} for iso, lessons in sorted(results.items())]
-    total = sum(len(d["lessons"]) for d in days)
-    return {"week": week, "year": year, "total_lessons": total, "days": days}
-
-
-# ── 10. Date range ────────────────────────────────────────────────────────────
-
-@router.get("/range", summary="All lessons between two dates")
-async def lessons_in_range(
-    from_date:    date_type          = Query(...),
-    to_date:      date_type          = Query(...),
-    entity_type:  Optional[str]      = Query(None, description="group | teacher | room"),
-    institute_id: Optional[int]      = Query(None),
-    subject:      Optional[str]      = Query(None),
-    lesson_type:  Optional[str]      = Query(None),
-    teacher_name: Optional[str]      = Query(None),
-    room_name:    Optional[str]      = Query(None),
-    limit:        int                = Query(500, ge=1, le=5000),
-):
-    if (to_date - from_date).days > 90:
-        raise HTTPException(status_code=400, detail="Range cannot exceed 90 days")
-
-    from_iso, to_iso = from_date.isoformat(), to_date.isoformat()
-    results = []
-
-    async def scan(schedule: dict, etype: str, eid: int, ename: str):
-        for iso, day in _iter_schedule(schedule):
-            if iso < from_iso or iso > to_iso:
-                continue
-            day_dict = _day_data_to_dict(day)
-            for lesson in day_dict.get("lessons", []):
-                if not _matches_lesson_filters(lesson, subject, lesson_type, teacher_name, room_name):
-                    continue
-                results.append({
-                    "entity_type":  etype,
-                    "entity_id":    eid,
-                    "entity_name":  ename,
-                    "date":         iso,
-                    "weekday_name": day_dict.get("weekday_name"),
-                    **lesson,
-                })
-                if len(results) >= limit:
-                    return
-
-    if entity_type in (None, "group"):
-        q = {"schedule": {"$ne": {}}}
-        if institute_id:
-            q["institute_id"] = institute_id
-        for g in await Group.find(q).to_list():
-            if len(results) < limit:
-                await scan(g.schedule, "group", g.group_id, g.name)
-
-    if entity_type in (None, "teacher") and len(results) < limit:
-        for t in await Teacher.find({"schedule": {"$ne": {}}}).to_list():
-            if len(results) < limit:
-                await scan(t.schedule, "teacher", t.teacher_id, t.full_name)
-
-    if entity_type in (None, "room") and len(results) < limit:
-        for r in await Room.find({"schedule": {"$ne": {}}}).to_list():
-            if len(results) < limit:
-                await scan(r.schedule, "room", r.room_id, r.name)
-
-    results.sort(key=lambda x: (x["date"], x.get("time_start", "")))
-    return {
-        "from_date": from_iso,
-        "to_date":   to_iso,
-        "total":     len(results),
-        "lessons":   results,
-    }
-
-
-# ── 11. Next lesson(s) ────────────────────────────────────────────────────────
-
-@router.get("/next", summary="Next upcoming lesson(s) for a teacher, room, or group")
-async def next_lessons(
-    teacher_id: Optional[int]  = Query(None),
-    room_id:    Optional[int]  = Query(None),
-    group_id:   Optional[int]  = Query(None),
-    count:      int            = Query(1, ge=1, le=20, description="How many upcoming lessons to return"),
-    from_dt:    Optional[datetime] = Query(None, description="Start from this datetime (default: now)"),
-):
-    if not any([teacher_id, room_id, group_id]):
-        raise HTTPException(status_code=400, detail="Provide at least one of: teacher_id, room_id, group_id")
-
-    base_dt   = from_dt or datetime.now()
-    today_iso = base_dt.date().isoformat()
-    now_time  = base_dt.time().replace(second=0, microsecond=0)
-
-    upcoming = []
-
-    async def collect(schedule: dict, etype: str, eid: int, ename: str):
-        for iso, day in _iter_schedule(schedule):
-            if iso < today_iso:
-                continue
-            day_dict = _day_data_to_dict(day)
-            for lesson in day_dict.get("lessons", []):
-                ts = lesson.get("time_start", "")
-                # Same day: only include lessons that haven't ended yet
-                if iso == today_iso:
-                    try:
-                        end_t = _parse_time(lesson.get("time_end", "00:00"))
-                        if end_t < now_time:
-                            continue
-                    except Exception:
-                        pass
-                upcoming.append({
-                    "entity_type":  etype,
-                    "entity_id":    eid,
-                    "entity_name":  ename,
-                    "date":         iso,
-                    "weekday_name": day_dict.get("weekday_name"),
-                    **lesson,
-                })
-
-    if teacher_id:
-        t = await Teacher.find_one(Teacher.teacher_id == teacher_id)
-        if t and t.schedule:
-            await collect(t.schedule, "teacher", t.teacher_id, t.full_name)
-
-    if room_id:
-        r = await Room.find_one(Room.room_id == room_id)
-        if r and r.schedule:
-            await collect(r.schedule, "room", r.room_id, r.name)
-
-    if group_id:
-        g = await Group.find_one(Group.group_id == group_id)
-        if g and g.schedule:
-            await collect(g.schedule, "group", g.group_id, g.name)
-
-    upcoming.sort(key=lambda x: (x["date"], x.get("time_start", "")))
-
-    return {
-        "from":    base_dt.isoformat(),
-        "count":   min(count, len(upcoming)),
-        "lessons": upcoming[:count],
-    }
-
-
-# ── 12. Free rooms ────────────────────────────────────────────────────────────
-
-@router.get("/free-rooms", summary="Rooms with no lessons at a given date and time")
-async def free_rooms(
-    dt:       datetime          = Query(..., description="ISO datetime e.g. 2026-03-10T10:00"),
-    building: Optional[str]    = Query(None, description="Filter by building"),
-    duration: int              = Query(90, ge=30, le=240, description="Duration in minutes to check availability"),
-):
-    date_iso   = dt.date().isoformat()
-    start_time = dt.time().replace(second=0, microsecond=0)
-    end_time   = (datetime.combine(dt.date(), start_time) + timedelta(minutes=duration)).time()
-
-    room_q: dict = {}
-    if building:
-        room_q["building"] = {"$regex": building, "$options": "i"}
-
-    all_rooms = await Room.find(room_q).sort("name").to_list()
-
-    free = []
-    busy = []
-
-    for r in all_rooms:
-        if not r.schedule:
-            # No schedule data — mark as unknown
-            continue
-
-        day_data = r.schedule.get(date_iso)
-        if not day_data:
-            # No lessons this day at all
-            free.append({"room_id": r.room_id, "name": r.name, "building": r.building})
-            continue
-
-        day_dict  = _day_data_to_dict(day_data)
-        conflict  = False
-        conflicts = []
-
-        for lesson in day_dict.get("lessons", []):
-            try:
-                ls = _parse_time(lesson["time_start"])
-                le = _parse_time(lesson["time_end"])
-                # Overlap: requested start < lesson end AND requested end > lesson start
-                if start_time < le and end_time > ls:
-                    conflict = True
-                    conflicts.append({
-                        "time_start": lesson["time_start"],
-                        "time_end":   lesson["time_end"],
-                        "subject":    lesson.get("subject"),
-                        "group":      lesson.get("teacher_name"),
-                    })
-            except Exception:
-                pass
-
-        if conflict:
-            busy.append({
-                "room_id":   r.room_id,
-                "name":      r.name,
-                "building":  r.building,
-                "conflicts": conflicts,
-            })
-        else:
-            free.append({"room_id": r.room_id, "name": r.name, "building": r.building})
-
-    return {
-        "datetime":    dt.isoformat(),
-        "duration_min": duration,
-        "free_count":  len(free),
-        "busy_count":  len(busy),
-        "free_rooms":  sorted(free, key=lambda x: x["name"]),
-        "busy_rooms":  busy,
-    }
-
-
-# ── 13. Teacher → groups (with optional schedule) ────────────────────────────
-
-@router.get("/teacher-groups", summary="Groups taught by a teacher, optionally with schedule")
-async def teacher_groups(
-    teacher_id:       int             = Query(...),
-    with_schedule:    bool            = Query(False, description="Include schedule for each group"),
-    from_date:        Optional[date_type] = Query(None),
-    to_date:          Optional[date_type] = Query(None),
-):
-    teacher = await Teacher.find_one(Teacher.teacher_id == teacher_id)
-    if not teacher:
-        raise HTTPException(status_code=404, detail="Teacher not found")
-
-    groups = await Group.find({"group_id": {"$in": teacher.group_ids}}).sort("name").to_list()
-
-    from_iso = from_date.isoformat() if from_date else None
-    to_iso   = to_date.isoformat()   if to_date   else None
-
-    result = []
-    for g in groups:
-        entry: dict = {
-            "group_id":        g.group_id,
-            "name":            g.name,
-            "institute_name":  g.institute_name,
-            "speciality_name": g.speciality_name,
-            "course":          g.course,
-        }
-        if with_schedule and g.schedule:
-            # Filter to only lessons taught by this teacher, optionally in date range
-            filtered: dict[str, list] = {}
-            for iso, day in _iter_schedule(g.schedule):
-                if from_iso and iso < from_iso:
-                    continue
-                if to_iso and iso > to_iso:
-                    continue
-                day_dict = _day_data_to_dict(day)
-                teacher_lessons = [
-                    l for l in day_dict.get("lessons", [])
-                    if l.get("teacher_id") == teacher_id
-                ]
-                if teacher_lessons:
-                    filtered[iso] = teacher_lessons
-            entry["schedule"] = filtered
-        result.append(entry)
-
-    return {
-        "teacher_id":   teacher_id,
-        "full_name":    teacher.full_name,
-        "group_count":  len(result),
-        "groups":       result,
-    }
-
-
-# ── 14. Conflict detection ────────────────────────────────────────────────────
-
-@router.get("/conflicts", summary="Find scheduling conflicts (same teacher or room at the same time)")
-async def find_conflicts(
-    from_date:  date_type          = Query(...),
-    to_date:    date_type          = Query(...),
-    check_type: str                = Query("both", description="teacher | room | both"),
-):
-    if (to_date - from_date).days > 14:
-        raise HTTPException(status_code=400, detail="Range cannot exceed 14 days for conflict check")
-
-    from_iso, to_iso = from_date.isoformat(), to_date.isoformat()
-    conflicts = []
-
-    def find_time_conflicts(lessons: list[dict], context_id, context_name, context_type) -> list:
-        found = []
-        for i, a in enumerate(lessons):
-            for b in lessons[i+1:]:
+        elif intent_type == "group_now":
+            group_id  = item_id
+            group_name = chosen["name"] if chosen else None
+            # Fallback: lookup name by id if not found in candidates
+            if not group_name and group_id:
+                from app.bot.handlers.ai_handler import _gql as _gql2, _GQL_SEARCH
                 try:
-                    a_start = _parse_time(a["time_start"])
-                    a_end   = _parse_time(a["time_end"])
-                    b_start = _parse_time(b["time_start"])
-                    b_end   = _parse_time(b["time_end"])
-                    if a_start < b_end and a_end > b_start:
-                        found.append({
-                            "context_type": context_type,
-                            "context_id":   context_id,
-                            "context_name": context_name,
-                            "lesson_a": a,
-                            "lesson_b": b,
-                        })
+                    sr = await _gql2(_GQL_SEARCH, {"q": str(group_id)})
+                    hits = sr.get("search", {}).get("groups", [])
+                    if hits:
+                        group_name = hits[0].get("name")
                 except Exception:
                     pass
-        return found
+            tr_raw = params.get("time_ref")
+            at = _resolve_time(TimeRef(**tr_raw) if tr_raw else None)
+            day = at.date().isoformat()
+            data = await _gql(_GQL_LESSONS_DAY, {
+                "day": day, "gid": group_id, "gn": group_name,
+                "tn": None, "rn": None, "iname": None,
+            })
+            nodes    = data.get("lessonsOn", {}).get("nodes", [])
+            at_time  = at.strftime("%H:%M")
+            active   = [l for l in nodes if l["timeStart"] <= at_time <= l["timeEnd"]]
+            upcoming = [l for l in nodes if l["timeStart"] > at_time]
+            reply = _fmt_now(group_name or "", at_time, active, upcoming,
+                             show_teacher=True, show_group=False)
 
-    if check_type in ("teacher", "both"):
-        teachers = await Teacher.find({"schedule": {"$ne": {}}}).to_list()
-        for t in teachers:
-            for iso, day in _iter_schedule(t.schedule):
-                if iso < from_iso or iso > to_iso:
-                    continue
-                day_dict = _day_data_to_dict(day)
-                lessons  = day_dict.get("lessons", [])
-                found = find_time_conflicts(lessons, t.teacher_id, t.full_name, "teacher")
-                for c in found:
-                    conflicts.append({"date": iso, **c})
+        elif intent_type == "room_schedule":
+            # item_id is room_id
+            room_id  = item_id
+            room_name = chosen["room_name"] if chosen else None
+            data = await _gql(_GQL_ROOM_SCHEDULE, {
+                "rn": room_name, "rid": room_id,
+                "from": params.get("from") or _now_moscow().date().isoformat(),
+                "to":   params.get("to"),
+            })
+            title = room_name or f"ауд. #{room_id}"
+            days  = data.get("roomSchedule", [])
+            reply = _fmt_days_paged(days, f"Расписание · {title}",
+                                    show_teacher=True, show_group=True)
+        else:
+            reply = "❓ Неизвестный тип запроса."
+    except Exception as exc:
+        import secrets, string as _str
+        eid = "ERR-" + "".join(secrets.choice(_str.ascii_uppercase + _str.digits) for _ in range(6))
+        logger.error(f"[{eid}] disambig dispatch error: {exc}")
+        try:
+            from app.auth.models import AuthErrorLog
+            import traceback as _tb
+            await AuthErrorLog(
+                level="ERROR",
+                message=f"[{eid}] {type(exc).__name__}: {exc}",
+                traceback=_tb.format_exc(),
+                error_id=eid,
+                tg_id=user_tg_id or None,
+                tg_chat_id=getattr(progress, "chat", None) and progress.chat.id,
+                intent=intent_type,
+                details={"exc_type": type(exc).__name__},
+            ).insert()
+        except Exception as _le:
+            logger.warning(f"error log failed: {_le}")
+        await progress.edit_text(f"❌ Ошибка при загрузке расписания.\n<code>{eid}</code>", parse_mode="HTML")
+        return
+    _PAGED_PFX = chr(0) + "PAGED" + chr(0)
+    if reply.startswith(_PAGED_PFX):
+        import json as _json2
+        raw = reply[len(_PAGED_PFX):]
+        raw = raw[:-1] if raw.endswith(chr(0)) else raw
+        try:
+            pages: list[str] = _json2.loads(raw)
+        except Exception:
+            await progress.edit_text("❌ Ошибка обработки расписания.")
+            return
+        pk = _page_key(user_tg_id, raw[:40])
+        await _store_pages(pk, pages)
+        kb = _make_nav_kb(pk, 0, len(pages))
+        kb = _add_feedback_row(kb, cb.message.chat.id, progress.message_id)
+        sent = await progress.edit_text(
+            pages[0] + f"\n\n<i>День 1 из {len(pages)}</i>",
+            parse_mode="HTML", reply_markup=kb,
+        )
+        asyncio.ensure_future(store_bot_reply(sent or progress, user_tg_id))
+    else:
+        from app.bot.handlers.ai_handler import _split_chunks
+        chunks = _split_chunks(reply)
+        fb_kb = _add_feedback_row(None, cb.message.chat.id, progress.message_id)
+        sent = await progress.edit_text(chunks[0] if chunks else "(пустой ответ)",
+                                 parse_mode="HTML", reply_markup=fb_kb)
+        asyncio.ensure_future(store_bot_reply(sent or progress, user_tg_id))
+        for chunk in chunks[1:]:
+            await cb.message.answer(chunk, parse_mode="HTML")
 
-    if check_type in ("room", "both"):
-        rooms = await Room.find({"schedule": {"$ne": {}}}).to_list()
-        for r in rooms:
-            for iso, day in _iter_schedule(r.schedule):
-                if iso < from_iso or iso > to_iso:
-                    continue
-                day_dict = _day_data_to_dict(day)
-                lessons  = day_dict.get("lessons", [])
-                found = find_time_conflicts(lessons, r.room_id, r.name, "room")
-                for c in found:
-                    conflicts.append({"date": iso, **c})
 
-    conflicts.sort(key=lambda x: (x["date"], x.get("context_name", "")))
-    return {
-        "from_date":      from_iso,
-        "to_date":        to_iso,
-        "conflict_count": len(conflicts),
-        "conflicts":      conflicts,
-    }
+
+@router.callback_query(F.data.startswith("disp:"))
+async def cb_disambig_page(cb: CallbackQuery) -> None:
+    """
+    Handle pagination in disambiguation keyboard.
+    callback_data: "disp:{redis_key}:{page_idx}"
+    Renders the next/prev page of group/room candidates.
+    """
+    await cb.answer()
+    try:
+        # callback_data format: "disp:{redis_key}:{page_idx}"
+        # redis_key itself contains colons (e.g. "disambig:USER_ID:HASH"),
+        # so we must split from the RIGHT to get the page index correctly.
+        after_prefix = cb.data[5:]   # strip leading "disp:"
+        key, page_str = after_prefix.rsplit(":", 1)
+        page_idx = int(page_str)
+    except (ValueError, IndexError, AttributeError):
+        await cb.message.edit_text("⚠️ Устаревшая кнопка. Повторите запрос.")
+        return
+
+    from app.bot.handlers.ai_handler import (
+        _load_disambig, _DISAMBIG_PAGE_SIZE, _store_disambig,
+    )
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    import json as _json
+
+    payload = await _load_disambig(key)
+    if payload is None:
+        await cb.message.edit_text("⏱ Время выбора истекло. Повторите запрос.")
+        return
+
+    candidates  = payload["candidates"]
+    intent_type = payload.get("intent_type", "group_schedule")
+    total_cands = len(candidates)
+    total_pages = (total_cands + _DISAMBIG_PAGE_SIZE - 1) // _DISAMBIG_PAGE_SIZE
+
+    page_idx = max(0, min(page_idx, total_pages - 1))
+    start    = page_idx * _DISAMBIG_PAGE_SIZE
+    page_cands = candidates[start : start + _DISAMBIG_PAGE_SIZE]
+
+    id_field = "room_id" if intent_type == "room_schedule" else "group_id"
+    buttons = []
+    for c in page_cands:
+        item_id = c.get(id_field)
+        if item_id is None:
+            continue  # skip candidates with null IDs
+        if intent_type == "room_schedule":
+            label   = c["name"]
+            bldg    = c.get("building", "")
+            if bldg:
+                label += f"  •  {bldg}"
+        else:
+            label   = c["name"]
+            if c.get("institute_name"):
+                label += f"  •  {c['institute_name']}"
+        buttons.append([InlineKeyboardButton(
+            text=label,
+            callback_data=f"dis:{key}:{item_id}",
+        )])
+
+    # Navigation row
+    nav_row = []
+    if page_idx > 0:
+        nav_row.append(InlineKeyboardButton(text="◀ Пред.", callback_data=f"disp:{key}:{page_idx-1}"))
+    nav_row.append(InlineKeyboardButton(text=f"{page_idx+1}/{total_pages}", callback_data="pg_noop"))
+    if page_idx < total_pages - 1:
+        nav_row.append(InlineKeyboardButton(text="След. ▶", callback_data=f"disp:{key}:{page_idx+1}"))
+    if nav_row:
+        buttons.append(nav_row)
+
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    try:
+        await cb.message.edit_reply_markup(reply_markup=kb)
+    except Exception:
+        pass  # message not changed — ignore
+
+
+@router.callback_query(F.data.startswith("fb:"))
+async def cb_feedback(cb: CallbackQuery) -> None:
+    """
+    Handle 👍 / 👎 feedback buttons on bot responses.
+    callback_data format: "fb:{like|dislike}:{chat_id}:{message_id}"
+    - One-way: once rated, the buttons disappear from the message.
+    - Idempotent: rating the same value twice is a no-op (no double-counting).
+    """
+    from app.auth.models import BotFeedback
+    try:
+        _, rating, chat_id_str, msg_id_str = cb.data.split(":", 3)
+        chat_id    = int(chat_id_str)
+        message_id = int(msg_id_str)
+    except (ValueError, AttributeError):
+        await cb.answer("⚠️ Ошибка")
+        return
+
+    user_id = cb.from_user.id if cb.from_user else 0
+
+    try:
+        doc = await BotFeedback.find_one(
+            BotFeedback.chat_id    == chat_id,
+            BotFeedback.message_id == message_id,
+        )
+        from datetime import datetime as _dt
+        if doc is None:
+            # First rating — try to recover user_text / bot_text from message history
+            # (needed when the user rates faster than _store_feedback_meta fires)
+            recovered_user_text = ""
+            recovered_bot_text  = ""
+            try:
+                from app.models.conversation import Message as _MsgModel
+                # Find the bot message (role=bot) by chat_id + message_id
+                bot_msg = await _MsgModel.find_one({
+                    "chat_id": chat_id,
+                    "message_id": message_id,
+                    "role": "bot",
+                })
+                if bot_msg:
+                    recovered_bot_text = bot_msg.text or bot_msg.html_text or ""
+                    # Find the most recent user message that preceded this bot message
+                    # (largest user message_id that is less than bot message_id)
+                    user_msg = await _MsgModel.get_motor_collection().find_one(
+                        {"chat_id": chat_id, "message_id": {"$lt": message_id}, "role": "user"},
+                        sort=[("message_id", -1)],
+                    )
+                    if user_msg:
+                        recovered_user_text = user_msg.get("text") or ""
+            except Exception as _e:
+                logger.debug(f"feedback text recovery failed: {_e}")
+
+            # Create the record
+            doc = BotFeedback(
+                chat_id=chat_id,
+                message_id=message_id,
+                tg_id=user_id,
+                user_text=recovered_user_text[:1000],
+                bot_text=recovered_bot_text[:2000],
+                rating=rating,
+                status="rated",
+                updated_at=_dt.utcnow(),
+            )
+            await doc.insert()
+        elif doc.status == "rated" and doc.rating == rating:
+            # Same rating again — no double-counting
+            await cb.answer("Уже оценено ✓")
+            return
+        else:
+            # Doc pre-created (pending) OR user changed their rating
+            doc.rating     = rating
+            doc.status     = "rated"
+            doc.tg_id      = user_id
+            doc.updated_at = _dt.utcnow()
+            await doc.save()
+    except Exception as exc:
+        logger.warning(f"feedback save failed: {exc}")
+        await cb.answer("⚠️ Не удалось сохранить оценку")
+        return
+
+    # Remove the feedback buttons from the message (they've voted)
+    try:
+        # Keep any existing reply_markup rows EXCEPT the feedback row
+        current_kb = cb.message.reply_markup
+        if current_kb:
+            new_rows = [
+                row for row in current_kb.inline_keyboard
+                if not any(
+                    btn.callback_data and btn.callback_data.startswith("fb:")
+                    for btn in row
+                )
+            ]
+            new_kb = InlineKeyboardMarkup(inline_keyboard=new_rows) if new_rows else None
+        else:
+            new_kb = None
+        await cb.message.edit_reply_markup(reply_markup=new_kb)
+    except Exception:
+        pass  # message too old to edit — ignore
+
+    icon = "👍" if rating == "like" else "👎"
+    await cb.answer(f"{icon} Оценка сохранена, спасибо!")
+    logger.info(f"Feedback {rating} from user {user_id} on msg {message_id} chat {chat_id}")
+
+
+# ── Text messages → AI handler ─────────────────────────────────────────────────
+
+@router.message(F.text)
+async def any_text_message(message: TelegramMessage) -> None:
+    # handle_message already calls store_message internally
+    await handle_message(message)
+
+
+# ── Media-only messages (no text / caption that would trigger AI) ──────────────
+# These handlers catch every supported media type, persist the message, and
+# optionally acknowledge the user.
+
+@router.message(F.photo)
+async def handle_photo(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message))
+    if message.from_user:
+        from app.bot.handlers.ai_handler import _upsert_user
+        asyncio.ensure_future(_upsert_user(message.from_user))
+    # If there's a caption treat it as a text query too
+    if message.caption and message.caption.strip():
+        await handle_message(message)
+
+
+@router.message(F.video)
+async def handle_video(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message))
+    if message.caption and message.caption.strip():
+        await handle_message(message)
+
+
+@router.message(F.animation)
+async def handle_animation(message: TelegramMessage) -> None:
+    """GIF / MP4 GIF — store message and update user profile."""
+    asyncio.ensure_future(store_message(message))
+    if message.from_user:
+        from app.bot.handlers.ai_handler import _upsert_user
+        asyncio.ensure_future(_upsert_user(message.from_user))
+
+
+@router.message(F.sticker)
+async def handle_sticker(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message))
+    if message.from_user:
+        from app.bot.handlers.ai_handler import _upsert_user
+        asyncio.ensure_future(_upsert_user(message.from_user))
+
+
+@router.message(F.voice)
+async def handle_voice(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message))
+
+
+@router.message(F.video_note)
+async def handle_video_note(message: TelegramMessage) -> None:
+    """Rounded video — кружок."""
+    asyncio.ensure_future(store_message(message))
+
+
+@router.message(F.audio)
+async def handle_audio(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message))
+    if message.caption and message.caption.strip():
+        await handle_message(message)
+
+
+@router.message(F.document)
+async def handle_document(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message))
+    if message.caption and message.caption.strip():
+        await handle_message(message)
+
+
+# ── Special message types: poll, location, contact, venue ─────────────────────
+
+@router.message(F.poll)
+async def handle_poll(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message))
+
+
+@router.message(F.location)
+async def handle_location(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message))
+
+
+@router.message(F.venue)
+async def handle_venue(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message))
+
+
+@router.message(F.contact)
+async def handle_contact(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message))
+
+
+# ── Command menu list (registered on startup) ──────────────────────────────────
+
+BOT_COMMANDS = [
+    BotCommand(command="start",   description="Начало работы"),
+    BotCommand(command="help",    description="Справка"),
+    BotCommand(command="miniapp", description="Открыть расписание (Mini App)"),
+    BotCommand(command="limit",   description="Мой лимит запросов"),
+    BotCommand(command="roles",   description="Мои роли и права"),
+]
