@@ -98,18 +98,19 @@ def create_app() -> FastAPI:
     from app.dashboard.router import router as dashboard_router
     from app.dashboard.api import api as dashboard_api
     from app.dashboard.api_chats import router as chats_router
-    app.include_router(dashboard_router)
+    # API роутеры ПЕРЕД dashboard_router, иначе catch-all /{path:path} перехватит /api/*
     app.include_router(dashboard_api)
     app.include_router(chats_router)
+    app.include_router(dashboard_router)
 
     # Optional secret admin path (defence-in-depth)
     _ap = settings.admin_path.strip("/")
     if _ap:
         from fastapi import APIRouter as _AR
         _secret = _AR(prefix=f"/{_ap}")
-        _secret.include_router(dashboard_router)
         _secret.include_router(dashboard_api)
         _secret.include_router(chats_router)
+        _secret.include_router(dashboard_router)
         app.include_router(_secret)
 
     @app.get("/health", tags=["ops"])
