@@ -352,12 +352,35 @@ async def admin_user_detail(
     activity = await AuthActivityLog.find(
         AuthActivityLog.user_id == user_id
     ).sort("-timestamp").to_list(50)
+
+    # Quota info from Redis
+    quota = None
+    if user.tg_id:
+        try:
+            from app.cache.redis import get_redis
+            from app.core.config import settings as _cfg
+            r = get_redis()
+            key = f"quota:{user.tg_id}"
+            raw, ttl = await r.get(key), await r.ttl(key)
+            used = int(raw) if raw else 0
+            cap  = user.daily_requests if (user.daily_requests and user.daily_requests > 0) else _cfg.quota_private
+            quota = {
+                "used":      used,
+                "cap":       cap,
+                "remaining": max(cap - used, 0),
+                "ttl_secs":  max(int(ttl), 0) if ttl and ttl > 0 else 0,
+                "exhausted": used >= cap,
+            }
+        except Exception:
+            pass
+
     return {
         "user":     _user_dict(user),
         "keys":     [{"id": str(k.id), "prefix": k.key_prefix, "name": k.name,
                       "is_revoked": k.is_revoked, "created_at": k.created_at.isoformat()} for k in keys],
         "activity": [{"action": a.action, "ip": a.ip, "details": a.details,
                       "timestamp": a.timestamp.isoformat()} for a in activity],
+        "quota":    quota,
     }
 
 
@@ -415,15 +438,6 @@ async def admin_update_user(
     if body.monthly_ai_tokens is not None: user.monthly_ai_tokens = body.monthly_ai_tokens
     await user.save()
 
-    # If daily_requests changed — reset Redis quota so new limit applies immediately
-    if body.daily_requests is not None and user.tg_id:
-        try:
-            from app.cache.redis import get_redis
-            r = get_redis()
-            await r.delete(f"quota:{user.tg_id}")
-        except Exception as exc:
-            logger.warning(f"Failed to reset quota on limit change: {exc}")
-
     # If user was blocked, revoke all their tokens
     if body.is_blocked:
         try:
@@ -456,29 +470,6 @@ async def admin_revoke_all_keys(
         user_id=str(admin.id), tg_id=admin.tg_id, action="admin.revoke_all_keys",
         details={"target": user_id, "count": len(keys)},
     ).insert()
-
-
-@api.post("/admin/users/{user_id}/reset-quota", status_code=200)
-async def admin_reset_quota(
-    user_id: str,
-    admin:   AuthUser = Depends(require_permission("users:write")),
-):
-    """Reset user's Redis quota counter so they can send messages again immediately."""
-    user = await AuthUser.get(user_id)
-    if not user:
-        raise HTTPException(404, "Not found")
-    try:
-        from app.cache.redis import get_redis
-        r = get_redis()
-        key = f"quota:{user.tg_id}"
-        await r.delete(key)
-    except Exception as exc:
-        raise HTTPException(500, f"Redis error: {exc}")
-    await AuthActivityLog(
-        user_id=str(admin.id), tg_id=admin.tg_id, action="admin.reset_quota",
-        details={"target": user_id, "tg_id": user.tg_id},
-    ).insert()
-    return {"ok": True, "tg_id": user.tg_id}
 
 
 # ── admin: roles ──────────────────────────────────────────────────────────────
@@ -924,13 +915,7 @@ async def _merged_poll(tg_id: int, after_ts) -> list[dict]:
     from app.auth.database import get_auth_db
     db = get_auth_db()
 
-    base_q: dict = {
-        "tg_id": tg_id,
-        "$or": [
-            {"chat_id": tg_id},
-            {"chat_id": {"$exists": False}},
-        ],
-    }
+    base_q: dict = {"tg_id": tg_id}
     if after_ts:
         base_q["timestamp"] = {"$gt": after_ts}
 
@@ -973,9 +958,6 @@ def _fmt_conv(doc: dict, tg_id: int = 0) -> dict:
         "tg_id":               doc.get("tg_id", tg_id),
         "message_id":          doc.get("message_id"),
         "role":                doc.get("role", "user"),
-        "first_name":          doc.get("first_name", ""),
-        "last_name":           doc.get("last_name", ""),
-        "username":            doc.get("username", ""),
         "text":                doc.get("text", ""),
         "html_text":           doc.get("html_text", "") or doc.get("text", ""),
         "timestamp":           ts.isoformat() if isinstance(ts, datetime) else str(ts or ""),
@@ -1035,22 +1017,8 @@ async def admin_chat_list(
     import asyncio as _aio
     db = get_auth_db()
 
-    # NOTE: We group ONLY by tg_id here because these are private-bot conversations.
-    # Key constraints:
-    # - chat_messages (legacy) has NO chat_type or chat_id fields — can't filter on them.
-    # - conversations (new) stores ALL messages including bot replies and group messages.
-    #   Bot replies have tg_id = bot's ID (before our fix) or user's ID (after fix).
-    #   Group messages have negative chat_id.
-    # Strategy:
-    # - Exclude role="bot" — bot reply rows must not create a "user" entry for the bot.
-    # - Exclude negative chat_id — those are group/supergroup chats (conversations only).
-    # - The legacy chat_messages collection has no chat_id, so the $gt filter passes them.
     pipeline = [
         {"$sort": {"timestamp": -1}},
-        {"$match": {
-            "role": {"$in": ["user", "admin", None, ""]},  # skip bot/assistant messages
-            "chat_id": {"$not": {"$lt": 0}},               # skip group chats (neg IDs); passes docs without chat_id
-        }},
         {"$group": {
             "_id":        "$tg_id",
             "last_ts":    {"$first": "$timestamp"},
@@ -1133,13 +1101,7 @@ async def admin_chat_search(
     from app.auth.database import get_auth_db
     db = get_auth_db()
 
-    base_q: dict = {
-        "tg_id": tg_id,
-        "$or": [
-            {"chat_id": tg_id},
-            {"chat_id": {"$exists": False}},
-        ],
-    }
+    base_q: dict = {"tg_id": tg_id}
     if q.strip():
         # [S7] Escape regex input
         escaped = _escape_regex(q)
@@ -1177,19 +1139,7 @@ async def admin_chat_history(
     date_to:    Optional[str]  = None,
     _: AuthUser = Depends(require_permission("admin:full")),
 ):
-    # Fetch only messages belonging to this user's PRIVATE conversation.
-    # New "conversations" docs: chat_id == tg_id for private chats (positive).
-    # Legacy "chat_messages" docs: no chat_id field at all.
-    # We use $or so that both collections work correctly:
-    #   - new docs: chat_id must equal tg_id (excludes group messages where tg_id is sender)
-    #   - legacy docs: chat_id missing → match via tg_id alone
-    query: dict = {
-        "tg_id": tg_id,
-        "$or": [
-            {"chat_id": tg_id},            # new: private chat, chat_id == tg_id
-            {"chat_id": {"$exists": False}}, # legacy: no chat_id field
-        ],
-    }
+    query: dict = {"tg_id": tg_id}
 
     if media_type == "link":
         query["$or"] = [
