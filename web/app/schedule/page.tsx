@@ -11,7 +11,7 @@ import { LessonCard } from '@/components/schedule/LessonCard'
 import { SearchDropdown } from '@/components/schedule/SearchDropdown'
 import { useScheduleStore } from '@/lib/store'
 import { api } from '@/lib/api'
-import type { Lesson } from '@/lib/types'
+import type { Lesson, GroupMeta, TeacherMeta, RoomMeta } from '@/lib/types'
 
 type SearchMode = 'group' | 'teacher' | 'room'
 
@@ -52,7 +52,9 @@ export default function SchedulePage() {
     enabled:  !!entityId && mode === 'group',
   })
 
-  const { data: searchData } = useQuery<unknown>({
+  const { data: searchData } = useQuery<
+    { total: number; groups?: GroupMeta[]; teachers?: TeacherMeta[]; rooms?: RoomMeta[] } | null
+  >({
     queryKey: ['search', mode, query],
     queryFn:  () => {
       if (query.length < 2) return null
@@ -102,7 +104,7 @@ export default function SchedulePage() {
             <X size={14} style={{ color: 'var(--t-muted)' }} />
           </button>
         )}
-        {showDropdown && query.length >= 2 && searchData && (
+        {showDropdown && query.length >= 2 && !!searchData && (
           <SearchDropdown mode={mode} data={searchData as any}
             onClose={() => { setShowDropdown(false); setQuery('') }} />
         )}
