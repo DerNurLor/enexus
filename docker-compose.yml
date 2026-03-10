@@ -25,11 +25,8 @@
 #   docker compose logs -f backend
 # ═══════════════════════════════════════════════════════════════════════════════
 
-services:
-
-  # ── Shared quota settings (override via QUOTA_PRIVATE in /etc/ncfu/secrets) ──
 x-quota: &quota-env
-  QUOTA_PRIVATE:    "${QUOTA_PRIVATE:-3}"
+  QUOTA_PRIVATE:     "${QUOTA_PRIVATE:-3}"
   QUOTA_GROUP_SMALL: "${QUOTA_GROUP_SMALL:-3}"
   QUOTA_GROUP_LARGE: "${QUOTA_GROUP_LARGE:-5}"
   QUOTA_TTL_HOURS:   "${QUOTA_TTL_HOURS:-7}"
