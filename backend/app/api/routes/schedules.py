@@ -152,24 +152,40 @@ async def get_schedule_for_day(
     background_tasks: BackgroundTasks,
     day: date_type = Query(...),
 ):
+    from app.models.lesson import LessonDoc
     group = await Group.find_one(Group.group_id == group_id)
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
 
-    refresh_reason = _maybe_refresh(background_tasks, group)
-    day_str  = day.isoformat()
-    day_data = group.schedule.get(day_str) if group.schedule else None
+    lessons = await LessonDoc.find(
+        LessonDoc.group_id == group_id,
+        LessonDoc.date == day,
+    ).sort("+time_start").to_list()
+
+    day_str = day.isoformat()
 
     return {
         "group_id":   group_id,
         "name":       group.name,
         "date":       day_str,
-        "refreshing": refresh_reason,
-        "lessons":    [l.model_dump() for l in day_data.lessons] if day_data else [],
-        "message":    None if day_data else (
-            "No classes this day" if not refresh_reason
-            else "No data yet — schedule is being fetched in background, retry in ~60s"
-        ),
+        "refreshing": None,
+        "lessons":    [
+            {
+                "subject":      l.subject,
+                "lesson_type":  l.lesson_type,
+                "time_start":   l.time_start,
+                "time_end":     l.time_end,
+                "teacher_name": l.teacher_name,
+                "teacher_id":   l.teacher_id,
+                "classroom":    l.room_name,
+                "room_name":    l.room_name,
+                "subgroup":     l.subgroup,
+                "week_type":    l.week_type,
+                "note":         l.note,
+            }
+            for l in lessons
+        ],
+        "message": None if lessons else "No classes this day",
     }
 
 
