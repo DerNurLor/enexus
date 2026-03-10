@@ -3,6 +3,7 @@ from datetime import date as date_type, datetime
 from typing import Optional
 from loguru import logger
 
+from app.core.config import settings
 from app.models.room import Room
 
 router = APIRouter(prefix="/rooms", tags=["Rooms"])
@@ -27,6 +28,8 @@ def _room_meta(r: Room) -> dict:
         "room_id":             r.room_id,
         "name":                r.name,
         "building":            r.building,
+        "institute_ids":       r.institute_ids,
+        "institute_names":     r.institute_names,
         "subjects":            r.subjects,
         "lesson_types":        r.lesson_types,
         "group_ids":           r.group_ids,
@@ -66,14 +69,16 @@ async def list_rooms(
     subject:      Optional[str]  = Query(None),
     teacher_id:   Optional[int]  = Query(None),
     group_id:     Optional[int]  = Query(None),
+    institute_id: Optional[int]  = Query(None),
     has_schedule: Optional[bool] = Query(None),
 ):
-    filters: dict = {}
-    if q:          filters["name"]        = {"$regex": q, "$options": "i"}
-    if building:   filters["building"]    = {"$regex": building, "$options": "i"}
-    if subject:    filters["subjects"]    = {"$regex": subject, "$options": "i"}
-    if teacher_id: filters["teacher_ids"] = teacher_id
-    if group_id:   filters["group_ids"]   = group_id
+    filters: dict = {"source_url": settings.base_url}
+    if q:            filters["name"]          = {"$regex": q, "$options": "i"}
+    if building:     filters["building"]      = {"$regex": building, "$options": "i"}
+    if subject:      filters["subjects"]      = {"$regex": subject, "$options": "i"}
+    if teacher_id:   filters["teacher_ids"]   = teacher_id
+    if group_id:     filters["group_ids"]     = group_id
+    if institute_id: filters["institute_ids"] = institute_id
     if has_schedule is True:  filters["schedule_scraped_at"] = {"$ne": None}
     if has_schedule is False: filters["schedule_scraped_at"] = None
 
@@ -83,14 +88,14 @@ async def list_rooms(
 
 @router.get("/buildings-list", summary="List all distinct buildings")
 async def list_buildings_simple():
-    rooms = await Room.find_all().to_list()
+    rooms = await Room.find({"source_url": settings.base_url}).to_list()
     buildings = sorted({r.building for r in rooms if r.building})
     return {"buildings": buildings}
 
 
 @router.get("/buildings", summary="All buildings with their rooms")
 async def list_buildings():
-    rooms = await Room.find_all().sort("name").to_list()
+    rooms = await Room.find({"source_url": settings.base_url}).sort("name").to_list()
     buildings: dict[str, dict] = {}
     for r in rooms:
         b = r.building or "СКФУ (корпус не определён)"
@@ -140,8 +145,8 @@ async def get_free_rooms(
     busy_lessons = await LessonDoc.find(lesson_filters).to_list()
     busy_room_ids = {l.room_id for l in busy_lessons}
 
-    # All rooms (optionally filtered by building)
-    room_filters: dict = {}
+    # All rooms (optionally filtered by building), scoped to this portal
+    room_filters: dict = {"source_url": settings.base_url}
     if building:
         room_filters["building"] = {"$regex": building, "$options": "i"}
 

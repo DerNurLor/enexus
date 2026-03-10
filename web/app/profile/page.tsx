@@ -108,7 +108,18 @@ export default function ProfilePage() {
 
           <div className="flex flex-col gap-3">
             <button
-              onClick={() => router.push('/schedule')}
+              onClick={() => {
+                // Restore profile into store and navigate with explicit URL params
+                // so schedule page always shows the user's own entity, not last viewed
+                setProfile(profile)
+                if (profile.role === 'student' && profile.groupId) {
+                  router.push(`/schedule?mode=group&id=${profile.groupId}&name=${encodeURIComponent(profile.groupName || '')}`)
+                } else if (profile.role === 'teacher' && profile.teacherId) {
+                  router.push(`/schedule?mode=teacher&id=${profile.teacherId}&name=${encodeURIComponent(profile.teacherName || '')}`)
+                } else {
+                  router.push('/schedule')
+                }
+              }}
               className="w-full h-12 rounded-2xl flex items-center justify-center gap-2 text-sm font-semibold text-black transition-opacity hover:opacity-90"
               style={{ background: 'var(--cyan)' }}
             >

@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'next/navigation'
 import { Search, CalendarRange, X, WifiOff, Clock } from 'lucide-react'
 import { format, addDays, startOfWeek, getISOWeek } from 'date-fns'
 import { ru } from 'date-fns/locale'
@@ -79,7 +80,9 @@ function useLiveClock() {
 
 export default function SchedulePage() {
   const queryClient = useQueryClient()
-  const { mode, groupId, groupName, teacherId, teacherName, roomId, roomName, setMode, profile, profileComplete } =
+  const searchParams = useSearchParams()
+  const { mode, groupId, groupName, teacherId, teacherName, roomId, roomName,
+          setMode, setGroup, setTeacher, setRoom, profile, profileComplete } =
     useScheduleStore()
   const [query, setQuery]               = useState('')
   const [showDropdown, setShowDropdown] = useState(false)
@@ -87,6 +90,23 @@ export default function SchedulePage() {
   const [isOffline, setIsOffline]       = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const now = useLiveClock()
+
+  // On mount: if URL has ?mode=&id=&name= params, apply them (used by "Открыть моё расписание")
+  useEffect(() => {
+    const urlMode = searchParams.get('mode') as 'group' | 'teacher' | 'room' | null
+    const urlId   = searchParams.get('id')
+    const urlName = searchParams.get('name')
+    if (urlMode && urlId && urlName) {
+      const id = parseInt(urlId, 10)
+      if (!isNaN(id)) {
+        setMode(urlMode)
+        if (urlMode === 'group')   setGroup(id, urlName)
+        if (urlMode === 'teacher') setTeacher(id, urlName)
+        if (urlMode === 'room')    setRoom(id, urlName)
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const entityId   = mode === 'group' ? groupId   : mode === 'teacher' ? teacherId   : roomId
   const entityName = mode === 'group' ? groupName : mode === 'teacher' ? teacherName : roomName
@@ -103,7 +123,7 @@ export default function SchedulePage() {
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
   }, [])
 
-  // ── Week prefetch: cache current + next week on load ──────────────────────
+  // ── Week prefetch: cache current + next week, once per entity ────────────
   const prefetchedRef = useRef<Set<string>>(new Set())
 
   const prefetchWeek = useCallback(async (weekOffset: number) => {
@@ -113,11 +133,8 @@ export default function SchedulePage() {
     const year = monday.getFullYear()
     const cKey = weekCacheKey(mode, entityId, weekNum, year)
 
-    // Skip if already cached in localStorage or already being fetched this session
     if (prefetchedRef.current.has(cKey)) return
-    try {
-      if (localStorage.getItem(cKey)) { prefetchedRef.current.add(cKey); return }
-    } catch {}
+    try { if (localStorage.getItem(cKey)) { prefetchedRef.current.add(cKey); return } } catch {}
 
     prefetchedRef.current.add(cKey)
     try {
@@ -132,18 +149,23 @@ export default function SchedulePage() {
         saveWeekToCache(mode, entityId, weekNum, year, dayMap)
       }
     } catch {
-      prefetchedRef.current.delete(cKey) // allow retry next time
+      prefetchedRef.current.delete(cKey)
     }
   }, [entityId, mode])
 
+  // Запускаем prefetch только при смене entity — с большими задержками
+  const lastPrefetchEntity = useRef<string | null>(null)
   useEffect(() => {
     if (!entityId) return
-    // Stagger requests to avoid hitting rate limit
-    const t0 = setTimeout(() => prefetchWeek(0), 800)
-    const t1 = setTimeout(() => prefetchWeek(1), 2500)
-    const t2 = setTimeout(() => prefetchWeek(2), 4500)
-    return () => { clearTimeout(t0); clearTimeout(t1); clearTimeout(t2) }
-  }, [entityId, mode, prefetchWeek])
+    const key = `${mode}:${entityId}`
+    if (lastPrefetchEntity.current === key) return
+    lastPrefetchEntity.current = key
+
+    // Текущая неделя — через 3с после загрузки дня, следующая — через 8с
+    const t0 = setTimeout(() => prefetchWeek(0), 3000)
+    const t1 = setTimeout(() => prefetchWeek(1), 8000)
+    return () => { clearTimeout(t0); clearTimeout(t1) }
+  }, [entityId, mode]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Day query ─────────────────────────────────────────────────────────────
   const { data: dayData, isLoading, isFetching, isError } = useQuery({
