@@ -170,11 +170,11 @@ body > * { position: relative; z-index: 1; }
   animation: shimmer 1.5s ease infinite;
 }
 
-/* Card hover lift */
-.card {
+/* Card hover lift — только для явных .lesson-card */
+.lesson-card-hover {
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
-.card:hover {
+.lesson-card-hover:hover {
   transform: translateY(-1px);
   box-shadow: 0 4px 20px rgba(0,0,0,0.3);
 }

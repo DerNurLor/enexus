@@ -32,10 +32,10 @@ export function DesktopSidebar() {
           const active = pathname === href || pathname.startsWith(href + '/')
           return (
             <Link key={href} href={href}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200"
+              className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 hover:bg-white/5"
               style={active
-                ? { background: 'var(--cyan)', color: '#000' }
-                : { color: 'var(--t-secondary)' }}>
+                ? { background: 'var(--cyan-dim)', color: 'var(--cyan)', borderLeft: '3px solid var(--cyan)', paddingLeft: 9 }
+                : { color: 'var(--t-secondary)', borderLeft: '3px solid transparent', paddingLeft: 9 }}>
               <Icon size={18} strokeWidth={active ? 2.5 : 1.8} />
               {label}
             </Link>
