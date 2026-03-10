@@ -24,9 +24,8 @@ class Settings(BaseSettings):
     cors_allowed_origins: str = ""
 
     # MongoDB — shared with Backend
-    # mongo_uri: str = "mongodb://mongo:27017"
+    mongo_uri: str = "mongodb://mongo:27017"
     mongo_db:  str = "ncfu_schedule"
-    auth_mongo_uri: str = "mongodb://mongo:27017"
     auth_mongo_db: str = "ncfu_auth"
 
     # Redis — shared with Backend
@@ -52,6 +51,12 @@ class Settings(BaseSettings):
     rate_limit_user_rpm:   int = 120
     rate_limit_anon_rpm:   int = 30
     rate_limit_window:     int = 60
+
+    # Message quota (must match ecampus_bot config)
+    quota_private:     int = 3
+    quota_group_small: int = 3
+    quota_group_large: int = 5
+    quota_ttl_hours:   int = 7
 
     # Logging
     activity_log_ttl_days: int = 90
