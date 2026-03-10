@@ -102,8 +102,8 @@ class Settings(BaseSettings):
     sentry_env:         str       = ""
 
     # Rate limiting
-    rate_limit_user_rpm:   int = 120
-    rate_limit_anon_rpm:   int = 30
+    rate_limit_user_rpm:   int = 300
+    rate_limit_anon_rpm:   int = 120
     rate_limit_bot_rpm:    int = 20
     rate_limit_window:     int = 60
     # Webhook-specific limit (req/min per IP, Telegram IPs are whitelisted)
