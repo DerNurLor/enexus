@@ -83,7 +83,7 @@ export function PanelUsers() {
                     </td>
                     <td><RolePills roles={u.roles} /></td>
                     <td style={{ fontSize: 10, color: 'var(--t-40)' }}>{u.last_active ? timeAgo(u.last_active) : '—'}</td>
-                    <td style={{ fontSize: 11 }}>{u.daily_requests || 0}</td>
+                    <td style={{ fontSize: 11 }}>{u.quota_cap}</td>
                     <td><StatusBadge blocked={u.is_blocked} /></td>
                   </tr>
                 ))
