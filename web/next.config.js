@@ -1,4 +1,5 @@
-const withPWA = require('@ducanh2912/next-pwa').default({
+/** @type {import('next').NextConfig} */
+const withPWA = require('next-pwa')({
   dest: 'public',
   register: true,
   skipWaiting: true,
@@ -6,7 +7,6 @@ const withPWA = require('@ducanh2912/next-pwa').default({
 })
 
 const nextConfig = {
-  output: 'standalone',
   reactStrictMode: true,
 }
 
