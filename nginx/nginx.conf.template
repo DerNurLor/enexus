@@ -76,6 +76,7 @@ http {
         set $$upstream_bot       http://bot:8001;
         set $$upstream_miniapp   http://miniapp:8002;
         set $$upstream_dashboard http://dashboard:8003;
+        set $$upstream_web       http://web:3000;
 
         # Общие proxy headers
         proxy_http_version    1.1;
@@ -127,7 +128,6 @@ http {
         # Статические ассеты SPA (JS/CSS) — разрешены без префикса,
         # т.к. Vite генерирует абсолютные пути /dashboard/assets/*
         location /dashboard/assets/ {
-            rewrite ^(/dashboard/.*)$ $$1 break;
             proxy_pass $$upstream_backend;
             expires 1y;
             add_header Cache-Control "public, immutable";
@@ -219,6 +219,59 @@ http {
         location / {
             limit_req zone=api_limit burst=30 nodelay;
             proxy_pass $$upstream_backend;
+        }
+    }
+
+    # ── Студенческий портал (app.*) ──────────────────────────────────────────
+    server {
+        listen 80;
+        server_name app.${NGINX_DOMAIN:-localhost};
+
+        set $$upstream_web http://web:3000;
+
+        proxy_http_version    1.1;
+        proxy_set_header Host              $$host;
+        proxy_set_header X-Real-IP         $$remote_addr;
+        proxy_set_header X-Forwarded-For   $$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $$scheme;
+        proxy_set_header Connection        "";
+        proxy_read_timeout    60s;
+        proxy_connect_timeout 10s;
+
+        # Next.js HMR websocket (dev only)
+        location /_next/webpack-hmr {
+            proxy_pass         $$upstream_web;
+            proxy_set_header Upgrade    $$http_upgrade;
+            proxy_set_header Connection "upgrade";
+        }
+
+        # Next.js static assets — aggressive caching
+        location /_next/static/ {
+            proxy_pass $$upstream_web;
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+
+        # PWA assets
+        location /icons/ {
+            proxy_pass $$upstream_web;
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+
+        location = /manifest.json {
+            proxy_pass $$upstream_web;
+            add_header Cache-Control "public, max-age=86400";
+        }
+
+        location = /sw.js {
+            proxy_pass $$upstream_web;
+            add_header Cache-Control "no-cache, no-store, must-revalidate";
+        }
+
+        # All other requests → Next.js
+        location / {
+            proxy_pass $$upstream_web;
         }
     }
 
