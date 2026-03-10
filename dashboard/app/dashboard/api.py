@@ -42,6 +42,8 @@ _utcnow = lambda: datetime.now(timezone.utc)  # noqa: E731
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _user_dict(u: AuthUser) -> dict:
+    from app.core.config import settings as _cfg
+    quota_cap = u.daily_requests if (u.daily_requests and u.daily_requests > 0) else _cfg.quota_private
     return {
         "id":           str(u.id),
         "tg_id":        u.tg_id,
@@ -56,6 +58,7 @@ def _user_dict(u: AuthUser) -> dict:
         "last_active":  u.last_active.isoformat() if u.last_active else "",
         "created_at":   u.created_at.isoformat() if u.created_at else "",
         "daily_requests":    u.daily_requests,
+        "quota_cap":         quota_cap,
         "monthly_ai_tokens": u.monthly_ai_tokens,
         "extra_permissions": u.extra_permissions or [],
         "accent_color":      getattr(u, "accent_color", "#7c6eff"),
