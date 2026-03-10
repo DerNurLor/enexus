@@ -228,6 +228,7 @@ http {
         server_name app.${NGINX_DOMAIN:-localhost};
 
         set $$upstream_web http://web:3000;
+        set $$upstream_backend_app http://backend:8000;
 
         proxy_http_version    1.1;
         proxy_set_header Host              $$host;
@@ -267,6 +268,11 @@ http {
         location = /sw.js {
             proxy_pass $$upstream_web;
             add_header Cache-Control "no-cache, no-store, must-revalidate";
+        }
+
+        # API proxy → backend
+        location /api/ {
+            proxy_pass $$upstream_backend_app;
         }
 
         # All other requests → Next.js
