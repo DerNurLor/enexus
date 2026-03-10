@@ -29,7 +29,7 @@ x-quota: &quota-env
   QUOTA_PRIVATE:     "${QUOTA_PRIVATE:-3}"
   QUOTA_GROUP_SMALL: "${QUOTA_GROUP_SMALL:-3}"
   QUOTA_GROUP_LARGE: "${QUOTA_GROUP_LARGE:-5}"
-  QUOTA_TTL_HOURS:   "${QUOTA_TTL_HOURS:-4}"
+  QUOTA_TTL_HOURS:   "${QUOTA_TTL_HOURS:-7}"
 
 services:
 
@@ -263,6 +263,7 @@ services:
       - "0.0.0.0:8080:80"
     environment:
       NGINX_ADMIN_PATH: "${ADMIN_PATH:-admin}"
+      NGINX_DOMAIN:     "${DOMAIN:-localhost}"
     volumes:
       - ./nginx/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
       - ./nginx/entrypoint.sh:/docker-entrypoint-nginx.sh:ro
@@ -272,6 +273,7 @@ services:
       bot:       { condition: service_healthy }
       miniapp:   { condition: service_healthy }
       dashboard: { condition: service_healthy }
+      web:       { condition: service_healthy }
     networks: [ncfu_net]
     healthcheck:
       test: ["CMD", "nginx", "-t"]
@@ -304,6 +306,34 @@ services:
       mongo: { condition: service_healthy }
     networks: [ncfu_net]
     profiles: [dev]
+
+# ────────────────────────────────────────────────────────────────────────────
+# WEB — Студенческий портал (Next.js PWA)  :3000
+# ────────────────────────────────────────────────────────────────────────────
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    image: ncfu_web:latest
+    container_name: ncfu_web
+    restart: unless-stopped
+    environment:
+      NODE_ENV:               "production"
+      NEXT_PUBLIC_API_URL:    "${WEBHOOK_BASE_URL}"
+      NEXT_TELEMETRY_DISABLED: "1"
+      <<: *quota-env
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      backend: { condition: service_healthy }
+    networks: [ncfu_net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
 # ────────────────────────────────────────────────────────────────────────────
 # VOLUMES & NETWORKS
