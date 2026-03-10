@@ -13,7 +13,8 @@ export interface AdminUser {
   block_reason?: string
   last_active?: string
   created_at?: string
-  daily_requests: number
+  daily_requests: number | null
+  quota_cap: number
   monthly_ai_tokens: number
   extra_permissions: string[]
   accent_color: string
