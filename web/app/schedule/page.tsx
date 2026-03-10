@@ -104,36 +104,45 @@ export default function SchedulePage() {
   }, [])
 
   // ── Week prefetch: cache current + next week on load ──────────────────────
+  const prefetchedRef = useRef<Set<string>>(new Set())
+
   const prefetchWeek = useCallback(async (weekOffset: number) => {
     if (!entityId) return
     const monday = startOfWeek(addDays(new Date(), weekOffset * 7), { weekStartsOn: 1 })
     const weekNum = getISOWeek(monday)
     const year = monday.getFullYear()
     const cKey = weekCacheKey(mode, entityId, weekNum, year)
-    if (localStorage.getItem(cKey)) return // already cached
 
+    // Skip if already cached in localStorage or already being fetched this session
+    if (prefetchedRef.current.has(cKey)) return
+    try {
+      if (localStorage.getItem(cKey)) { prefetchedRef.current.add(cKey); return }
+    } catch {}
+
+    prefetchedRef.current.add(cKey)
     try {
       let weekData
-      if (mode === 'group')   weekData = await api.getGroupWeek(entityId, weekNum)
+      if (mode === 'group')        weekData = await api.getGroupWeek(entityId, weekNum)
       else if (mode === 'teacher') weekData = await api.getTeacherWeek(entityId, weekNum)
-      else weekData = await api.getRoomWeek(entityId, weekNum)
+      else                         weekData = await api.getRoomWeek(entityId, weekNum)
 
       if (weekData?.days) {
         const dayMap: Record<string, Lesson[]> = {}
-        weekData.days.forEach((d: any) => {
-          dayMap[d.date] = d.lessons ?? []
-        })
+        weekData.days.forEach((d: any) => { dayMap[d.date] = d.lessons ?? [] })
         saveWeekToCache(mode, entityId, weekNum, year, dayMap)
       }
-    } catch {}
+    } catch {
+      prefetchedRef.current.delete(cKey) // allow retry next time
+    }
   }, [entityId, mode])
 
   useEffect(() => {
     if (!entityId) return
-    // Prefetch current and next 2 weeks in background
-    setTimeout(() => prefetchWeek(0), 500)
-    setTimeout(() => prefetchWeek(1), 1200)
-    setTimeout(() => prefetchWeek(2), 2000)
+    // Stagger requests to avoid hitting rate limit
+    const t0 = setTimeout(() => prefetchWeek(0), 800)
+    const t1 = setTimeout(() => prefetchWeek(1), 2500)
+    const t2 = setTimeout(() => prefetchWeek(2), 4500)
+    return () => { clearTimeout(t0); clearTimeout(t1); clearTimeout(t2) }
   }, [entityId, mode, prefetchWeek])
 
   // ── Day query ─────────────────────────────────────────────────────────────
