@@ -1,24 +1,26 @@
 'use client'
 
-import { MapPin, User } from 'lucide-react'
+import { MapPin, User, Users } from 'lucide-react'
 import { useScheduleStore } from '@/lib/store'
 
 export type LessonType = 'lab' | 'lecture' | 'seminar' | 'practice'
 
 export interface LessonCardData {
-  id:          string
-  subject:     string
-  type:        LessonType
-  teacher:     string
-  teacherId?:  number | null
-  room:        string
-  roomId?:     number | null
-  groupName?:  string | null
-  groupId?:    number | null
-  timeStart:   string
-  timeEnd:     string
-  subgroup?:   string
-  note?:       string
+  id:           string
+  subject:      string
+  type:         LessonType
+  teacher:      string
+  teacherId?:   number | null
+  showTeacher?: boolean        // default true
+  room:         string
+  roomId?:      number | null
+  showRoom?:    boolean        // default true
+  groupName?:   string | null
+  groupId?:     number | null
+  timeStart:    string
+  timeEnd:      string
+  subgroup?:    string
+  note?:        string
 }
 
 const TYPE_CONFIG: Record<LessonType, { label: string; color: string; bg: string }> = {
@@ -31,6 +33,9 @@ const TYPE_CONFIG: Record<LessonType, { label: string; color: string; bg: string
 export function LessonCard({ lesson }: { lesson: LessonCardData }) {
   const cfg = TYPE_CONFIG[lesson.type]
   const { setTeacher, setRoom, setGroup, setMode } = useScheduleStore()
+
+  const showTeacher = lesson.showTeacher !== false
+  const showRoom    = lesson.showRoom    !== false
 
   function handleTeacherClick(e: React.MouseEvent) {
     if (!lesson.teacherId) return
@@ -56,13 +61,14 @@ export function LessonCard({ lesson }: { lesson: LessonCardData }) {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  const hasTeacherLink = !!lesson.teacherId
-  const hasRoomLink    = !!lesson.roomId
+  const hasTeacherLink = showTeacher && !!lesson.teacherId
+  const hasRoomLink    = showRoom    && !!lesson.roomId
   const hasGroupLink   = !!(lesson.groupId && lesson.groupName)
 
   return (
     <div className="card flex gap-0 overflow-hidden"
       style={{ borderLeft: `3px solid ${cfg.color}` }}>
+
       {/* Time */}
       <div className="flex flex-col justify-center px-4 py-4 min-w-[72px]">
         <span className="text-sm font-bold tabular-nums" style={{ color: 'var(--t-primary)' }}>
@@ -94,30 +100,40 @@ export function LessonCard({ lesson }: { lesson: LessonCardData }) {
             {cfg.label}
           </span>
         </div>
+
         <div className="flex items-center gap-3 flex-wrap">
-          <div className="flex items-center gap-1">
-            <User size={11} style={{ color: 'var(--t-muted)' }} />
-            <button
-              onClick={hasTeacherLink ? handleTeacherClick : undefined}
-              className={`text-xs transition-colors ${hasTeacherLink ? 'hover:text-[var(--cyan)] cursor-pointer underline-offset-2 hover:underline' : 'cursor-default'}`}
-              style={{ color: 'var(--t-secondary)', background: 'none', border: 'none', padding: 0 }}
-            >
-              {lesson.teacher}
-            </button>
-          </div>
-          <div className="flex items-center gap-1">
-            <MapPin size={11} style={{ color: 'var(--t-muted)' }} />
-            <button
-              onClick={hasRoomLink ? handleRoomClick : undefined}
-              className={`text-xs transition-colors ${hasRoomLink ? 'hover:text-[var(--cyan)] cursor-pointer underline-offset-2 hover:underline' : 'cursor-default'}`}
-              style={{ color: 'var(--t-secondary)', background: 'none', border: 'none', padding: 0 }}
-            >
-              {lesson.room}
-            </button>
-          </div>
+          {/* Teacher */}
+          {showTeacher && lesson.teacher && lesson.teacher !== '—' && (
+            <div className="flex items-center gap-1">
+              <User size={11} style={{ color: 'var(--t-muted)' }} />
+              <button
+                onClick={hasTeacherLink ? handleTeacherClick : undefined}
+                className={`text-xs transition-colors ${hasTeacherLink ? 'hover:text-[var(--cyan)] cursor-pointer underline-offset-2 hover:underline' : 'cursor-default'}`}
+                style={{ color: 'var(--t-secondary)', background: 'none', border: 'none', padding: 0 }}
+              >
+                {lesson.teacher}
+              </button>
+            </div>
+          )}
+
+          {/* Room */}
+          {showRoom && lesson.room && lesson.room !== '—' && (
+            <div className="flex items-center gap-1">
+              <MapPin size={11} style={{ color: 'var(--t-muted)' }} />
+              <button
+                onClick={hasRoomLink ? handleRoomClick : undefined}
+                className={`text-xs transition-colors ${hasRoomLink ? 'hover:text-[var(--cyan)] cursor-pointer underline-offset-2 hover:underline' : 'cursor-default'}`}
+                style={{ color: 'var(--t-secondary)', background: 'none', border: 'none', padding: 0 }}
+              >
+                {lesson.room}
+              </button>
+            </div>
+          )}
+
+          {/* Group (only in teacher/room mode) */}
           {hasGroupLink && (
             <div className="flex items-center gap-1">
-              <span style={{ color: 'var(--t-muted)', fontSize: 11 }}>👥</span>
+              <Users size={11} style={{ color: 'var(--t-muted)' }} />
               <button
                 onClick={handleGroupClick}
                 className="text-xs transition-colors hover:text-[var(--cyan)] cursor-pointer underline-offset-2 hover:underline"
@@ -128,6 +144,7 @@ export function LessonCard({ lesson }: { lesson: LessonCardData }) {
             </div>
           )}
         </div>
+
         {lesson.note && (
           <div className="mt-1.5 text-xs" style={{ color: 'var(--t-muted)' }}>{lesson.note}</div>
         )}
@@ -135,4 +152,3 @@ export function LessonCard({ lesson }: { lesson: LessonCardData }) {
     </div>
   )
 }
-

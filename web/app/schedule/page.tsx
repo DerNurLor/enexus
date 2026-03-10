@@ -193,6 +193,20 @@ export default function SchedulePage() {
         {items.map((lesson, i) => {
           const isCurrent = isToday && lesson.time_start <= nowStr && lesson.time_end >= nowStr
           const isPast    = isToday && lesson.time_end < nowStr
+
+          // В режиме преподавателя — показываем группу вместо преподавателя
+          // В режиме аудитории — показываем преподавателя (группа идёт отдельным полем)
+          const teacherDisplay = mode === 'teacher'
+            ? null  // не показываем — это сам преподаватель
+            : (lesson.teacher_name || '—')
+
+          const roomDisplay = mode === 'room'
+            ? null  // не показываем аудиторию — мы уже в её расписании
+            : (lesson.classroom || lesson.room_name || '—')
+
+          // group показываем только когда смотрим преподавателя или аудиторию
+          const showGroup = mode === 'teacher' || mode === 'room'
+
           return (
             <div key={i}
               style={{ opacity: isPast ? 0.5 : 1, transition: 'opacity 0.3s' }}
@@ -207,16 +221,14 @@ export default function SchedulePage() {
                 id:          String(i),
                 subject:     lesson.subject,
                 type:        mapLessonType(lesson.lesson_type),
-                teacher:     mode === 'teacher'
-                  ? (lesson.group_name || '—')
-                  : (lesson.teacher_name || '—'),
+                teacher:     teacherDisplay || '',
                 teacherId:   mode !== 'teacher' ? lesson.teacher_id : null,
-                room:        mode === 'room'
-                  ? `${lesson.group_name || '—'} · ${lesson.teacher_name || '—'}`
-                  : (lesson.classroom || lesson.room_name || '—'),
-                roomId:      mode !== 'room' ? undefined : undefined,
-                groupName:   mode !== 'group' ? lesson.group_name : null,
-                groupId:     mode !== 'group' ? lesson.group_id : null,
+                showTeacher: mode !== 'teacher',
+                room:        roomDisplay || '',
+                roomId:      mode !== 'room' ? (lesson.room_id ?? undefined) : undefined,
+                showRoom:    mode !== 'room',
+                groupName:   showGroup ? (lesson.group_name || null) : null,
+                groupId:     showGroup ? (lesson.group_id || null) : null,
                 timeStart:   lesson.time_start,
                 timeEnd:     lesson.time_end,
                 subgroup:    lesson.subgroup ?? undefined,
