@@ -52,7 +52,7 @@ export default function SchedulePage() {
     enabled:  !!entityId && mode === 'group',
   })
 
-  const { data: searchData } = useQuery({
+  const { data: searchData } = useQuery<unknown>({
     queryKey: ['search', mode, query],
     queryFn:  () => {
       if (query.length < 2) return null
@@ -103,7 +103,7 @@ export default function SchedulePage() {
           </button>
         )}
         {showDropdown && query.length >= 2 && searchData && (
-          <SearchDropdown mode={mode} data={searchData}
+          <SearchDropdown mode={mode} data={searchData as any}
             onClose={() => { setShowDropdown(false); setQuery('') }} />
         )}
       </div>
