@@ -352,12 +352,35 @@ async def admin_user_detail(
     activity = await AuthActivityLog.find(
         AuthActivityLog.user_id == user_id
     ).sort("-timestamp").to_list(50)
+
+    # Quota info from Redis
+    quota = None
+    if user.tg_id:
+        try:
+            from app.cache.redis import get_redis
+            from app.core.config import settings as _cfg
+            r = get_redis()
+            key = f"quota:{user.tg_id}"
+            raw, ttl = await r.get(key), await r.ttl(key)
+            used = int(raw) if raw else 0
+            cap  = user.daily_requests if (user.daily_requests and user.daily_requests > 0) else _cfg.quota_private
+            quota = {
+                "used":      used,
+                "cap":       cap,
+                "remaining": max(cap - used, 0),
+                "ttl_secs":  max(int(ttl), 0) if ttl and ttl > 0 else 0,
+                "exhausted": used >= cap,
+            }
+        except Exception:
+            pass
+
     return {
         "user":     _user_dict(user),
         "keys":     [{"id": str(k.id), "prefix": k.key_prefix, "name": k.name,
                       "is_revoked": k.is_revoked, "created_at": k.created_at.isoformat()} for k in keys],
         "activity": [{"action": a.action, "ip": a.ip, "details": a.details,
                       "timestamp": a.timestamp.isoformat()} for a in activity],
+        "quota":    quota,
     }
 
 

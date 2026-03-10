@@ -19,6 +19,14 @@ export interface AdminUser {
   accent_color: string
 }
 
+export interface UserQuota {
+  used: number
+  cap: number
+  remaining: number
+  ttl_secs: number
+  exhausted: boolean
+}
+
 export interface ApiKey {
   id: string
   prefix: string
