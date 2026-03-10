@@ -1,4 +1,4 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL || ''
+const BASE = (process.env.NEXT_PUBLIC_API_URL || '') + '/api'
 
 async function get<T>(path: string, params?: Record<string, string | number>): Promise<T> {
   const url = new URL(`${BASE}${path}`)
