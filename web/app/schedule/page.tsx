@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Search, CalendarRange, X } from 'lucide-react'
+import { Search, CalendarRange, X, WifiOff } from 'lucide-react'
 import { format } from 'date-fns'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { PillTabs } from '@/components/ui/PillTabs'
@@ -35,27 +35,62 @@ function mapLessonType(t: string | null): 'lab' | 'lecture' | 'seminar' | 'pract
   return 'practice'
 }
 
+function getCacheKey(mode: string, id: number | null, date: string) {
+  return `schedule_cache:${mode}:${id}:${date}`
+}
+
+function saveToCache(key: string, lessons: Lesson[]) {
+  try { localStorage.setItem(key, JSON.stringify(lessons)) } catch {}
+}
+
+function loadFromCache(key: string): Lesson[] | null {
+  try {
+    const raw = localStorage.getItem(key)
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+}
+
 export default function SchedulePage() {
   const { mode, groupId, groupName, teacherId, teacherName, roomId, roomName, setMode } = useScheduleStore()
   const [query, setQuery]               = useState('')
   const [showDropdown, setShowDropdown] = useState(false)
   const [selectedDate, setSelectedDate] = useState(new Date())
+  const [isOffline, setIsOffline]       = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
 
   const entityId   = mode === 'group' ? groupId   : mode === 'teacher' ? teacherId   : roomId
   const entityName = mode === 'group' ? groupName : mode === 'teacher' ? teacherName : roomName
   const dateStr    = format(selectedDate, 'yyyy-MM-dd')
+  const cacheKey   = getCacheKey(mode, entityId, dateStr)
 
-  const { data: dayData, isLoading, isFetching } = useQuery({
+  // Track online/offline
+  useEffect(() => {
+    setIsOffline(!navigator.onLine)
+    const on  = () => setIsOffline(false)
+    const off = () => setIsOffline(true)
+    window.addEventListener('online',  on)
+    window.addEventListener('offline', off)
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
+  }, [])
+
+  const { data: dayData, isLoading, isFetching, isError } = useQuery({
     queryKey: ['schedule', 'day', mode, entityId, dateStr],
-    queryFn:  () => {
+    queryFn:  async () => {
       if (!entityId) return null
       if (mode === 'group')   return api.getGroupDay(entityId, dateStr)
       if (mode === 'teacher') return api.getTeacherDay(entityId, dateStr)
       return api.getRoomDay(entityId, dateStr)
     },
     enabled:  !!entityId,
+    retry: 1,
   })
+
+  // Save to cache when data arrives
+  useEffect(() => {
+    if (dayData?.lessons?.length) {
+      saveToCache(cacheKey, dayData.lessons)
+    }
+  }, [dayData, cacheKey])
 
   const { data: searchData } = useQuery<
     { total: number; groups?: GroupMeta[]; teachers?: TeacherMeta[]; rooms?: RoomMeta[] } | null
@@ -70,12 +105,40 @@ export default function SchedulePage() {
     enabled: query.length >= 2,
   })
 
-  const lessons: Lesson[] = dayData?.lessons || []
+  // Use cached lessons if offline or error
+  const liveLessons: Lesson[]   = dayData?.lessons || []
+  const cachedLessons: Lesson[] = loadFromCache(cacheKey) || []
+  const showingCache = (isOffline || isError) && liveLessons.length === 0 && cachedLessons.length > 0
+  const lessons      = showingCache ? cachedLessons : liveLessons
 
   function handleModeChange(m: SearchMode) {
     setMode(m)
     setQuery('')
     setShowDropdown(false)
+  }
+
+  function renderLessons(items: Lesson[]) {
+    return (
+      <div className="flex flex-col gap-3 stagger">
+        {items.map((lesson, i) => (
+          <LessonCard key={i} lesson={{
+            id:        String(i),
+            subject:   lesson.subject,
+            type:      mapLessonType(lesson.lesson_type),
+            teacher:   mode === 'teacher'
+              ? (lesson.group_name || '—')
+              : (lesson.teacher_name || '—'),
+            room:      mode === 'room'
+              ? `${lesson.group_name || '—'} · ${lesson.teacher_name || '—'}`
+              : (lesson.classroom || lesson.room_name || '—'),
+            timeStart: lesson.time_start,
+            timeEnd:   lesson.time_end,
+            subgroup:  lesson.subgroup ?? undefined,
+            note:      lesson.note ?? undefined,
+          }} />
+        ))}
+      </div>
+    )
   }
 
   return (
@@ -89,6 +152,15 @@ export default function SchedulePage() {
           </button>
         }
       />
+
+      {/* Offline banner */}
+      {isOffline && (
+        <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl text-xs"
+          style={{ background: 'rgba(255,180,0,0.08)', border: '1px solid rgba(255,180,0,0.2)', color: 'rgba(255,180,0,0.9)' }}>
+          <WifiOff size={13} />
+          <span>Нет подключения — показываем кешированные данные</span>
+        </div>
+      )}
 
       <div className="mb-3">
         <PillTabs options={SEARCH_MODES} value={mode} onChange={handleModeChange} />
@@ -126,7 +198,7 @@ export default function SchedulePage() {
             Введите название группы,<br />преподавателя или аудитории
           </span>
         </div>
-      ) : (isLoading || isFetching) ? (
+      ) : (isLoading || isFetching) && !showingCache ? (
         <div className="flex flex-col gap-3">
           {[1,2,3].map(i => (
             <div key={i} className="card h-20 animate-pulse" style={{ opacity: 0.5 }} />
@@ -136,29 +208,18 @@ export default function SchedulePage() {
         <div className="flex flex-col items-center py-16 gap-3">
           <CalendarRange size={40} style={{ color: 'var(--t-muted)' }} />
           <span className="text-sm" style={{ color: 'var(--t-muted)' }}>
-            {dayData?.message || 'Занятий нет'}
+            {isOffline ? 'Нет данных в кеше для этого дня' : (dayData?.message || 'Занятий нет')}
           </span>
         </div>
       ) : (
-        <div className="flex flex-col gap-3 stagger">
-          {lessons.map((lesson, i) => (
-            <LessonCard key={i} lesson={{
-              id:        String(i),
-              subject:   lesson.subject,
-              type:      mapLessonType(lesson.lesson_type),
-              teacher:   mode === 'teacher'
-                ? (lesson.group_name || '—')
-                : (lesson.teacher_name || '—'),
-              room:      mode === 'room'
-                ? `${lesson.group_name || '—'} · ${lesson.teacher_name || '—'}`
-                : (lesson.classroom || lesson.room_name || '—'),
-              timeStart: lesson.time_start,
-              timeEnd:   lesson.time_end,
-              subgroup:  lesson.subgroup ?? undefined,
-              note:      lesson.note ?? undefined,
-            }} />
-          ))}
-        </div>
+        <>
+          {showingCache && (
+            <p className="text-xs mb-3" style={{ color: 'var(--t-muted)' }}>
+              📦 Данные из кеша
+            </p>
+          )}
+          {renderLessons(lessons)}
+        </>
       )}
     </div>
   )
