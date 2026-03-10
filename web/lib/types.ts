@@ -8,6 +8,7 @@ export interface Lesson {
   teacher_id:   number | null
   classroom:    string | null
   room_name:    string | null
+  room_id:      number | null
   group_name:   string | null
   group_id:     number | null
   subgroup:     string | null
