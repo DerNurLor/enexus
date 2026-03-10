@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     cors_allowed_origins: str = ""
 
     # MongoDB — shared with Backend
-    mongo_uri: str = "mongodb://mongo:27017"
+    auth_mongo_uri: str = "mongodb://mongo:27017"
     mongo_db:  str = "ncfu_schedule"
     auth_mongo_db: str = "ncfu_auth"
 
