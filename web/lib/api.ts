@@ -29,7 +29,7 @@ export const api = {
     get<import('./types').GroupSchedule>(`/groups/${groupId}/schedule`),
 
   getGroupDay: (groupId: number, date: string) =>
-    get<import('./types').DayResponse>(`/groups/${groupId}/schedule/${date}`),
+    get<import('./types').DayResponse>(`/schedules/group/${groupId}/day`, { day: date }),
 
   // Schedules
   getScheduleDay: (groupId: number, day: string) =>
