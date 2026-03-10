@@ -1,0 +1,118 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --font-sans: 'Outfit', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --bg: #0a0a0a;
+  --surface: #161616;
+  --card: #1c1c1e;
+  --border: #2a2a2a;
+  --cyan: #5ce1e6;
+  --cyan-dim: rgba(92, 225, 230, 0.12);
+
+  --t-primary: #ffffff;
+  --t-secondary: #8e8e93;
+  --t-muted: #48484a;
+
+  --lab: #4ade80;
+  --lecture: #60a5fa;
+  --seminar: #fb923c;
+  --practice: #a78bfa;
+
+  --nav-height: 72px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  background: var(--bg);
+  color: var(--t-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 0; }
+
+/* Selection */
+::selection {
+  background: var(--cyan-dim);
+  color: var(--cyan);
+}
+
+/* Safe area for PWA */
+.pb-nav {
+  padding-bottom: calc(var(--nav-height) + var(--safe-bottom));
+}
+
+@layer components {
+  .card {
+    @apply bg-[var(--card)] rounded-2xl border border-[var(--border)];
+  }
+
+  .pill {
+    @apply inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-xs font-medium cursor-pointer transition-all duration-200;
+  }
+
+  .pill-active {
+    @apply bg-[var(--cyan)] text-black;
+  }
+
+  .pill-inactive {
+    @apply bg-[var(--card)] text-[var(--t-secondary)] border border-[var(--border)] hover:border-[var(--cyan)] hover:text-[var(--t-primary)];
+  }
+
+  .input-search {
+    @apply w-full bg-[var(--card)] border border-[var(--border)] rounded-2xl px-4 py-3 text-sm text-[var(--t-primary)] placeholder-[var(--t-muted)] outline-none transition-all duration-200;
+  }
+
+  .input-search:focus {
+    @apply border-[var(--cyan)] ring-1 ring-[var(--cyan)] ring-opacity-30;
+  }
+
+  .nav-btn {
+    @apply flex flex-col items-center gap-1 px-4 py-2 transition-all duration-200 cursor-pointer;
+  }
+}
+
+/* Animations */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+.animate-fade-up {
+  animation: fadeUp 0.3s ease forwards;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s ease forwards;
+}
+
+.stagger > * {
+  opacity: 0;
+  animation: fadeUp 0.3s ease forwards;
+}
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 60ms; }
+.stagger > *:nth-child(3) { animation-delay: 120ms; }
+.stagger > *:nth-child(4) { animation-delay: 180ms; }
+.stagger > *:nth-child(5) { animation-delay: 240ms; }
+.stagger > *:nth-child(6) { animation-delay: 300ms; }
