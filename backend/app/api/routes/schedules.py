@@ -250,3 +250,73 @@ async def get_schedule_for_range(
         "refreshing": refresh_reason,
         "days":       sorted(days, key=lambda d: d["date"]),
     }
+
+
+def _lesson_to_dict(l) -> dict:
+    return {
+        "subject":      l.subject,
+        "lesson_type":  l.lesson_type,
+        "time_start":   l.time_start,
+        "time_end":     l.time_end,
+        "teacher_name": l.teacher_name,
+        "teacher_id":   l.teacher_id,
+        "classroom":    l.room_name,
+        "room_name":    l.room_name,
+        "group_name":   l.group_name,
+        "group_id":     l.group_id,
+        "subgroup":     l.subgroup,
+        "week_type":    l.week_type,
+        "note":         l.note,
+    }
+
+
+@router.get("/teacher/{teacher_id}/day", summary="Schedule for a teacher on a specific date")
+async def get_teacher_day(
+    teacher_id: int,
+    day: date_type = Query(...),
+):
+    from app.models.lesson import LessonDoc
+    from app.models.teacher import Teacher
+    teacher = await Teacher.find_one(Teacher.teacher_id == teacher_id)
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+
+    lessons = await LessonDoc.find(
+        LessonDoc.teacher_id == teacher_id,
+        LessonDoc.date == day,
+    ).sort("+time_start").to_list()
+
+    return {
+        "teacher_id": teacher_id,
+        "name":       teacher.full_name,
+        "date":       day.isoformat(),
+        "refreshing": None,
+        "lessons":    [_lesson_to_dict(l) for l in lessons],
+        "message":    None if lessons else "No classes this day",
+    }
+
+
+@router.get("/room/{room_id}/day", summary="Schedule for a room on a specific date")
+async def get_room_day(
+    room_id: int,
+    day: date_type = Query(...),
+):
+    from app.models.lesson import LessonDoc
+    from app.models.room import Room
+    room = await Room.find_one(Room.room_id == room_id)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+
+    lessons = await LessonDoc.find(
+        LessonDoc.room_id == room_id,
+        LessonDoc.date == day,
+    ).sort("+time_start").to_list()
+
+    return {
+        "room_id":    room_id,
+        "name":       room.name,
+        "date":       day.isoformat(),
+        "refreshing": None,
+        "lessons":    [_lesson_to_dict(l) for l in lessons],
+        "message":    None if lessons else "No classes this day",
+    }

@@ -12,9 +12,6 @@ async function get<T>(path: string, params?: Record<string, string | number>): P
 
 export const api = {
   // Search
-  search: (q: string) =>
-    get<import('./types').SearchResults>('/search/', { q }),
-
   searchGroups: (q: string) =>
     get<{ total: number; groups: import('./types').GroupMeta[] }>('/search/groups', { q, limit: 20 }),
 
@@ -24,14 +21,13 @@ export const api = {
   searchRooms: (q: string) =>
     get<{ total: number; rooms: import('./types').RoomMeta[] }>('/search/rooms', { q, limit: 20 }),
 
-  // Groups
-  getGroupSchedule: (groupId: number) =>
-    get<import('./types').GroupSchedule>(`/groups/${groupId}/schedule`),
-
+  // Day schedules
   getGroupDay: (groupId: number, date: string) =>
     get<import('./types').DayResponse>(`/schedules/group/${groupId}/day`, { day: date }),
 
-  // Schedules
-  getScheduleDay: (groupId: number, day: string) =>
-    get<import('./types').DayResponse>(`/schedules/group/${groupId}/day`, { day }),
+  getTeacherDay: (teacherId: number, date: string) =>
+    get<import('./types').DayResponse>(`/schedules/teacher/${teacherId}/day`, { day: date }),
+
+  getRoomDay: (roomId: number, date: string) =>
+    get<import('./types').DayResponse>(`/schedules/room/${roomId}/day`, { day: date }),
 }
