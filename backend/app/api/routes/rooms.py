@@ -39,6 +39,26 @@ def _room_meta(r: Room) -> dict:
     }
 
 
+def _lesson_to_dict(l) -> dict:
+    return {
+        "subject":      l.subject,
+        "lesson_type":  l.lesson_type,
+        "time_start":   l.time_start,
+        "time_end":     l.time_end,
+        "teacher_name": l.teacher_name,
+        "teacher_id":   l.teacher_id,
+        "room_name":    l.room_name,
+        "room_id":      l.room_id,
+        "classroom":    l.room_name,
+        "group_name":   l.group_name,
+        "group_id":     l.group_id,
+        "subgroup":     l.subgroup,
+        "week_type":    l.week_type,
+        "note":         l.note,
+        "building":     l.building,
+    }
+
+
 @router.get("/", summary="List all rooms")
 async def list_rooms(
     q:            Optional[str]  = Query(None, description="Room name substring"),
@@ -49,11 +69,11 @@ async def list_rooms(
     has_schedule: Optional[bool] = Query(None),
 ):
     filters: dict = {}
-    if q:          filters["name"]       = {"$regex": q, "$options": "i"}
-    if building:   filters["building"]   = {"$regex": building, "$options": "i"}
-    if subject:    filters["subjects"]   = {"$regex": subject, "$options": "i"}
+    if q:          filters["name"]        = {"$regex": q, "$options": "i"}
+    if building:   filters["building"]    = {"$regex": building, "$options": "i"}
+    if subject:    filters["subjects"]    = {"$regex": subject, "$options": "i"}
     if teacher_id: filters["teacher_ids"] = teacher_id
-    if group_id:   filters["group_ids"]  = group_id
+    if group_id:   filters["group_ids"]   = group_id
     if has_schedule is True:  filters["schedule_scraped_at"] = {"$ne": None}
     if has_schedule is False: filters["schedule_scraped_at"] = None
 
@@ -93,37 +113,41 @@ async def get_free_rooms(
     duration: int           = Query(90,  description="Duration in minutes"),
     building: Optional[str] = Query(None),
 ):
-    """Returns rooms that have no lessons overlapping the [at, at+duration) window."""
+    """
+    Returns all known rooms that have NO lessons overlapping [at, at+duration).
+    Uses LessonDoc collection — works even if Room.schedule is not populated.
+    """
+    from datetime import timedelta, date as date_type
+    from app.models.lesson import LessonDoc
+
     try:
         dt_start = datetime.fromisoformat(at)
     except ValueError:
-        raise HTTPException(400, "Invalid datetime format. Use ISO 8601, e.g. 2025-01-15T10:00:00")
+        raise HTTPException(400, "Invalid datetime. Use ISO 8601: 2025-01-15T10:00:00")
 
-    from datetime import timedelta
     dt_end  = dt_start + timedelta(minutes=duration)
-    day_str = dt_start.date().isoformat()
+    day     = dt_start.date()
     t_start = dt_start.strftime("%H:%M")
     t_end   = dt_end.strftime("%H:%M")
 
-    filters: dict = {"schedule": {"$exists": True, "$ne": None}}
+    # Find all rooms that HAVE a lesson overlapping the window on this day
+    lesson_filters: dict = {
+        "date":       day,
+        "time_start": {"$lt": t_end},
+        "time_end":   {"$gt": t_start},
+        "room_id":    {"$ne": None},
+    }
+    busy_lessons = await LessonDoc.find(lesson_filters).to_list()
+    busy_room_ids = {l.room_id for l in busy_lessons}
+
+    # All rooms (optionally filtered by building)
+    room_filters: dict = {}
     if building:
-        filters["building"] = {"$regex": building, "$options": "i"}
+        room_filters["building"] = {"$regex": building, "$options": "i"}
 
-    rooms = await Room.find(filters).sort("name").to_list()
+    all_rooms = await Room.find(room_filters).sort("name").to_list()
 
-    free_rooms = []
-    for r in rooms:
-        day_data = (r.schedule or {}).get(day_str)
-        if not day_data:
-            free_rooms.append(r)
-            continue
-        lessons = day_data.get("lessons", [])
-        busy = any(
-            l.get("time_start", "00:00") < t_end and l.get("time_end", "00:00") > t_start
-            for l in lessons
-        )
-        if not busy:
-            free_rooms.append(r)
+    free = [r for r in all_rooms if r.room_id not in busy_room_ids]
 
     result_rooms = [
         {
@@ -132,16 +156,15 @@ async def get_free_rooms(
             "building": r.building,
             "capacity": getattr(r, "capacity", None),
         }
-        for r in free_rooms
+        for r in free
     ]
 
     by_building: dict = {}
     for r in result_rooms:
         key = r.get("building") or "—"
         by_building.setdefault(key, []).append({
-            "name":     r["name"],
-            "capacity": r.get("capacity"),
-            "room_id":  r["roomId"],
+            "name":    r["name"],
+            "room_id": r["roomId"],
         })
 
     return {"rooms": result_rooms, "by_building": by_building, "total": len(result_rooms)}
@@ -166,22 +189,24 @@ async def get_room_day(
     room_id: int,
     day: date_type = Query(...),
 ):
+    from app.models.lesson import LessonDoc
     r = await Room.find_one(Room.room_id == room_id)
     if not r:
         raise HTTPException(status_code=404, detail="Room not found")
 
-    day_str  = day.isoformat()
-    day_data = (r.schedule or {}).get(day_str)
-    stale, reason = _needs_refresh(r.schedule_scraped_at, r.schedule or {})
+    lessons = await LessonDoc.find(
+        LessonDoc.room_id == room_id,
+        LessonDoc.date == day,
+    ).sort("+time_start").to_list()
 
     return {
-        "room_id":  room_id,
-        "name":     r.name,
-        "building": r.building,
-        "date":     day_str,
-        "stale":    reason if stale else None,
-        "lessons":  day_data.get("lessons", []) if day_data else [],
-        "message":  None if day_data else "No classes this day",
+        "room_id":    room_id,
+        "name":       r.name,
+        "building":   r.building,
+        "date":       day.isoformat(),
+        "refreshing": None,
+        "lessons":    [_lesson_to_dict(l) for l in lessons],
+        "message":    None if lessons else "No classes this day",
     }
 
 
@@ -190,22 +215,27 @@ async def get_room_week(
     room_id: int,
     week: int = Query(..., ge=1, le=53),
 ):
+    from app.models.lesson import LessonDoc
     r = await Room.find_one(Room.room_id == room_id)
     if not r:
         raise HTTPException(status_code=404, detail="Room not found")
 
-    stale, reason = _needs_refresh(r.schedule_scraped_at, r.schedule or {})
-    days = [
-        {"date": iso, **day}
-        for iso, day in (r.schedule or {}).items()
-        if day.get("week_number") == week
-    ]
+    lessons = await LessonDoc.find(
+        LessonDoc.room_id == room_id,
+        LessonDoc.week_number == week,
+    ).sort("+date", "+time_start").to_list()
+
+    days_map: dict = {}
+    for l in lessons:
+        d = l.date.isoformat()
+        if d not in days_map:
+            days_map[d] = {"date": d, "week_number": week, "lessons": []}
+        days_map[d]["lessons"].append(_lesson_to_dict(l))
 
     return {
         "room_id":  room_id,
         "name":     r.name,
         "building": r.building,
         "week":     week,
-        "stale":    reason if stale else None,
-        "days":     sorted(days, key=lambda d: d["date"]),
+        "days":     sorted(days_map.values(), key=lambda d: d["date"]),
     }

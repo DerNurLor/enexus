@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
+from fastapi import APIRouter, HTTPException, Query
 from datetime import date as date_type, datetime
 from typing import Optional
 from loguru import logger
@@ -6,24 +6,6 @@ from loguru import logger
 from app.models.teacher import Teacher
 
 router = APIRouter(prefix="/teachers", tags=["Teachers"])
-
-STALE_HOURS      = 24
-MIN_FUTURE_WEEKS = 6
-
-
-def _needs_refresh(scraped_at, schedule: dict) -> tuple[bool, str]:
-    """
-    Teacher schedules are derived from group data — check staleness only.
-    No background HTTP fetch is triggered; refresh happens via the group scrape.
-    """
-    if not schedule:
-        return True, "no schedule yet — will populate after next group scrape"
-    if not scraped_at:
-        return True, "never scraped"
-    age_h = (datetime.utcnow() - scraped_at).total_seconds() / 3600
-    if age_h > STALE_HOURS:
-        return True, f"stale ({age_h:.1f}h) — refreshes with next group scrape"
-    return False, "fresh"
 
 
 def _teacher_meta(t: Teacher) -> dict:
@@ -38,9 +20,28 @@ def _teacher_meta(t: Teacher) -> dict:
         "group_ids":           t.group_ids,
         "group_names":         t.group_names,
         "schedule_scraped_at": t.schedule_scraped_at,
-        "days_count":          len(t.schedule) if t.schedule else 0,
         "first_seen_at":       t.first_seen_at,
         "last_seen_at":        t.last_seen_at,
+    }
+
+
+def _lesson_to_dict(l) -> dict:
+    return {
+        "subject":      l.subject,
+        "lesson_type":  l.lesson_type,
+        "time_start":   l.time_start,
+        "time_end":     l.time_end,
+        "teacher_name": l.teacher_name,
+        "teacher_id":   l.teacher_id,
+        "room_name":    l.room_name,
+        "room_id":      l.room_id,
+        "classroom":    l.room_name,
+        "group_name":   l.group_name,
+        "group_id":     l.group_id,
+        "subgroup":     l.subgroup,
+        "week_type":    l.week_type,
+        "note":         l.note,
+        "building":     l.building,
     }
 
 
@@ -66,18 +67,12 @@ async def list_teachers(
     return [_teacher_meta(t) for t in teachers]
 
 
-@router.get("/{teacher_id}", summary="Get teacher with full schedule")
+@router.get("/{teacher_id}", summary="Get teacher info")
 async def get_teacher(teacher_id: int):
     t = await Teacher.find_one(Teacher.teacher_id == teacher_id)
     if not t:
         raise HTTPException(status_code=404, detail="Teacher not found")
-
-    stale, reason = _needs_refresh(t.schedule_scraped_at, t.schedule or {})
-    return {
-        **_teacher_meta(t),
-        "stale":    reason if stale else None,
-        "schedule": t.schedule or {},
-    }
+    return _teacher_meta(t)
 
 
 @router.get("/{teacher_id}/day", summary="Teacher schedule for a specific date")
@@ -85,21 +80,23 @@ async def get_teacher_day(
     teacher_id: int,
     day: date_type = Query(...),
 ):
+    from app.models.lesson import LessonDoc
     t = await Teacher.find_one(Teacher.teacher_id == teacher_id)
     if not t:
         raise HTTPException(status_code=404, detail="Teacher not found")
 
-    day_str  = day.isoformat()
-    day_data = (t.schedule or {}).get(day_str)
-    stale, reason = _needs_refresh(t.schedule_scraped_at, t.schedule or {})
+    lessons = await LessonDoc.find(
+        LessonDoc.teacher_id == teacher_id,
+        LessonDoc.date == day,
+    ).sort("+time_start").to_list()
 
     return {
         "teacher_id": teacher_id,
-        "full_name":  t.full_name,
-        "date":       day_str,
-        "stale":      reason if stale else None,
-        "lessons":    day_data.get("lessons", []) if day_data else [],
-        "message":    None if day_data else "No classes this day",
+        "name":       t.full_name,
+        "date":       day.isoformat(),
+        "refreshing": None,
+        "lessons":    [_lesson_to_dict(l) for l in lessons],
+        "message":    None if lessons else "No classes this day",
     }
 
 
@@ -108,21 +105,27 @@ async def get_teacher_week(
     teacher_id: int,
     week: int = Query(..., ge=1, le=53),
 ):
+    from app.models.lesson import LessonDoc
     t = await Teacher.find_one(Teacher.teacher_id == teacher_id)
     if not t:
         raise HTTPException(status_code=404, detail="Teacher not found")
 
-    stale, reason = _needs_refresh(t.schedule_scraped_at, t.schedule or {})
-    days = [
-        {"date": iso, **day}
-        for iso, day in (t.schedule or {}).items()
-        if day.get("week_number") == week
-    ]
+    lessons = await LessonDoc.find(
+        LessonDoc.teacher_id == teacher_id,
+        LessonDoc.week_number == week,
+    ).sort("+date", "+time_start").to_list()
+
+    # Group by date
+    days_map: dict = {}
+    for l in lessons:
+        d = l.date.isoformat()
+        if d not in days_map:
+            days_map[d] = {"date": d, "week_number": week, "lessons": []}
+        days_map[d]["lessons"].append(_lesson_to_dict(l))
 
     return {
         "teacher_id": teacher_id,
-        "full_name":  t.full_name,
+        "name":       t.full_name,
         "week":       week,
-        "stale":      reason if stale else None,
-        "days":       sorted(days, key=lambda d: d["date"]),
+        "days":       sorted(days_map.values(), key=lambda d: d["date"]),
     }

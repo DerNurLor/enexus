@@ -262,6 +262,7 @@ def _lesson_to_dict(l) -> dict:
         "teacher_id":   l.teacher_id,
         "classroom":    l.room_name,
         "room_name":    l.room_name,
+        "room_id":      l.room_id,
         "group_name":   l.group_name,
         "group_id":     l.group_id,
         "subgroup":     l.subgroup,
