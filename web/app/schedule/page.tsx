@@ -48,8 +48,13 @@ export default function SchedulePage() {
 
   const { data: dayData, isLoading, isFetching } = useQuery({
     queryKey: ['schedule', 'day', mode, entityId, dateStr],
-    queryFn:  () => entityId && mode === 'group' ? api.getGroupDay(entityId, dateStr) : null,
-    enabled:  !!entityId && mode === 'group',
+    queryFn:  () => {
+      if (!entityId) return null
+      if (mode === 'group')   return api.getGroupDay(entityId, dateStr)
+      if (mode === 'teacher') return api.getTeacherDay(entityId, dateStr)
+      return api.getRoomDay(entityId, dateStr)
+    },
+    enabled:  !!entityId,
   })
 
   const { data: searchData } = useQuery<
@@ -141,8 +146,12 @@ export default function SchedulePage() {
               id:        String(i),
               subject:   lesson.subject,
               type:      mapLessonType(lesson.lesson_type),
-              teacher:   lesson.teacher_name || '—',
-              room:      lesson.classroom || lesson.room_name || '—',
+              teacher:   mode === 'teacher'
+                ? (lesson.group_name || '—')
+                : (lesson.teacher_name || '—'),
+              room:      mode === 'room'
+                ? `${lesson.group_name || '—'} · ${lesson.teacher_name || '—'}`
+                : (lesson.classroom || lesson.room_name || '—'),
               timeStart: lesson.time_start,
               timeEnd:   lesson.time_end,
               subgroup:  lesson.subgroup ?? undefined,

@@ -8,6 +8,8 @@ export interface Lesson {
   teacher_id:   number | null
   classroom:    string | null   // field name in group schedule
   room_name:    string | null   // field name in teacher/room schedule
+  group_name:   string | null
+  group_id:     number | null
   subgroup:     string | null
   week_type:    string | null
   note:         string | null
