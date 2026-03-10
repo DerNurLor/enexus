@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Search, CalendarRange, X, WifiOff } from 'lucide-react'
-import { format } from 'date-fns'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Search, CalendarRange, X, WifiOff, Clock } from 'lucide-react'
+import { format, addDays, startOfWeek, getISOWeek } from 'date-fns'
+import { ru } from 'date-fns/locale'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { PillTabs } from '@/components/ui/PillTabs'
 import { DayPicker } from '@/components/schedule/DayPicker'
@@ -35,33 +36,62 @@ function mapLessonType(t: string | null): 'lab' | 'lecture' | 'seminar' | 'pract
   return 'practice'
 }
 
-function getCacheKey(mode: string, id: number | null, date: string) {
-  return `schedule_cache:${mode}:${id}:${date}`
+// ── Cache helpers (week-granular) ─────────────────────────────────────────────
+
+function weekCacheKey(mode: string, id: number | null, weekNum: number, year: number) {
+  return `schedule_cache:week:${mode}:${id}:${year}-W${weekNum}`
 }
 
-function saveToCache(key: string, lessons: Lesson[]) {
-  try { localStorage.setItem(key, JSON.stringify(lessons)) } catch {}
+function dayCacheKey(mode: string, id: number | null, date: string) {
+  return `schedule_cache:day:${mode}:${id}:${date}`
 }
 
-function loadFromCache(key: string): Lesson[] | null {
+function saveWeekToCache(mode: string, id: number | null, weekNum: number, year: number, dayMap: Record<string, Lesson[]>) {
   try {
-    const raw = localStorage.getItem(key)
+    const key = weekCacheKey(mode, id, weekNum, year)
+    localStorage.setItem(key, JSON.stringify({ saved: Date.now(), days: dayMap }))
+    // Also store individual day entries for fast lookup
+    Object.entries(dayMap).forEach(([date, lessons]) => {
+      localStorage.setItem(dayCacheKey(mode, id, date), JSON.stringify(lessons))
+    })
+  } catch {}
+}
+
+function loadDayFromCache(mode: string, id: number | null, date: string): Lesson[] | null {
+  try {
+    const raw = localStorage.getItem(dayCacheKey(mode, id, date))
     return raw ? JSON.parse(raw) : null
   } catch { return null }
 }
 
+// ── Live clock ────────────────────────────────────────────────────────────────
+
+function useLiveClock() {
+  const [now, setNow] = useState(new Date())
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 1000)
+    return () => clearInterval(id)
+  }, [])
+  return now
+}
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export default function SchedulePage() {
-  const { mode, groupId, groupName, teacherId, teacherName, roomId, roomName, setMode } = useScheduleStore()
+  const queryClient = useQueryClient()
+  const { mode, groupId, groupName, teacherId, teacherName, roomId, roomName, setMode, profile, profileComplete } =
+    useScheduleStore()
   const [query, setQuery]               = useState('')
   const [showDropdown, setShowDropdown] = useState(false)
   const [selectedDate, setSelectedDate] = useState(new Date())
   const [isOffline, setIsOffline]       = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const now = useLiveClock()
 
   const entityId   = mode === 'group' ? groupId   : mode === 'teacher' ? teacherId   : roomId
   const entityName = mode === 'group' ? groupName : mode === 'teacher' ? teacherName : roomName
   const dateStr    = format(selectedDate, 'yyyy-MM-dd')
-  const cacheKey   = getCacheKey(mode, entityId, dateStr)
+  const dKey       = dayCacheKey(mode, entityId, dateStr)
 
   // Track online/offline
   useEffect(() => {
@@ -73,6 +103,40 @@ export default function SchedulePage() {
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
   }, [])
 
+  // ── Week prefetch: cache current + next week on load ──────────────────────
+  const prefetchWeek = useCallback(async (weekOffset: number) => {
+    if (!entityId) return
+    const monday = startOfWeek(addDays(new Date(), weekOffset * 7), { weekStartsOn: 1 })
+    const weekNum = getISOWeek(monday)
+    const year = monday.getFullYear()
+    const cKey = weekCacheKey(mode, entityId, weekNum, year)
+    if (localStorage.getItem(cKey)) return // already cached
+
+    try {
+      let weekData
+      if (mode === 'group')   weekData = await api.getGroupWeek(entityId, weekNum)
+      else if (mode === 'teacher') weekData = await api.getTeacherWeek(entityId, weekNum)
+      else weekData = await api.getRoomWeek(entityId, weekNum)
+
+      if (weekData?.days) {
+        const dayMap: Record<string, Lesson[]> = {}
+        weekData.days.forEach((d: any) => {
+          dayMap[d.date] = d.lessons ?? []
+        })
+        saveWeekToCache(mode, entityId, weekNum, year, dayMap)
+      }
+    } catch {}
+  }, [entityId, mode])
+
+  useEffect(() => {
+    if (!entityId) return
+    // Prefetch current and next 2 weeks in background
+    setTimeout(() => prefetchWeek(0), 500)
+    setTimeout(() => prefetchWeek(1), 1200)
+    setTimeout(() => prefetchWeek(2), 2000)
+  }, [entityId, mode, prefetchWeek])
+
+  // ── Day query ─────────────────────────────────────────────────────────────
   const { data: dayData, isLoading, isFetching, isError } = useQuery({
     queryKey: ['schedule', 'day', mode, entityId, dateStr],
     queryFn:  async () => {
@@ -81,17 +145,19 @@ export default function SchedulePage() {
       if (mode === 'teacher') return api.getTeacherDay(entityId, dateStr)
       return api.getRoomDay(entityId, dateStr)
     },
-    enabled:  !!entityId,
+    enabled: !!entityId,
     retry: 1,
+    staleTime: 1000 * 60 * 5,
   })
 
-  // Save to cache when data arrives
+  // Save day to cache
   useEffect(() => {
     if (dayData?.lessons?.length) {
-      saveToCache(cacheKey, dayData.lessons)
+      try { localStorage.setItem(dKey, JSON.stringify(dayData.lessons)) } catch {}
     }
-  }, [dayData, cacheKey])
+  }, [dayData, dKey])
 
+  // Search query
   const { data: searchData } = useQuery<
     { total: number; groups?: GroupMeta[]; teachers?: TeacherMeta[]; rooms?: RoomMeta[] } | null
   >({
@@ -105,11 +171,15 @@ export default function SchedulePage() {
     enabled: query.length >= 2,
   })
 
-  // Use cached lessons if offline or error
   const liveLessons: Lesson[]   = dayData?.lessons || []
-  const cachedLessons: Lesson[] = loadFromCache(cacheKey) || []
+  const cachedLessons: Lesson[] = loadDayFromCache(mode, entityId, dateStr) || []
   const showingCache = (isOffline || isError) && liveLessons.length === 0 && cachedLessons.length > 0
   const lessons      = showingCache ? cachedLessons : liveLessons
+
+  // Find currently running lesson
+  const nowStr = format(now, 'HH:mm')
+  const currentLesson = lessons.find(l => l.time_start <= nowStr && l.time_end >= nowStr)
+  const isToday = format(selectedDate, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')
 
   function handleModeChange(m: SearchMode) {
     setMode(m)
@@ -120,23 +190,41 @@ export default function SchedulePage() {
   function renderLessons(items: Lesson[]) {
     return (
       <div className="flex flex-col gap-3 stagger">
-        {items.map((lesson, i) => (
-          <LessonCard key={i} lesson={{
-            id:        String(i),
-            subject:   lesson.subject,
-            type:      mapLessonType(lesson.lesson_type),
-            teacher:   mode === 'teacher'
-              ? (lesson.group_name || '—')
-              : (lesson.teacher_name || '—'),
-            room:      mode === 'room'
-              ? `${lesson.group_name || '—'} · ${lesson.teacher_name || '—'}`
-              : (lesson.classroom || lesson.room_name || '—'),
-            timeStart: lesson.time_start,
-            timeEnd:   lesson.time_end,
-            subgroup:  lesson.subgroup ?? undefined,
-            note:      lesson.note ?? undefined,
-          }} />
-        ))}
+        {items.map((lesson, i) => {
+          const isCurrent = isToday && lesson.time_start <= nowStr && lesson.time_end >= nowStr
+          const isPast    = isToday && lesson.time_end < nowStr
+          return (
+            <div key={i}
+              style={{ opacity: isPast ? 0.5 : 1, transition: 'opacity 0.3s' }}
+            >
+              {isCurrent && (
+                <div className="flex items-center gap-1.5 mb-1 ml-1">
+                  <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                  <span className="text-[10px] font-semibold" style={{ color: '#4ade80' }}>Сейчас идёт</span>
+                </div>
+              )}
+              <LessonCard lesson={{
+                id:          String(i),
+                subject:     lesson.subject,
+                type:        mapLessonType(lesson.lesson_type),
+                teacher:     mode === 'teacher'
+                  ? (lesson.group_name || '—')
+                  : (lesson.teacher_name || '—'),
+                teacherId:   mode !== 'teacher' ? lesson.teacher_id : null,
+                room:        mode === 'room'
+                  ? `${lesson.group_name || '—'} · ${lesson.teacher_name || '—'}`
+                  : (lesson.classroom || lesson.room_name || '—'),
+                roomId:      mode !== 'room' ? undefined : undefined,
+                groupName:   mode !== 'group' ? lesson.group_name : null,
+                groupId:     mode !== 'group' ? lesson.group_id : null,
+                timeStart:   lesson.time_start,
+                timeEnd:     lesson.time_end,
+                subgroup:    lesson.subgroup ?? undefined,
+                note:        lesson.note ?? undefined,
+              }} />
+            </div>
+          )
+        })}
       </div>
     )
   }
@@ -146,10 +234,11 @@ export default function SchedulePage() {
       <PageHeader
         title="Расписание"
         action={
-          <button className="w-10 h-10 rounded-full flex items-center justify-center"
-            style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
-            <CalendarRange size={18} style={{ color: 'var(--t-secondary)' }} />
-          </button>
+          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-mono"
+            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--cyan)' }}>
+            <Clock size={12} />
+            {format(now, 'HH:mm:ss')}
+          </div>
         }
       />
 
@@ -197,6 +286,13 @@ export default function SchedulePage() {
           <span className="text-sm text-center" style={{ color: 'var(--t-muted)' }}>
             Введите название группы,<br />преподавателя или аудитории
           </span>
+          {!profileComplete && (
+            <a href="/profile"
+              className="mt-2 text-xs px-4 py-2 rounded-xl transition-colors hover:bg-white/5"
+              style={{ color: 'var(--cyan)', border: '1px solid rgba(92,225,230,0.3)' }}>
+              Настроить профиль →
+            </a>
+          )}
         </div>
       ) : (isLoading || isFetching) && !showingCache ? (
         <div className="flex flex-col gap-3">
@@ -214,8 +310,12 @@ export default function SchedulePage() {
       ) : (
         <>
           {showingCache && (
-            <p className="text-xs mb-3" style={{ color: 'var(--t-muted)' }}>
-              📦 Данные из кеша
+            <p className="text-xs mb-3" style={{ color: 'var(--t-muted)' }}>📦 Данные из кеша</p>
+          )}
+          {!showingCache && isFetching && (
+            <p className="text-xs mb-3 flex items-center gap-1.5" style={{ color: 'var(--t-muted)' }}>
+              <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--cyan)' }} />
+              Обновление…
             </p>
           )}
           {renderLessons(lessons)}

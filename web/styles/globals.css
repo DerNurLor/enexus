@@ -57,6 +57,28 @@ html, body {
   padding-bottom: calc(var(--nav-height) + var(--safe-bottom));
 }
 
+/* Animated bg gradient */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 15% 20%, rgba(92,225,230,0.04) 0%, transparent 70%),
+    radial-gradient(ellipse 40% 35% at 85% 75%, rgba(96,165,250,0.035) 0%, transparent 70%);
+  animation: bgShift 20s ease-in-out infinite alternate;
+}
+
+@keyframes bgShift {
+  0%   { opacity: 0.6; transform: scale(1) translate(0, 0); }
+  50%  { opacity: 1;   transform: scale(1.05) translate(1%, 1%); }
+  100% { opacity: 0.7; transform: scale(0.97) translate(-1%, -1%); }
+}
+
+body > * { position: relative; z-index: 1; }
+
+
 @layer components {
   .card {
     @apply bg-[var(--card)] rounded-2xl border border-[var(--border)];
@@ -98,6 +120,20 @@ html, body {
   to   { opacity: 1; }
 }
 
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position:  200% center; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 .animate-fade-up {
   animation: fadeUp 0.3s ease forwards;
 }
@@ -106,9 +142,17 @@ html, body {
   animation: fadeIn 0.2s ease forwards;
 }
 
+.animate-pulse {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+.animate-spin {
+  animation: spin 0.8s linear infinite;
+}
+
 .stagger > * {
   opacity: 0;
-  animation: fadeUp 0.3s ease forwards;
+  animation: fadeUp 0.35s ease forwards;
 }
 .stagger > *:nth-child(1) { animation-delay: 0ms; }
 .stagger > *:nth-child(2) { animation-delay: 60ms; }
@@ -116,3 +160,22 @@ html, body {
 .stagger > *:nth-child(4) { animation-delay: 180ms; }
 .stagger > *:nth-child(5) { animation-delay: 240ms; }
 .stagger > *:nth-child(6) { animation-delay: 300ms; }
+.stagger > *:nth-child(7) { animation-delay: 360ms; }
+.stagger > *:nth-child(8) { animation-delay: 420ms; }
+
+/* Skeleton shimmer */
+.animate-pulse {
+  background: linear-gradient(90deg, var(--card) 25%, rgba(255,255,255,0.03) 50%, var(--card) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease infinite;
+}
+
+/* Card hover lift */
+.card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+

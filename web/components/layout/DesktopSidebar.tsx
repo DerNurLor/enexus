@@ -2,11 +2,11 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { CalendarDays, User, GraduationCap } from 'lucide-react'
-import clsx from 'clsx'
+import { CalendarDays, User, GraduationCap, DoorOpen } from 'lucide-react'
 
 const NAV_ITEMS = [
   { href: '/schedule', label: 'Расписание', icon: CalendarDays },
+  { href: '/rooms',    label: 'Аудитории',  icon: DoorOpen },
   { href: '/profile',  label: 'Профиль',    icon: User },
 ]
 

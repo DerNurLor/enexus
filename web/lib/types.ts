@@ -6,8 +6,8 @@ export interface Lesson {
   time_end:     string
   teacher_name: string | null
   teacher_id:   number | null
-  classroom:    string | null   // field name in group schedule
-  room_name:    string | null   // field name in teacher/room schedule
+  classroom:    string | null
+  room_name:    string | null
   group_name:   string | null
   group_id:     number | null
   subgroup:     string | null
@@ -46,12 +46,20 @@ export interface GroupSchedule {
 }
 
 export interface DayResponse {
-  group_id:   number
+  group_id?:   number
+  teacher_id?: number
+  room_id?:    number
   name:       string
   date:       string
   refreshing: string | null
   lessons:    Lesson[]
   message:    string | null
+}
+
+export interface WeekResponse {
+  name:  string
+  week:  number
+  days:  Array<{ date: string; weekday_name: string; week_number: number; lessons: Lesson[] }>
 }
 
 // ── Search ────────────────────────────────────────────────────────────────────
@@ -79,3 +87,19 @@ export interface RoomMeta {
   building: string | null
   subjects: string[]
 }
+
+// ── Free Rooms ────────────────────────────────────────────────────────────────
+export interface FreeRoomsResponse {
+  rooms: Array<{ roomId: number; name: string; building?: string; capacity?: number }>
+  by_building: Record<string, Array<{ name: string; capacity?: number; room_id?: number }>>
+  total: number
+}
+
+// ── Institutes ────────────────────────────────────────────────────────────────
+export interface InstituteMeta {
+  institute_id: number
+  short_name:   string
+  name:         string
+  buildings:    string[]
+}
+
