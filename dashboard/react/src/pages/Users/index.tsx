@@ -116,14 +116,14 @@ function UserDetail({ user, onClose, onToggleBlock, onUpdate }: {
   onToggleBlock: () => void
   onUpdate: (u: AdminUser) => void
 }) {
-  const [detail, setDetail] = useState<{ keys: import('@/types').ApiKey[]; activity: import('@/types').ActivityLog[] } | null>(null)
+  const [detail, setDetail] = useState<{ keys: import('@/types').ApiKey[]; activity: import('@/types').ActivityLog[]; quota: import('@/types').UserQuota | null } | null>(null)
   const [roles, setRoles] = useState(user.roles.join(', '))
   const [dailyLimit, setDailyLimit] = useState(String(user.daily_requests ?? ''))
   const [saving, setSaving] = useState(false)
   const [tab, setTab] = useState<'info' | 'keys' | 'activity'>('info')
 
   useEffect(() => {
-    api.getUserDetail(user.id).then((d) => setDetail({ keys: d.keys, activity: d.activity })).catch(() => {})
+    api.getUserDetail(user.id).then((d) => setDetail({ keys: d.keys, activity: d.activity, quota: d.quota ?? null })).catch(() => {})
     setRoles(user.roles.join(', '))
     setDailyLimit(String(user.daily_requests ?? ''))
   }, [user.id])
@@ -219,7 +219,6 @@ function UserDetail({ user, onClose, onToggleBlock, onUpdate }: {
             <hr className="divider" />
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
               {[
-                { k: 'Запросов/день', v: user.daily_requests || 0 },
                 { k: 'AI токенов/мес', v: numFmt(user.monthly_ai_tokens || 0) },
                 { k: 'Создан', v: user.created_at ? fmtDate(user.created_at) : '—' },
                 { k: 'Активность', v: user.last_active ? timeAgo(user.last_active) : '—' },
@@ -230,6 +229,32 @@ function UserDetail({ user, onClose, onToggleBlock, onUpdate }: {
                 </div>
               ))}
             </div>
+            {detail?.quota && (
+              <>
+                <hr className="divider" />
+                <div style={{ fontSize: 9, color: 'var(--t-40)', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.08em' }}>Квота сообщений (7ч)</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6 }}>
+                  {[
+                    { k: 'Использовано', v: detail.quota.used },
+                    { k: 'Максимум', v: detail.quota.cap },
+                    { k: 'Осталось', v: detail.quota.remaining },
+                  ].map((s, i) => (
+                    <div key={i} style={{ padding: '8px 10px', background: detail.quota!.exhausted ? 'rgba(255,80,80,0.06)' : 'var(--ink-20)', borderRadius: 'var(--rad-md)', border: `1px solid ${detail.quota!.exhausted ? 'rgba(255,80,80,0.2)' : 'var(--line)'}` }}>
+                      <div style={{ fontSize: 9, color: 'var(--t-40)', marginBottom: 3 }}>{s.k}</div>
+                      <div style={{ fontSize: 13, fontFamily: 'var(--serif)', color: i === 2 && detail.quota!.exhausted ? 'rgb(255,80,80)' : 'var(--t-100)' }}>{s.v}</div>
+                    </div>
+                  ))}
+                </div>
+                {detail.quota.ttl_secs > 0 && (
+                  <div style={{ fontSize: 9, color: 'var(--t-40)', marginTop: 6 }}>
+                    Сбросится через {Math.ceil(detail.quota.ttl_secs / 60)} мин
+                  </div>
+                )}
+                {detail.quota.used === 0 && (
+                  <div style={{ fontSize: 9, color: 'var(--t-40)', marginTop: 6 }}>Активности нет — счётчик не запущен</div>
+                )}
+              </>
+            )}
           </>
         )}
 

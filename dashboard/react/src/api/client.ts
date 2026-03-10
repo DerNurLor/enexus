@@ -129,7 +129,7 @@ export const api = {
   getUsers: (params: { q?: string; blocked_only?: boolean; skip?: number; limit?: number }) =>
     apiGet<{ users: import('@/types').AdminUser[]; total: number }>('/dashboard/api/admin/users', params as Record<string, string | number | boolean>),
   getUserDetail: (userId: string) =>
-    apiGet<{ user: import('@/types').AdminUser; keys: import('@/types').ApiKey[]; activity: import('@/types').ActivityLog[] }>(`/dashboard/api/admin/users/${userId}`),
+    apiGet<{ user: import('@/types').AdminUser; keys: import('@/types').ApiKey[]; activity: import('@/types').ActivityLog[]; quota: import('@/types').UserQuota | null }>(`/dashboard/api/admin/users/${userId}`),
   updateUser: (userId: string, body: Partial<{ roles: string[]; is_blocked: boolean; block_reason: string; daily_requests: number; monthly_ai_tokens: number }>) =>
     apiPatch<import('@/types').AdminUser>(`/dashboard/api/admin/users/${userId}`, body),
   revokeAllKeys: (userId: string) => apiPost<void>(`/dashboard/api/admin/users/${userId}/revoke-all-keys`),
