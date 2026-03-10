@@ -361,7 +361,8 @@ async def admin_user_detail(
             from app.core.config import settings as _cfg
             r = get_redis()
             key = f"quota:{user.tg_id}"
-            raw, ttl = await r.get(key), await r.ttl(key)
+            raw = await r.get(key)
+            ttl  = await r.ttl(key)
             used = int(raw) if raw else 0
             cap  = user.daily_requests if (user.daily_requests and user.daily_requests > 0) else _cfg.quota_private
             quota = {
