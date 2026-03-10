@@ -1,31 +1,56 @@
 {
-  "name": "ncfu-web",
-  "version": "0.1.0",
-  "private": true,
-  "scripts": {
-    "dev": "next dev",
-    "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
+  "name": "ncfu-desktop",
+  "version": "1.0.0",
+  "description": "НЦФУ — Студенческий портал",
+  "author": {
+    "name": "DerNurLor",
+    "email": "dev@isabelline.xyz"
   },
-  "dependencies": {
-    "@ducanh2912/next-pwa": "^10.2.9",
-    "@tanstack/react-query": "^5.0.0",
-    "clsx": "^2.1.0",
-    "date-fns": "^3.6.0",
-    "lucide-react": "^0.383.0",
-    "next": "^15.0.0",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0",
-    "zustand": "^4.5.0"
+  "homepage": "https://github.com/DerNurLor/enexus",
+  "license": "MIT",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder",
+    "dist:win": "electron-builder --win",
+    "dist:linux": "electron-builder --linux",
+    "dist:mac": "electron-builder --mac"
+  },
+  "build": {
+    "appId": "xyz.isabelline.enexus.ncfu",
+    "productName": "НЦФУ",
+    "copyright": "© 2026 DerNurLor",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*"
+    ],
+    "win": {
+      "target": ["nsis", "portable"],
+      "icon": "assets/icon.ico"
+    },
+    "linux": {
+      "target": ["AppImage", "deb"],
+      "icon": "assets/icon.png",
+      "category": "Education",
+      "maintainer": "DerNurLor <dev@isabelline.xyz>"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "icon": "assets/icon.icns",
+      "category": "public.app-category.education"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerLanguages": ["ru_RU", "en_US"],
+      "language": "1049"
+    }
   },
   "devDependencies": {
-    "@types/node": "^20",
-    "@types/react": "^18",
-    "@types/react-dom": "^18",
-    "autoprefixer": "^10.4.0",
-    "postcss": "^8.4.0",
-    "tailwindcss": "^3.4.0",
-    "typescript": "^5.4.0"
+    "electron": "^30.0.0",
+    "electron-builder": "^24.0.0"
   }
 }
