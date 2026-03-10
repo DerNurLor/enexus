@@ -174,6 +174,11 @@ function UserDetail({ user, onClose, onToggleBlock, onUpdate }: {
           {user.username && <div style={{ fontSize: 10, color: 'var(--t-40)' }}>@{user.username} · tg:{user.tg_id}</div>}
         </div>
         <button className="btn btn-ghost btn-icon" onClick={onClose}><Icon.close /></button>
+        <a href={user.username ? `https://t.me/${user.username}` : `tg://user?id=${user.tg_id}`}
+          target="_blank" rel="noopener noreferrer"
+          className="btn btn-ghost btn-icon" title="Открыть в Telegram" style={{ textDecoration: 'none', fontSize: 14 }}>
+          ✈
+        </a>
       </div>
 
       {/* Tabs */}
