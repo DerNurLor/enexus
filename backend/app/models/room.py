@@ -6,10 +6,14 @@ from pydantic import Field
 
 
 class Room(Document):
-    room_id:   int
-    name:      str
-    building:  Optional[str] = None
-    capacity:  Optional[int] = None  # manual seed
+    room_id:    int
+    name:       str
+    source_url: str = "https://ecampus.ncfu.ru"   # portal this room belongs to
+    building:   Optional[str] = None
+    capacity:   Optional[int] = None  # manual seed
+
+    institute_ids:   List[int] = Field(default_factory=list)
+    institute_names: List[str] = Field(default_factory=list)
 
     subjects:      List[str] = Field(default_factory=list)
     lesson_types:  List[str] = Field(default_factory=list)
@@ -29,7 +33,9 @@ class Room(Document):
     class Settings:
         name = "rooms"
         indexes = [
-            IndexModel([("room_id", ASCENDING)], unique=True),
+            IndexModel([("room_id", ASCENDING), ("source_url", ASCENDING)], unique=True),
+            IndexModel([("source_url", ASCENDING)]),
             IndexModel([("building", ASCENDING)]),
+            IndexModel([("institute_ids", ASCENDING)]),
             IndexModel([("name", TEXT)], default_language="russian", name="rooms_text"),
         ]

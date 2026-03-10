@@ -312,10 +312,12 @@ class NCFUScraper:
 
                     try:
                         await Group.find_one(
-                            Group.group_id == grp.group_id
+                            Group.group_id == grp.group_id,
+                            Group.source_url == settings.base_url,
                         ).upsert(
                             {"$set": {
                                 "name":            grp.name,
+                                "source_url":      settings.base_url,
                                 "institute_id":    grp.institute_id,
                                 "institute_name":  grp.institute_name,
                                 "speciality_id":   grp.speciality_id,
@@ -327,6 +329,7 @@ class NCFUScraper:
                             on_insert=Group(
                                 group_id=grp.group_id,
                                 name=grp.name,
+                                source_url=settings.base_url,
                                 institute_id=grp.institute_id,
                                 institute_name=grp.institute_name,
                                 speciality_id=grp.speciality_id,
@@ -660,16 +663,20 @@ class NCFUScraper:
                     continue
                 if l.room_id not in acc:
                     acc[l.room_id] = {
-                        "room_id": l.room_id,
-                        "name": l.classroom.strip(),
-                        "building": l.building,
+                        "room_id":    l.room_id,
+                        "name":       l.classroom.strip(),
+                        "building":   l.building,
+                        "source_url": settings.base_url,
                         "subjects": set(), "lesson_types": set(),
                         "group_ids": set(), "group_names": set(),
                         "teacher_ids": set(), "teacher_names": set(),
+                        "institute_ids": set(), "institute_names": set(),
                     }
                 e = acc[l.room_id]
                 e["group_ids"].add(group.group_id)
                 e["group_names"].add(group.name)
+                e["institute_ids"].add(group.institute_id)
+                e["institute_names"].add(group.institute_name)
                 if l.subject:      e["subjects"].add(l.subject)
                 if l.lesson_type:  e["lesson_types"].add(l.lesson_type)
                 if l.teacher_id:   e["teacher_ids"].add(l.teacher_id)
@@ -683,6 +690,7 @@ class NCFUScraper:
             doc = {
                 "full_name":       t["full_name"],
                 "short_name":      Teacher.derive_short_name(t["full_name"]),
+                "source_url":      settings.base_url,
                 "institute_ids":   sorted(t["institute_ids"]),
                 "institute_names": sorted(t["institute_names"]),
                 "subjects":        sorted(t["subjects"]),
@@ -692,7 +700,8 @@ class NCFUScraper:
                 "last_seen_at":    now,
             }
             await Teacher.find_one(
-                Teacher.teacher_id == tid
+                Teacher.teacher_id == tid,
+                Teacher.source_url == settings.base_url,
             ).upsert(
                 {"$set": doc},
                 on_insert=Teacher(teacher_id=tid, **doc),
@@ -702,17 +711,23 @@ class NCFUScraper:
         now = datetime.utcnow()
         for rid, r in rooms.items():
             doc = {
-                "name":          r["name"],
-                "building":      r.get("building"),
-                "subjects":      sorted(r["subjects"]),
-                "lesson_types":  sorted(r["lesson_types"]),
-                "group_ids":     sorted(r["group_ids"]),
-                "group_names":   sorted(r["group_names"]),
-                "teacher_ids":   sorted(r["teacher_ids"]),
-                "teacher_names": sorted(r["teacher_names"]),
-                "last_seen_at":  now,
+                "name":            r["name"],
+                "building":        r.get("building"),
+                "source_url":      settings.base_url,
+                "institute_ids":   sorted(r["institute_ids"]),
+                "institute_names": sorted(r["institute_names"]),
+                "subjects":        sorted(r["subjects"]),
+                "lesson_types":    sorted(r["lesson_types"]),
+                "group_ids":       sorted(r["group_ids"]),
+                "group_names":     sorted(r["group_names"]),
+                "teacher_ids":     sorted(r["teacher_ids"]),
+                "teacher_names":   sorted(r["teacher_names"]),
+                "last_seen_at":    now,
             }
-            await Room.find_one(Room.room_id == rid).upsert(
+            await Room.find_one(
+                Room.room_id == rid,
+                Room.source_url == settings.base_url,
+            ).upsert(
                 {"$set": doc},
                 on_insert=Room(room_id=rid, **doc),
             )
