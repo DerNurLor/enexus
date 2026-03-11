@@ -54,7 +54,8 @@ async def list_teachers(
     group_id:     Optional[int] = Query(None),
     has_schedule: Optional[bool] = Query(None),
 ):
-    filters: dict = {}
+    from app.core.config import settings
+    filters: dict = {"source_url": settings.base_url}
     if q:            filters["full_name"]    = {"$regex": q, "$options": "i"}
     if subject:      filters["subjects"]     = {"$regex": subject, "$options": "i"}
     if lesson_type:  filters["lesson_types"] = {"$regex": lesson_type, "$options": "i"}

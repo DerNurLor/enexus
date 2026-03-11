@@ -763,6 +763,7 @@ async def resolve_search(
         if institute_id:
             g_f["institute_id"]   = institute_id
             t_f["institute_ids"]  = institute_id
+            r_f["institute_ids"]  = institute_id  # аудитории тоже фильтруем по институту
 
         groups   = await Group.find(g_f).limit(15).to_list()
         teachers = await Teacher.find(t_f).limit(15).to_list()

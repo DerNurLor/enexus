@@ -9,6 +9,7 @@ class Teacher(Document):
     teacher_id:      int
     full_name:       str
     short_name:      Optional[str] = None  # derived: Иванов И.И.
+    source_url:      str = "https://ecampus.ncfu.ru"   # portal this teacher belongs to
 
     institute_ids:   List[int] = Field(default_factory=list)
     institute_names: List[str] = Field(default_factory=list)
@@ -28,7 +29,8 @@ class Teacher(Document):
     class Settings:
         name = "teachers"
         indexes = [
-            IndexModel([("teacher_id", ASCENDING)], unique=True),
+            IndexModel([("teacher_id", ASCENDING), ("source_url", ASCENDING)], unique=True),
+            IndexModel([("source_url", ASCENDING)]),
             IndexModel([("institute_ids", ASCENDING)]),
             IndexModel([("full_name", TEXT)], default_language="russian", name="teachers_text"),
         ]

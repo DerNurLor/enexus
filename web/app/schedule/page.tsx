@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, Suspense } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'next/navigation'
 import { Search, CalendarRange, X, WifiOff, Clock } from 'lucide-react'
@@ -78,7 +78,7 @@ function useLiveClock() {
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function SchedulePage() {
+function SchedulePageInner() {
   const queryClient = useQueryClient()
   const searchParams = useSearchParams()
   const { mode, groupId, groupName, teacherId, teacherName, roomId, roomName,
@@ -91,7 +91,9 @@ export default function SchedulePage() {
   const inputRef = useRef<HTMLInputElement>(null)
   const now = useLiveClock()
 
-  // On mount: if URL has ?mode=&id=&name= params, apply them (used by "Открыть моё расписание")
+  // Применяем URL-параметры ?mode=&id=&name= при монтировании и при навигации.
+  // Это гарантирует что "Открыть моё расписание" всегда показывает нужный entity,
+  // даже если store содержит что-то другое (последний просмотренный).
   useEffect(() => {
     const urlMode = searchParams.get('mode') as 'group' | 'teacher' | 'room' | null
     const urlId   = searchParams.get('id')
@@ -100,13 +102,13 @@ export default function SchedulePage() {
       const id = parseInt(urlId, 10)
       if (!isNaN(id)) {
         setMode(urlMode)
-        if (urlMode === 'group')   setGroup(id, urlName)
-        if (urlMode === 'teacher') setTeacher(id, urlName)
-        if (urlMode === 'room')    setRoom(id, urlName)
+        if (urlMode === 'group')   setGroup(id, decodeURIComponent(urlName))
+        if (urlMode === 'teacher') setTeacher(id, decodeURIComponent(urlName))
+        if (urlMode === 'room')    setRoom(id, decodeURIComponent(urlName))
       }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // searchParams объект меняется при каждой навигации — реагируем на него
+  }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const entityId   = mode === 'group' ? groupId   : mode === 'teacher' ? teacherId   : roomId
   const entityName = mode === 'group' ? groupName : mode === 'teacher' ? teacherName : roomName
@@ -365,5 +367,14 @@ export default function SchedulePage() {
         </>
       )}
     </div>
+  )
+}
+
+// Suspense boundary обязателен для useSearchParams в Next.js 14 App Router
+export default function SchedulePage() {
+  return (
+    <Suspense fallback={<div className="px-4 lg:px-0 animate-pulse"><div className="h-12 rounded-2xl" style={{ background: 'var(--card)' }} /></div>}>
+      <SchedulePageInner />
+    </Suspense>
   )
 }
