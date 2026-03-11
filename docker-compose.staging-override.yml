@@ -1,41 +1,49 @@
-# docker-compose.staging-override.yml
-# Переопределяет порты и имена контейнеров для staging-стека.
-# Запускается через deploy.sh / Makefile как второй -f файл.
-#
-# Порты staging:
-#   backend   → 127.0.0.1:18000
-#   bot       → 127.0.0.1:18001
-#   miniapp   → 127.0.0.1:18002
-#   dashboard → 127.0.0.1:18003
-#   web       → 127.0.0.1:13000
-
 services:
   backend:
     container_name: ncfu_staging_backend
     ports:
-      - "127.0.0.1:18000:8000"
+      - target: 8000
+        host_ip: "127.0.0.1"
+        published: "18000"
+        protocol: tcp
+        mode: ingress
 
   bot:
     container_name: ncfu_staging_bot
     ports:
-      - "127.0.0.1:18001:8001"
+      - target: 8001
+        host_ip: "127.0.0.1"
+        published: "18001"
+        protocol: tcp
+        mode: ingress
 
   miniapp:
     container_name: ncfu_staging_miniapp
     ports:
-      - "127.0.0.1:18002:8002"
+      - target: 8002
+        host_ip: "127.0.0.1"
+        published: "18002"
+        protocol: tcp
+        mode: ingress
 
   dashboard:
     container_name: ncfu_staging_dashboard
     ports:
-      - "127.0.0.1:18003:8003"
+      - target: 8003
+        host_ip: "127.0.0.1"
+        published: "18003"
+        protocol: tcp
+        mode: ingress
 
   web:
     container_name: ncfu_staging_web
     ports:
-      - "127.0.0.1:13000:3000"
+      - target: 3000
+        host_ip: "127.0.0.1"
+        published: "13000"
+        protocol: tcp
+        mode: ingress
 
-  # nginx из основного стека не нужен — системный nginx проксирует напрямую
   nginx:
     profiles: ["disabled"]
 

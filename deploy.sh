@@ -355,10 +355,6 @@ _staging_compose() {
     echo "   И замени: TELEGRAM_BOT_TOKEN, WEBHOOK_BASE_URL, DOMAIN"
     exit 1
   fi
-  if [[ ! -f "$STAGING_COMPOSE_OVERRIDE" ]]; then
-    echo -e "${RED}❌ Нет $STAGING_COMPOSE_OVERRIDE${RESET}"
-    exit 1
-  fi
   docker compose \
     --env-file "$STAGING_SECRETS_FILE" \
     -p "$STAGING_PROJECT" \
@@ -369,7 +365,7 @@ _staging_compose() {
 
 _staging_up() {
   echo -e "${CYAN}${BOLD}▶ Поднимаем staging...${RESET}"
-  docker network create ncfu_staging_network 2>/dev/null || true
+  # docker network create ncfu_staging_network 2>/dev/null || true
   docker volume  create ncfu_staging_mongo_data 2>/dev/null || true
   _staging_compose build --pull
   _staging_compose up -d --remove-orphans
