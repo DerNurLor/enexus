@@ -1,0 +1,354 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# docker-compose.yml — TOP-LEVEL STACK
+#
+# Сервисы:
+#   backend    :8000  — REST API расписания, GraphQL, Scraper
+#   bot        :8001  — Telegram Bot (aiogram, webhook)
+#   miniapp    :8002  — Telegram Mini App SPA + API
+#   dashboard  :8003  — Админ-панель (RBAC, просмотр чатов, статистика)
+#
+# Инфраструктура:
+#   mongo      :27017 — MongoDB 7.0
+#   redis      :6379  — Redis 7.4
+#   nginx      :80    — Обратный прокси, единая точка входа
+#
+# Dev-инструменты (профиль dev):
+#   mongo-express :8081
+#
+# Быстрый старт:
+#   sudo bash setup-secrets.sh   # один раз на сервере
+#   sudo bash deploy.sh           # деплой
+#   docker compose --profile dev up -d  # с mongo-express (dev)
+#
+# Проверить статус:
+#   docker compose ps
+#   docker compose logs -f backend
+# ═══════════════════════════════════════════════════════════════════════════════
+
+x-quota: &quota-env
+  QUOTA_PRIVATE:     "${QUOTA_PRIVATE:-3}"
+  QUOTA_GROUP_SMALL: "${QUOTA_GROUP_SMALL:-3}"
+  QUOTA_GROUP_LARGE: "${QUOTA_GROUP_LARGE:-5}"
+  QUOTA_TTL_HOURS:   "${QUOTA_TTL_HOURS:-7}"
+
+services:
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # INFRASTRUCTURE
+  # ────────────────────────────────────────────────────────────────────────────
+
+  mongo:
+    image: mongo:7.0
+    container_name: ncfu_staging_mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "${MONGO_USER}"
+      MONGO_INITDB_ROOT_PASSWORD: "${MONGO_PASSWORD}"
+      # Передаём для init.js
+      MONGO_DB:      "${MONGO_DB:-ncfu_schedule}"
+      AUTH_MONGO_DB: "${AUTH_MONGO_DB:-ncfu_auth}"
+      MONGO_PASSWORD: "${MONGO_PASSWORD}"
+    volumes:
+      - mongo_data:/data/db
+      - ./docker/mongo/init.js:/docker-entrypoint-initdb.d/01-init.js:ro
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - >-
+          mongosh --quiet
+          --username $$MONGO_INITDB_ROOT_USERNAME
+          --password $$MONGO_INITDB_ROOT_PASSWORD
+          --eval "db.adminCommand('ping')"
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+    networks: [ncfu_net]
+    # ports: ["127.0.0.1:27017:27017"]  # раскомментируй для прямого доступа
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: ncfu_staging_redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass "${REDIS_PASSWORD}"
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      --save ""
+      --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    networks: [ncfu_net]
+    # ports: ["127.0.0.1:6379:6379"]   # раскомментируй для прямого доступа
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # APPLICATION SERVICES
+  # ────────────────────────────────────────────────────────────────────────────
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+      target: runtime
+    image: ncfu_backend:latest
+    container_name: ncfu_staging_backend
+    restart: unless-stopped
+    environment:
+      MONGO_URI:        "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${MONGO_DB:-ncfu_schedule}?authSource=admin"
+      AUTH_MONGO_URI:   "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${AUTH_MONGO_DB:-ncfu_auth}?authSource=admin"
+      REDIS_URL:        "redis://:${REDIS_PASSWORD}@redis:6379/0"
+      APP_ENV:          "${APP_ENV:-production}"
+      OPENAI_API_KEY:   "${OPENAI_API_KEY}"
+      JWT_SECRET:       "${JWT_SECRET}"
+      DASHBOARD_SECRET: "${DASHBOARD_SECRET}"
+      GRAPHQL_SECRET:   "${GRAPHQL_SECRET}"
+      WEBHOOK_BASE_URL: "${WEBHOOK_BASE_URL}"
+      CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS}"
+      SENTRY_DSN:       "${SENTRY_DSN:-}"
+      ADMIN_PATH:       "${ADMIN_PATH:-admin}"
+      <<: *quota-env
+    ports:
+      - "127.0.0.1:18000:8000"
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [ncfu_net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  bot:
+    build:
+      context: ./ecampus_bot
+      dockerfile: Dockerfile
+      target: runtime
+    image: ncfu_bot:latest
+    container_name: ncfu_staging_bot
+    restart: unless-stopped
+    environment:
+      MONGO_URI:              "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${AUTH_MONGO_DB:-ncfu_auth}?authSource=admin"
+      REDIS_URL:              "redis://:${REDIS_PASSWORD}@redis:6379/0"
+      BACKEND_URL:            "http://backend:8000"
+      BACKEND_GRAPHQL_URL:    "http://backend:8000/graphql"
+      APP_ENV:                "${APP_ENV:-production}"
+      OPENAI_API_KEY:         "${OPENAI_API_KEY}"
+      JWT_SECRET:             "${JWT_SECRET}"
+      TELEGRAM_BOT_TOKEN:     "${TELEGRAM_BOT_TOKEN}"
+      TELEGRAM_WEBHOOK_SECRET: "${TELEGRAM_WEBHOOK_SECRET}"
+      WEBHOOK_BASE_URL:       "${WEBHOOK_BASE_URL}"
+      SUPPORT_BOT_TOKEN:      "${SUPPORT_BOT_TOKEN:-}"
+      ADMIN_BOT_TOKEN:        "${ADMIN_BOT_TOKEN:-}"
+      SENTRY_DSN:             "${SENTRY_DSN:-}"
+      <<: *quota-env
+    ports:
+      - "127.0.0.1:18001:8001"
+    depends_on:
+      mongo:   { condition: service_healthy }
+      redis:   { condition: service_healthy }
+      backend: { condition: service_healthy }
+    networks: [ncfu_net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8001/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  miniapp:
+    build:
+      context: ./miniapp
+      dockerfile: Dockerfile
+      target: runtime
+    image: ncfu_miniapp:latest
+    container_name: ncfu_staging_miniapp
+    restart: unless-stopped
+    environment:
+      MONGO_URI:        "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${MONGO_DB:-ncfu_schedule}?authSource=admin"
+      AUTH_MONGO_URI:   "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${AUTH_MONGO_DB:-ncfu_auth}?authSource=admin"
+      REDIS_URL:        "redis://:${REDIS_PASSWORD}@redis:6379/0"
+      BACKEND_URL:      "http://backend:8000"
+      APP_ENV:          "${APP_ENV:-production}"
+      JWT_SECRET:         "${JWT_SECRET}"
+      WEBHOOK_BASE_URL:   "${WEBHOOK_BASE_URL}"
+      OPENAI_API_KEY:     "${OPENAI_API_KEY}"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
+      SENTRY_DSN:         "${SENTRY_DSN:-}"
+      <<: *quota-env
+    ports:
+      - "127.0.0.1:18002:8002"
+    depends_on:
+      mongo:   { condition: service_healthy }
+      redis:   { condition: service_healthy }
+      backend: { condition: service_healthy }
+    networks: [ncfu_net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8002/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+      target: runtime
+    image: ncfu_dashboard:latest
+    container_name: ncfu_staging_dashboard
+    restart: unless-stopped
+    environment:
+      MONGO_URI:        "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${MONGO_DB:-ncfu_schedule}?authSource=admin"
+      AUTH_MONGO_URI:   "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${AUTH_MONGO_DB:-ncfu_auth}?authSource=admin"
+      REDIS_URL:        "redis://:${REDIS_PASSWORD}@redis:6379/0"
+      APP_ENV:          "${APP_ENV:-production}"
+      JWT_SECRET:       "${JWT_SECRET}"
+      DASHBOARD_SECRET: "${DASHBOARD_SECRET}"
+      GRAPHQL_SECRET:   "${GRAPHQL_SECRET}"
+      WEBHOOK_BASE_URL: "${WEBHOOK_BASE_URL}"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
+      ADMIN_PATH:       "${ADMIN_PATH:-admin}"
+      SENTRY_DSN:       "${SENTRY_DSN:-}"
+      <<: *quota-env
+    ports:
+      - "127.0.0.1:18003:8003"
+    depends_on:
+      mongo:   { condition: service_healthy }
+      redis:   { condition: service_healthy }
+      backend: { condition: service_healthy }
+    networks: [ncfu_net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8003/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # NGINX — единая точка входа
+  # ────────────────────────────────────────────────────────────────────────────
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: ncfu_staging_nginx
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:18080:80"
+    environment:
+      NGINX_ADMIN_PATH: "${ADMIN_PATH:-admin}"
+      NGINX_DOMAIN:     "${DOMAIN:-localhost}"
+    volumes:
+      - ./nginx/nginx.conf.template:/etc/nginx/nginx.conf.template:ro
+      - ./nginx/entrypoint.sh:/docker-entrypoint-nginx.sh:ro
+    entrypoint: ["/bin/sh", "/docker-entrypoint-nginx.sh"]
+    depends_on:
+      backend:   { condition: service_healthy }
+      bot:       { condition: service_healthy }
+      miniapp:   { condition: service_healthy }
+      dashboard: { condition: service_healthy }
+      web:       { condition: service_healthy }
+    networks: [ncfu_net]
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # DEV TOOLS (запускаются только с: docker compose --profile dev up)
+  # ────────────────────────────────────────────────────────────────────────────
+
+  mongo-express:
+    image: mongo-express:1.0.2
+    container_name: ncfu_mongo_express
+    restart: unless-stopped
+    environment:
+      ME_CONFIG_MONGODB_URL:           "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/"
+      ME_CONFIG_BASICAUTH_USERNAME:    "${MONGO_EXPRESS_USER:-admin}"
+      ME_CONFIG_BASICAUTH_PASSWORD:    "${MONGO_EXPRESS_PASSWORD}"
+      ME_CONFIG_MONGODB_ADMINUSERNAME: "${MONGO_USER}"
+      ME_CONFIG_MONGODB_ADMINPASSWORD: "${MONGO_PASSWORD}"
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      mongo: { condition: service_healthy }
+    networks: [ncfu_net]
+    profiles: [dev]
+
+# ────────────────────────────────────────────────────────────────────────────
+# WEB — Студенческий портал (Next.js PWA)  :3000
+# ────────────────────────────────────────────────────────────────────────────
+
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    image: ncfu_web:latest
+    container_name: ncfu_staging_web
+    restart: unless-stopped
+    environment:
+      NODE_ENV:               "production"
+      NEXT_PUBLIC_API_URL:    "${WEBHOOK_BASE_URL}"
+      NEXT_TELEMETRY_DISABLED: "1"
+      <<: *quota-env
+    ports:
+      - "127.0.0.1:13000:3000"
+    depends_on:
+      backend: { condition: service_healthy }
+    networks: [ncfu_net]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+# ────────────────────────────────────────────────────────────────────────────
+# VOLUMES & NETWORKS
+#
+# external: true — используем уже существующий volume/network созданный ранее
+# другим compose-проектом. Если поднимаешь с нуля — убери external: true,
+# тогда compose создаст их сам.
+# ────────────────────────────────────────────────────────────────────────────
+
+volumes:
+  mongo_data:
+    name: ncfu_staging_mongo_data
+    external: true   # volume уже существует (создан проектом "backend")
+
+networks:
+  ncfu_net:
+    name: ncfu_staging_network
+    external: true   # сеть уже существует (создана проектом "all")
