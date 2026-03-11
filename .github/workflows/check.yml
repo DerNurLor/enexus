@@ -1,0 +1,23 @@
+name: Check
+
+on:
+  push:
+    branches: ["*"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python syntax check
+        run: |
+          find backend/app ecampus_bot/app miniapp/app dashboard/app \
+            -name "*.py" -print0 2>/dev/null | \
+            xargs -0 python3 -m py_compile && echo "✅ Python OK"
+
+      - name: docker-compose syntax check
+        run: |
+          docker compose config --quiet && echo "✅ docker-compose OK"
