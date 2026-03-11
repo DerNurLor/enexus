@@ -119,13 +119,15 @@ async def list_buildings():
 
 @router.get("/free", summary="Free rooms at a given datetime")
 async def get_free_rooms(
-    at:       str           = Query(..., description="ISO datetime, e.g. 2025-01-15T10:00:00"),
-    duration: int           = Query(90,  description="Duration in minutes"),
-    building: Optional[str] = Query(None),
+    at:           str           = Query(..., description="ISO datetime, e.g. 2025-01-15T10:00:00"),
+    duration:     int           = Query(90,  description="Duration in minutes"),
+    building:     Optional[str] = Query(None),
+    institute_id: Optional[int] = Query(None, description="Filter by institute (room.institute_ids)"),
 ):
     """
     Returns all known rooms that have NO lessons overlapping [at, at+duration).
     Uses LessonDoc collection — works even if Room.schedule is not populated.
+    Supports filtering by building and/or institute_id.
     """
     from datetime import timedelta, date as date_type
     from app.models.lesson import LessonDoc
@@ -140,14 +142,19 @@ async def get_free_rooms(
     t_start = dt_start.strftime("%H:%M")
     t_end   = dt_end.strftime("%H:%M")
 
-    # Find all rooms that HAVE a lesson overlapping the window on this day
+    # Find all rooms that HAVE a lesson overlapping the window on this day.
+    # Если institute_id задан — ищем занятые только среди аудиторий этого института,
+    # чтобы не считать занятыми одноимённые аудитории других филиалов.
     lesson_filters: dict = {
         "date":       day,
         "time_start": {"$lt": t_end},
         "time_end":   {"$gt": t_start},
         "room_id":    {"$ne": None},
     }
-    busy_lessons = await LessonDoc.find(lesson_filters).to_list()
+    if institute_id:
+        lesson_filters["institute_id"] = institute_id
+
+    busy_lessons  = await LessonDoc.find(lesson_filters).to_list()
     busy_room_ids = {l.room_id for l in busy_lessons}
 
     # All rooms scoped to this portal.
@@ -159,7 +166,9 @@ async def get_free_rooms(
         ]
     }
     if building:
-        room_filters["building"] = {"$regex": building, "$options": "i"}
+        room_filters["building"]      = {"$regex": building, "$options": "i"}
+    if institute_id:
+        room_filters["institute_ids"] = institute_id
 
     all_rooms = await Room.find(room_filters).sort("name").to_list()
 

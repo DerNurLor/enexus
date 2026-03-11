@@ -42,9 +42,10 @@ export const api = {
     get<import('./types').WeekResponse>(`/rooms/${roomId}/week`, { week }),
 
   // Free rooms
-  getFreeRooms: (at: string, duration?: number, building?: string) => {
+  getFreeRooms: (at: string, duration?: number, building?: string, instituteId?: number) => {
     const params: Record<string, string | number> = { at, duration: duration ?? 90 }
-    if (building) params.building = building
+    if (building)    params.building     = building
+    if (instituteId) params.institute_id = instituteId
     return get<import('./types').FreeRoomsResponse>('/rooms/free', params)
   },
 

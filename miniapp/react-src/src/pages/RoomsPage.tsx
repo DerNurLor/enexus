@@ -95,7 +95,8 @@ export function RoomsPage({ toast, onRoomClick, isActive }: Props) {
     try {
       const at = `${date}T${time}:00`
       const params = new URLSearchParams({ at, duration: '90' })
-      if (selectedBuilding) params.set('building', selectedBuilding)
+      if (selectedBuilding)   params.set('building',     selectedBuilding)
+      if (selectedInstitute)  params.set('institute_id', selectedInstitute)
       const data = await api<FreeRoomsResponse>(`/miniapp/api/free-rooms?${params}`)
       setResult(data)
     } catch (e) {
@@ -103,7 +104,7 @@ export function RoomsPage({ toast, onRoomClick, isActive }: Props) {
     } finally {
       setLoading(false)
     }
-  }, [date, time, selectedBuilding, toast])
+  }, [date, time, selectedBuilding, selectedInstitute, toast])
 
   return (
     <div id="page-rooms" className={`page${isActive ? " active" : ""}`}>
