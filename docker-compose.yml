@@ -315,12 +315,14 @@ services:
     build:
       context: ./web
       dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: "${WEB_URL}"
     image: ncfu_web:latest
     container_name: ncfu_web
     restart: unless-stopped
     environment:
       NODE_ENV:               "production"
-      NEXT_PUBLIC_API_URL:    "${WEBHOOK_BASE_URL}"
+      NEXT_PUBLIC_API_URL:    "${WEB_URL}"
       NEXT_TELEMETRY_DISABLED: "1"
       <<: *quota-env
     ports:
