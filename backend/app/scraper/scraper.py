@@ -313,7 +313,6 @@ class NCFUScraper:
                     try:
                         await Group.find_one(
                             Group.group_id == grp.group_id,
-                            Group.source_url == settings.base_url,
                         ).upsert(
                             {"$set": {
                                 "name":            grp.name,
