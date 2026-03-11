@@ -16,6 +16,7 @@ export interface LessonCardData {
   roomId?:      number | null
   showRoom?:    boolean        // default true
   groupName?:   string | null
+  groupNames?:  string[] | null  // list of groups when merged
   groupId?:     number | null
   timeStart:    string
   timeEnd:      string
@@ -36,6 +37,9 @@ export function LessonCard({ lesson }: { lesson: LessonCardData }) {
 
   const showTeacher = lesson.showTeacher !== false
   const showRoom    = lesson.showRoom    !== false
+
+  // Multiple groups when merged (e.g. lectures with several groups)
+  const multiGroup = lesson.groupNames && lesson.groupNames.length > 1
 
   function handleTeacherClick(e: React.MouseEvent) {
     if (!lesson.teacherId) return
@@ -63,7 +67,9 @@ export function LessonCard({ lesson }: { lesson: LessonCardData }) {
 
   const hasTeacherLink = showTeacher && !!lesson.teacherId
   const hasRoomLink    = showRoom    && !!lesson.roomId
-  const hasGroupLink   = !!(lesson.groupId && lesson.groupName)
+  // Single group: clickable. Multiple groups: just text.
+  const hasSingleGroupLink = !multiGroup && !!(lesson.groupId && lesson.groupName)
+  const showGroupRow = !!(multiGroup ? lesson.groupNames?.length : lesson.groupName)
 
   return (
     <div className="card flex gap-0 overflow-hidden"
@@ -130,17 +136,25 @@ export function LessonCard({ lesson }: { lesson: LessonCardData }) {
             </div>
           )}
 
-          {/* Group (only in teacher/room mode) */}
-          {hasGroupLink && (
-            <div className="flex items-center gap-1">
-              <Users size={11} style={{ color: 'var(--t-muted)' }} />
-              <button
-                onClick={handleGroupClick}
-                className="text-xs transition-colors hover:text-[var(--cyan)] cursor-pointer underline-offset-2 hover:underline"
-                style={{ color: 'var(--t-secondary)', background: 'none', border: 'none', padding: 0 }}
-              >
-                {lesson.groupName}
-              </button>
+          {/* Group(s) — only in teacher/room mode */}
+          {showGroupRow && (
+            <div className="flex items-start gap-1">
+              <Users size={11} style={{ color: 'var(--t-muted)', marginTop: 2 }} />
+              {multiGroup ? (
+                // Multiple groups — plain text, not clickable
+                <span className="text-xs leading-tight" style={{ color: 'var(--t-secondary)' }}>
+                  {lesson.groupNames!.join(', ')}
+                </span>
+              ) : (
+                // Single group — clickable link
+                <button
+                  onClick={hasSingleGroupLink ? handleGroupClick : undefined}
+                  className={`text-xs transition-colors ${hasSingleGroupLink ? 'hover:text-[var(--cyan)] cursor-pointer underline-offset-2 hover:underline' : 'cursor-default'}`}
+                  style={{ color: 'var(--t-secondary)', background: 'none', border: 'none', padding: 0 }}
+                >
+                  {lesson.groupName}
+                </button>
+              )}
             </div>
           )}
         </div>

@@ -261,6 +261,7 @@ function SchedulePageInner() {
                 roomId:      mode !== 'room' ? (lesson.room_id ?? undefined) : undefined,
                 showRoom:    mode !== 'room',
                 groupName:   showGroup ? (lesson.group_name || null) : null,
+                groupNames:  showGroup ? (lesson.group_names || null) : null,
                 groupId:     showGroup ? (lesson.group_id || null) : null,
                 timeStart:   lesson.time_start,
                 timeEnd:     lesson.time_end,
