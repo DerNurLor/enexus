@@ -700,7 +700,6 @@ class NCFUScraper:
             }
             await Teacher.find_one(
                 Teacher.teacher_id == tid,
-                Teacher.source_url == settings.base_url,
             ).upsert(
                 {"$set": doc},
                 on_insert=Teacher(teacher_id=tid, **doc),
@@ -725,7 +724,6 @@ class NCFUScraper:
             }
             await Room.find_one(
                 Room.room_id == rid,
-                Room.source_url == settings.base_url,
             ).upsert(
                 {"$set": doc},
                 on_insert=Room(room_id=rid, **doc),
