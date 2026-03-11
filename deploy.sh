@@ -355,6 +355,7 @@ _staging_compose() {
     echo "   И замени: TELEGRAM_BOT_TOKEN, WEBHOOK_BASE_URL, DOMAIN"
     exit 1
   fi
+  set -a; source "$STAGING_SECRETS_FILE"; set +a
   docker compose \
     --env-file "$STAGING_SECRETS_FILE" \
     -p "$STAGING_PROJECT" \
@@ -525,7 +526,7 @@ case "$CMD" in
     ;;
   staging-build)
     [[ -z "$SVCS" ]] && { echo -e "${RED}❌ Укажи сервис: sudo bash deploy.sh staging-build miniapp${RESET}"; exit 1; }
-    _staging_compose build $SVCS
+    _staging_compose build --no-cache $SVCS
     _staging_compose up -d --no-deps $SVCS
     echo -e "${GREEN}✅ Staging $SVCS пересобран.${RESET}"
     ;;

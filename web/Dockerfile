@@ -6,11 +6,12 @@ RUN npm ci
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY . .
 ARG NEXT_PUBLIC_API_URL
-ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ARG CACHEBUST=1
+COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npm run build
+RUN echo ">>> NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL" && npm run build
 
 FROM node:20-alpine AS runner
 WORKDIR /app

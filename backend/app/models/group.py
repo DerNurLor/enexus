@@ -42,6 +42,7 @@ class Group(Document):
     subjects:        List[str] = Field(default_factory=list)
     schedule_scraped_at: Optional[datetime] = None
     scrape_status:       str = "pending"
+    source_url: Optional[str] = None
     scraped_at:          Optional[datetime] = None
     schedule: Dict[str, DaySchedule] = Field(default_factory=dict)
 
