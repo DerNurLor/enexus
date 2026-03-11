@@ -79,7 +79,12 @@ echo ""
 echo "── Telegram ──────────────────────────────────────────"
 ask TELEGRAM_BOT_TOKEN "Токен бота (от @BotFather)" true
 ask WEBHOOK_BASE_URL   "Домен (https://enexus.isabelline.xyz)" false
+ask DOMAIN            "Домен без https (enexus.isabelline.xyz)" false
 hexsecret TELEGRAM_WEBHOOK_SECRET "Webhook secret" 32
+echo ""
+echo "── Опциональные боты ─────────────────────────────"
+ask SUPPORT_BOT_TOKEN "Support bot токен (необязательно, Enter=пропустить)" true
+ask ADMIN_BOT_TOKEN   "Admin bot токен (необязательно, Enter=пропустить)" true
 echo ""
 
 echo "── OpenAI ────────────────────────────────────────────"
@@ -92,6 +97,7 @@ hexsecret DASHBOARD_SECRET "Dashboard Secret" 16
 hexsecret GRAPHQL_SECRET   "GraphQL Secret"   16
 echo ""
 
+C["DOMAIN"]="${C[DOMAIN]:-${C[WEBHOOK_BASE_URL]:-localhost}}"
 C["ADMIN_PATH"]="${C[ADMIN_PATH]:-admin}"
 C["APP_ENV"]="${C[APP_ENV]:-production}"
 C["BASE_URL"]="${C[BASE_URL]:-https://ecampus.ncfu.ru}"
@@ -118,6 +124,7 @@ REDIS_PASSWORD=${C[REDIS_PASSWORD]}
 TELEGRAM_BOT_TOKEN=${C[TELEGRAM_BOT_TOKEN]}
 TELEGRAM_WEBHOOK_SECRET=${C[TELEGRAM_WEBHOOK_SECRET]}
 WEBHOOK_BASE_URL=${C[WEBHOOK_BASE_URL]}
+DOMAIN=${C[DOMAIN]}
 SUPPORT_BOT_TOKEN=${C[SUPPORT_BOT_TOKEN]}
 SUPPORT_ADMIN_CHAT_ID=${C[SUPPORT_ADMIN_CHAT_ID]}
 
