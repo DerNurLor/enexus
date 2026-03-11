@@ -180,7 +180,8 @@ async def migrate_teacher_source_url(dry_run: bool):
     """
     print("\n── Teacher.source_url backfill ────────────────────────────────────")
     from app.core.config import settings
-    db_teachers = Teacher.get_motor_collection()
+    from app.db.database import get_motor_db
+    db_teachers = get_motor_db()["teachers"]
     without_url = await db_teachers.count_documents(
         {"source_url": {"$exists": False}}
     )
