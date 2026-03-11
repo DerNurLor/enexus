@@ -67,8 +67,13 @@ export default function RoomsPage() {
   const atParam = `${date}T${time}:00`
 
   const { data, isLoading, isError, refetch } = useQuery<FreeRoomsResponse>({
-    queryKey: ['freeRooms', atParam, selectedBuilding],
-    queryFn:  () => api.getFreeRooms(atParam, 90, selectedBuilding || undefined),
+    queryKey: ['freeRooms', atParam, selectedBuilding, selectedInst],
+    queryFn:  () => api.getFreeRooms(
+      atParam,
+      90,
+      selectedBuilding || undefined,
+      selectedInst ? parseInt(selectedInst) : undefined,
+    ),
     enabled:  triggered,
     retry: 1,
   })

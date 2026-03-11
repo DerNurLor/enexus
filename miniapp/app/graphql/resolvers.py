@@ -712,10 +712,11 @@ async def resolve_lessons_on_day(
 
 async def resolve_free_rooms(
     at:               str,
-    duration_minutes: int = 90,
+    duration_minutes: int          = 90,
     building:         Optional[str] = None,
+    institute_id:     Optional[int] = None,
 ) -> List[FreeRoomType]:
-    ck = cache_key("ncfu", "free", hash_params(at=at, dur=duration_minutes, b=building))
+    ck = cache_key("ncfu", "free", hash_params(at=at, dur=duration_minutes, b=building, iid=institute_id))
 
     async def _fetch():
         col         = get_motor_db()["lessons"]
@@ -723,22 +724,32 @@ async def resolve_free_rooms(
         check_end   = (dt + timedelta(minutes=duration_minutes)).strftime("%H:%M")
         check_start = dt.strftime("%H:%M")
         today_dt    = datetime.combine(dt.date(), datetime.min.time())
-        busy_ids    = set(await col.distinct(
-            "room_id",
-            {"date": today_dt, "room_id": {"$ne": None},
-             "time_start": {"$lt": check_end}, "time_end": {"$gt": check_start}},
-        ))
+
+        # Занятые аудитории — фильтруем по институту если задан,
+        # чтобы не считать занятыми одноимённые аудитории других филиалов.
+        busy_filter: dict = {
+            "date":       today_dt,
+            "room_id":    {"$ne": None},
+            "time_start": {"$lt": check_end},
+            "time_end":   {"$gt": check_start},
+        }
+        if institute_id:
+            busy_filter["institute_id"] = institute_id
+
+        busy_ids = set(await col.distinct("room_id", busy_filter))
+
         room_filter: dict = {"room_id": {"$nin": list(busy_ids)}}
         if building:
-            # Normalize: "11 корпус" / "корпус 11" / "11" → all match "Корпус 11"
             b = building.strip()
-            # Extract just the number/name part so we match regardless of word order
             import re as _re
             num = _re.sub(r'(?i)корпус\s*', '', b).strip()
             if num:
                 room_filter["building"] = {"$regex": num, "$options": "i"}
             else:
                 room_filter["building"] = {"$regex": b, "$options": "i"}
+        if institute_id:
+            room_filter["institute_ids"] = institute_id
+
         rooms = await Room.find(room_filter).sort("name").to_list()
         return [{"room_id": r.room_id, "name": r.name,
                  "building": r.building, "capacity": r.capacity} for r in rooms]

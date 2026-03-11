@@ -257,13 +257,19 @@ async def free_rooms(
     at:            str,
     duration:      int           = Query(90),
     building:      Optional[str] = Query(None),
+    institute_id:  Optional[int] = Query(None),
     min_capacity:  Optional[int] = Query(None),
     authorization: Optional[str] = Header(None),
 ):
     await _auth_user(authorization)
     from app.graphql import resolvers as R
     try:
-        rooms_obj = await R.resolve_free_rooms(at=at, duration_minutes=duration, building=building)
+        rooms_obj = await R.resolve_free_rooms(
+            at=at,
+            duration_minutes=duration,
+            building=building,
+            institute_id=institute_id,
+        )
     except Exception as exc:
         raise HTTPException(502, str(exc))
 
