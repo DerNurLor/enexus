@@ -10,6 +10,7 @@ export interface Lesson {
   room_name:    string | null
   room_id:      number | null
   group_name:   string | null
+  group_names:  string[] | null   // present when lesson is merged across multiple groups
   group_id:     number | null
   subgroup:     string | null
   week_type:    string | null
@@ -103,4 +104,3 @@ export interface InstituteMeta {
   name:         string
   buildings:    string[]
 }
-
