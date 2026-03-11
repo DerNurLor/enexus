@@ -26,7 +26,7 @@ export function MobileNav() {
         {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
           const active = pathname === href || pathname.startsWith(href + '/')
           return (
-            <Link key={href} href={href} className="nav-btn" style={{ minWidth: 72 }}>
+            <Link key={href} href={href} className="nav-btn focus:outline-none focus-visible:outline-none" style={{ minWidth: 72 }}>
               <Icon size={22} strokeWidth={active ? 2.5 : 1.8}
                 style={{ color: active ? 'var(--cyan)' : 'var(--t-muted)', transition: 'color 0.2s' }} />
               <span className="text-[10px] font-medium tracking-wide"

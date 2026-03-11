@@ -106,7 +106,28 @@ body > * { position: relative; z-index: 1; }
 
   .nav-btn {
     @apply flex flex-col items-center gap-1 px-4 py-2 transition-all duration-200 cursor-pointer;
+    /* убираем браузерный highlight после нажатия */
+    outline: none;
+    -webkit-tap-highlight-color: transparent;
   }
+  .nav-btn:focus,
+  .nav-btn:focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
+}
+
+/* Reset focus-visible highlight on nav buttons and pill buttons */
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
+/* Remove tap highlight on mobile */
+button, a {
+  -webkit-tap-highlight-color: transparent;
 }
 
 /* Animations */

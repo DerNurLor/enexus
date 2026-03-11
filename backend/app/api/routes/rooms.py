@@ -72,7 +72,12 @@ async def list_rooms(
     institute_id: Optional[int]  = Query(None),
     has_schedule: Optional[bool] = Query(None),
 ):
-    filters: dict = {"source_url": settings.base_url}
+    filters: dict = {
+        "$or": [
+            {"source_url": settings.base_url},
+            {"source_url": {"$exists": False}},
+        ]
+    }
     if q:            filters["name"]          = {"$regex": q, "$options": "i"}
     if building:     filters["building"]      = {"$regex": building, "$options": "i"}
     if subject:      filters["subjects"]      = {"$regex": subject, "$options": "i"}
@@ -88,14 +93,14 @@ async def list_rooms(
 
 @router.get("/buildings-list", summary="List all distinct buildings")
 async def list_buildings_simple():
-    rooms = await Room.find({"source_url": settings.base_url}).to_list()
+    rooms = await Room.find({"$or": [{"source_url": settings.base_url}, {"source_url": {"$exists": False}}]}).to_list()
     buildings = sorted({r.building for r in rooms if r.building})
     return {"buildings": buildings}
 
 
 @router.get("/buildings", summary="All buildings with their rooms")
 async def list_buildings():
-    rooms = await Room.find({"source_url": settings.base_url}).sort("name").to_list()
+    rooms = await Room.find({"$or": [{"source_url": settings.base_url}, {"source_url": {"$exists": False}}]}).sort("name").to_list()
     buildings: dict[str, dict] = {}
     for r in rooms:
         b = r.building or "СКФУ (корпус не определён)"
@@ -145,8 +150,14 @@ async def get_free_rooms(
     busy_lessons = await LessonDoc.find(lesson_filters).to_list()
     busy_room_ids = {l.room_id for l in busy_lessons}
 
-    # All rooms (optionally filtered by building), scoped to this portal
-    room_filters: dict = {"source_url": settings.base_url}
+    # All rooms scoped to this portal.
+    # Фоллбек: если source_url ещё не проставлен (до миграции) — берём такие записи тоже.
+    room_filters: dict = {
+        "$or": [
+            {"source_url": settings.base_url},
+            {"source_url": {"$exists": False}},
+        ]
+    }
     if building:
         room_filters["building"] = {"$regex": building, "$options": "i"}
 
