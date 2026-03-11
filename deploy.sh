@@ -18,12 +18,22 @@
 #   sudo bash deploy.sh canary-rollback          # весь трафик на stable
 #   sudo bash deploy.sh canary-stable            # сделать canary новым stable
 #   sudo bash deploy.sh canary-status            # текущий статус canary
+#   sudo bash deploy.sh staging-up               # поднять staging
+#   sudo bash deploy.sh staging-down             # остановить staging
+#   sudo bash deploy.sh staging-status           # статус staging
+#   sudo bash deploy.sh staging-health           # health-check staging
+#   sudo bash deploy.sh staging-logs [сервис]    # логи staging
+#   sudo bash deploy.sh staging-build <сервис>   # пересобрать сервис в staging
+#   sudo bash deploy.sh staging-set-webhook      # зарегистрировать webhook бота
 # =============================================================================
 set -euo pipefail
 
 SECRETS_FILE="/etc/ncfu/secrets"
+STAGING_SECRETS_FILE="/etc/ncfu/secrets.staging"
 DIR="$(dirname "$(realpath "$0")")"
 CANARY_STATE_FILE="/etc/ncfu/canary.state"
+STAGING_COMPOSE_OVERRIDE="$DIR/docker-compose.staging-override.yml"
+STAGING_PROJECT="ncfu_staging"
 BOLD='\033[1m'; GREEN='\033[32m'; RED='\033[31m'; YELLOW='\033[33m'; CYAN='\033[36m'; RESET='\033[0m'
 
 [[ $EUID -ne 0 ]] && { echo -e "${RED}❌ Запускай через: sudo bash deploy.sh${RESET}"; exit 1; }
@@ -168,7 +178,6 @@ _verify_health() {
 }
 
 _save_previous() {
-  # Сохраняем текущие :latest как :previous перед пересборкой — нужно для отката
   for svc in backend bot miniapp dashboard; do
     local img="ncfu_${svc}:latest"
     docker image inspect "$img" &>/dev/null && docker tag "$img" "ncfu_${svc}:previous" 2>/dev/null || true
@@ -222,7 +231,6 @@ _canary_up() {
     git -C "$DIR" stash pop 2>/dev/null || true
   fi
 
-  # Запускаем canary через отдельный compose override
   if [[ ! -f "$DIR/docker-compose.canary.yml" ]]; then
     echo -e "${RED}❌ Нет docker-compose.canary.yml — создай его сначала${RESET}"
     exit 1
@@ -230,13 +238,11 @@ _canary_up() {
   docker compose -f "$DIR/docker-compose.yml" -f "$DIR/docker-compose.canary.yml" \
     up -d --no-deps backend_canary 2>&1
 
-  # Сохраняем состояние
   mkdir -p /etc/ncfu
   echo "CANARY_BRANCH=${branch:-current}" > "$CANARY_STATE_FILE"
   echo "CANARY_PERCENT=0" >> "$CANARY_STATE_FILE"
   echo "CANARY_STARTED=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$CANARY_STATE_FILE"
 
-  # Health-check canary
   sleep 5
   if curl -sf --max-time 5 "http://127.0.0.1:8010/health" &>/dev/null; then
     resp=$(curl -sf --max-time 5 "http://127.0.0.1:8010/health")
@@ -255,7 +261,6 @@ _canary_promote() {
     echo -e "${RED}❌ Укажи процент 0-100: sudo bash deploy.sh canary-promote 10${RESET}"; exit 1
   fi
 
-  # Проверяем что canary жив
   if ! curl -sf --max-time 5 "http://127.0.0.1:8010/health" &>/dev/null; then
     echo -e "${RED}❌ Canary backend не отвечает! Сначала подними: sudo bash deploy.sh canary-up${RESET}"; exit 1
   fi
@@ -276,7 +281,6 @@ _canary_promote() {
 
   if docker exec ncfu_nginx nginx -t 2>/dev/null; then
     docker exec ncfu_nginx nginx -s reload
-    # Обновляем состояние
     sed -i "s/CANARY_PERCENT=.*/CANARY_PERCENT=$pct/" "$CANARY_STATE_FILE" 2>/dev/null || \
       echo "CANARY_PERCENT=$pct" >> "$CANARY_STATE_FILE"
     echo -e "${GREEN}✅ ${pct}% трафика → canary${RESET}"
@@ -312,7 +316,7 @@ _canary_stable() {
   docker compose up -d --no-deps --no-build backend
   sleep 5
   if curl -sf --max-time 5 "http://127.0.0.1:8000/health" &>/dev/null; then
-    _canary_rollback   # сбрасываем nginx на обычный конфиг
+    _canary_rollback
     echo -e "${GREEN}✅ Canary стал новым stable. Деплой завершён.${RESET}"
   else
     echo -e "${RED}❌ Stable backend не отвечает после promote! Откатываемся...${RESET}"
@@ -339,6 +343,81 @@ _canary_status() {
     cat "$CANARY_STATE_FILE" | sed 's/^/  /'
   fi
   echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# STAGING
+# ═══════════════════════════════════════════════════════════════════════════════
+_staging_compose() {
+  if [[ ! -f "$STAGING_SECRETS_FILE" ]]; then
+    echo -e "${RED}❌ Нет $STAGING_SECRETS_FILE${RESET}"
+    echo "   Создай: sudo cp /etc/ncfu/secrets /etc/ncfu/secrets.staging"
+    echo "   И замени: TELEGRAM_BOT_TOKEN, WEBHOOK_BASE_URL, DOMAIN"
+    exit 1
+  fi
+  if [[ ! -f "$STAGING_COMPOSE_OVERRIDE" ]]; then
+    echo -e "${RED}❌ Нет $STAGING_COMPOSE_OVERRIDE${RESET}"
+    exit 1
+  fi
+  docker compose \
+    --env-file "$STAGING_SECRETS_FILE" \
+    -p "$STAGING_PROJECT" \
+    -f "$DIR/docker-compose.yml" \
+    -f "$STAGING_COMPOSE_OVERRIDE" \
+    "$@"
+}
+
+_staging_up() {
+  echo -e "${CYAN}${BOLD}▶ Поднимаем staging...${RESET}"
+  docker network create ncfu_staging_network 2>/dev/null || true
+  docker volume  create ncfu_staging_mongo_data 2>/dev/null || true
+  _staging_compose build --pull
+  _staging_compose up -d --remove-orphans
+  echo -e "${GREEN}${BOLD}✅ Staging поднят.${RESET}"
+  echo -e "   Логи:    make staging-logs backend"
+  echo -e "   Health:  make staging-health"
+  echo -e "   Стоп:    make staging-down"
+}
+
+_staging_down() {
+  echo -e "${YELLOW}▶ Останавливаем staging...${RESET}"
+  docker compose -p "$STAGING_PROJECT" down
+  echo -e "${GREEN}✅ Staging остановлен.${RESET}"
+}
+
+_staging_status() {
+  echo -e "\n${BOLD}Статус staging:${RESET}"
+  docker compose -p "$STAGING_PROJECT" ps 2>/dev/null || echo "  не запущен"
+  echo ""
+}
+
+_staging_health() {
+  echo -e "\n${BOLD}Health checks (staging):${RESET}"
+  declare -A _STAGING_PORT=([backend]=18000 [bot]=18001 [miniapp]=18002 [dashboard]=18003)
+  for svc in backend bot miniapp dashboard; do
+    port="${_STAGING_PORT[$svc]}"
+    if curl -sf --max-time 5 "http://127.0.0.1:${port}/health" &>/dev/null; then
+      resp=$(curl -sf --max-time 5 "http://127.0.0.1:${port}/health" 2>/dev/null)
+      echo -e "  ${GREEN}✓${RESET} ${BOLD}${svc}${RESET}:${port}  $resp"
+    else
+      echo -e "  ${RED}✗${RESET} ${BOLD}${svc}${RESET}:${port} — недоступен"
+    fi
+  done
+  echo ""
+}
+
+_staging_set_webhook() {
+  if [[ ! -f "$STAGING_SECRETS_FILE" ]]; then
+    echo -e "${RED}❌ Нет $STAGING_SECRETS_FILE${RESET}"; exit 1
+  fi
+  # Перезагружаем секреты из staging-файла
+  set -a; source "$STAGING_SECRETS_FILE"; set +a
+  echo -e "${CYAN}▶ Регистрируем webhook staging бота...${RESET}"
+  resp=$(curl -s "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/setWebhook" \
+    --data-urlencode "url=${WEBHOOK_BASE_URL}/webhook/telegram" \
+    -d "secret_token=${TELEGRAM_WEBHOOK_SECRET}")
+  echo "  $resp"
+  echo -e "${GREEN}✅ Webhook: ${WEBHOOK_BASE_URL}/webhook/telegram${RESET}"
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -441,6 +520,21 @@ case "$CMD" in
   canary-stable)   _canary_stable ;;
   canary-status)   _canary_status ;;
 
+  staging-up)          _staging_up ;;
+  staging-down)        _staging_down ;;
+  staging-status)      _staging_status ;;
+  staging-health)      _staging_health ;;
+  staging-set-webhook) _staging_set_webhook ;;
+  staging-logs)
+    _staging_compose logs -f --tail="${3:-100}" ${SVCS:-}
+    ;;
+  staging-build)
+    [[ -z "$SVCS" ]] && { echo -e "${RED}❌ Укажи сервис: sudo bash deploy.sh staging-build miniapp${RESET}"; exit 1; }
+    _staging_compose build $SVCS
+    _staging_compose up -d --no-deps $SVCS
+    echo -e "${GREEN}✅ Staging $SVCS пересобран.${RESET}"
+    ;;
+
   *)
     echo -e "${BOLD}Команды:${RESET}"
     echo "  Основные:   up | build <сервис> | restart | pull | fresh | stop | down"
@@ -448,6 +542,8 @@ case "$CMD" in
     echo "  Мониторинг: logs [сервис] | status"
     echo "  Canary:     canary-up [ветка] | canary-promote <N%>"
     echo "              canary-rollback | canary-stable | canary-status"
+    echo "  Staging:    staging-up | staging-down | staging-status | staging-health"
+    echo "              staging-logs [сервис] | staging-build <сервис> | staging-set-webhook"
     exit 1
     ;;
 esac

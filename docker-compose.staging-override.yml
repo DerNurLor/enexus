@@ -1,0 +1,56 @@
+# docker-compose.staging-override.yml
+# Переопределяет порты и имена контейнеров для staging-стека.
+# Запускается через deploy.sh / Makefile как второй -f файл.
+#
+# Порты staging:
+#   backend   → 127.0.0.1:18000
+#   bot       → 127.0.0.1:18001
+#   miniapp   → 127.0.0.1:18002
+#   dashboard → 127.0.0.1:18003
+#   web       → 127.0.0.1:13000
+
+services:
+  backend:
+    container_name: ncfu_staging_backend
+    ports:
+      - "127.0.0.1:18000:8000"
+
+  bot:
+    container_name: ncfu_staging_bot
+    ports:
+      - "127.0.0.1:18001:8001"
+
+  miniapp:
+    container_name: ncfu_staging_miniapp
+    ports:
+      - "127.0.0.1:18002:8002"
+
+  dashboard:
+    container_name: ncfu_staging_dashboard
+    ports:
+      - "127.0.0.1:18003:8003"
+
+  web:
+    container_name: ncfu_staging_web
+    ports:
+      - "127.0.0.1:13000:3000"
+
+  # nginx из основного стека не нужен — системный nginx проксирует напрямую
+  nginx:
+    profiles: ["disabled"]
+
+  mongo:
+    container_name: ncfu_staging_mongo
+
+  redis:
+    container_name: ncfu_staging_redis
+
+volumes:
+  mongo_data:
+    name: ncfu_staging_mongo_data
+    external: false
+
+networks:
+  ncfu_net:
+    name: ncfu_staging_network
+    external: false
