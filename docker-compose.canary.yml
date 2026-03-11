@@ -1,0 +1,60 @@
+# =============================================================================
+# docker-compose.canary.yml — Canary override
+#
+# Запускает backend_canary на порту 8010.
+# Используется ТОЛЬКО вместе с основным docker-compose.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.canary.yml up -d backend_canary
+#
+# Управление через deploy.sh:
+#   sudo bash deploy.sh canary-up [ветка]
+#   sudo bash deploy.sh canary-promote 5
+#   sudo bash deploy.sh canary-rollback
+# =============================================================================
+
+services:
+  backend_canary:
+    image: ncfu_backend:canary       # собирается командой canary-up
+    container_name: ncfu_backend_canary
+    restart: "no"                    # canary не рестартует автоматически
+    environment:
+      MONGO_URI:        "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${MONGO_DB:-ncfu_schedule}?authSource=admin"
+      AUTH_MONGO_URI:   "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${AUTH_MONGO_DB:-ncfu_auth}?authSource=admin"
+      REDIS_URL:        "redis://:${REDIS_PASSWORD}@redis:6379/0"
+      APP_ENV:          "${APP_ENV:-production}"
+      OPENAI_API_KEY:   "${OPENAI_API_KEY}"
+      JWT_SECRET:       "${JWT_SECRET}"
+      DASHBOARD_SECRET: "${DASHBOARD_SECRET}"
+      GRAPHQL_SECRET:   "${GRAPHQL_SECRET}"
+      WEBHOOK_BASE_URL: "${WEBHOOK_BASE_URL}"
+      CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS}"
+      SENTRY_DSN:       "${SENTRY_DSN:-}"
+      ADMIN_PATH:       "${ADMIN_PATH:-admin}"
+      # Canary метка — попадает в health-check ответ и логи
+      CANARY:           "true"
+      CANARY_VERSION:   "${CANARY_VERSION:-canary}"
+    ports:
+      - "127.0.0.1:8010:8000"        # отдельный порт — nginx сам решает куда роутить
+    depends_on:
+      mongo: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    networks: [ncfu_net]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health').raise_for_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"
+    labels:
+      ncfu.canary: "true"
+      ncfu.role: "canary-backend"
+
+# Canary использует существующую сеть — не создаёт новую
+networks:
+  ncfu_net:
+    name: ncfu_network
+    external: true
