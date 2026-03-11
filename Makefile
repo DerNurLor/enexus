@@ -202,6 +202,9 @@ else
 	@echo "$(DIM)Доступные: backend bot miniapp dashboard$(RESET)"
 endif
 
+staging-rebuild:
+	sudo bash deploy.sh staging-rebuild $(filter-out $@,$(MAKECMDGOALS))
+
 # ── МОНИТОРИНГ ────────────────────────────────────────────────────────────────
 
 status: ## Статус контейнеров

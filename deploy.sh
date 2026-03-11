@@ -32,7 +32,7 @@ SECRETS_FILE="/etc/ncfu/secrets"
 STAGING_SECRETS_FILE="/etc/ncfu/secrets.staging"
 DIR="$(dirname "$(realpath "$0")")"
 CANARY_STATE_FILE="/etc/ncfu/canary.state"
-STAGING_COMPOSE_OVERRIDE="$DIR/docker-compose.staging-override.yml"
+STAGING_COMPOSE_FILE="$DIR/docker-compose.staging.yml"
 STAGING_PROJECT="ncfu_staging"
 BOLD='\033[1m'; GREEN='\033[32m'; RED='\033[31m'; YELLOW='\033[33m'; CYAN='\033[36m'; RESET='\033[0m'
 
@@ -358,8 +358,7 @@ _staging_compose() {
   docker compose \
     --env-file "$STAGING_SECRETS_FILE" \
     -p "$STAGING_PROJECT" \
-    -f "$DIR/docker-compose.yml" \
-    -f "$STAGING_COMPOSE_OVERRIDE" \
+    -f "$STAGING_COMPOSE_FILE" \
     "$@"
 }
 
@@ -529,6 +528,16 @@ case "$CMD" in
     _staging_compose build $SVCS
     _staging_compose up -d --no-deps $SVCS
     echo -e "${GREEN}✅ Staging $SVCS пересобран.${RESET}"
+    ;;
+  
+  staging-rebuild)
+    [[ -z "$SVCS" ]] && { echo -e "${RED}❌ Укажи сервис: make staging-rebuild web${RESET}"; exit 1; }
+    docker stop ncfu_staging_${SVCS} 2>/dev/null || true
+    docker rm ncfu_staging_${SVCS} 2>/dev/null || true
+    docker rmi ncfu_${SVCS}:staging 2>/dev/null || true
+    _staging_compose build --no-cache $SVCS
+    _staging_compose up -d --no-deps $SVCS
+    echo -e "${GREEN}✅ Staging $SVCS пересобран без кеша.${RESET}"
     ;;
 
   *)

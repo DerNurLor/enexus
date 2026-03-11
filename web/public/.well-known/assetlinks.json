@@ -8,5 +8,15 @@
         "14:26:4D:95:07:25:7D:85:10:F7:6D:4C:07:7A:E9:A0:56:31:C1:16:0E:2A:99:95:41:A4:7D:5B:70:B3:BF:84"
       ]
     }
+  },
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "xyz.isabelline.enexus.ncfu.debug",
+      "sha256_cert_fingerprints": [
+        "55:E6:F0:B9:F7:35:19:74:A0:4E:21:0A:9B:43:40:D1:A9:5A:B9:E2:5F:9A:D2:C9:2B:35:AE:11:D6:D4:3E:B7"
+      ]
+    }
   }
 ]

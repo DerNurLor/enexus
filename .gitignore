@@ -27,3 +27,4 @@ Thumbs.db
 
 # Build output
 /miniapp/react-src/dist/
+.env.staging
