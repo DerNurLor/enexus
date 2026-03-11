@@ -30,9 +30,15 @@ async def institutes_with_buildings():
                 result.append({"institute_id": inst.institute_id, "short_name": inst.short_name,
                                 "name": inst.name, "buildings": []})
                 continue
+            # Используем Room.institute_ids напрямую (быстрее и точнее).
+            # Фоллбек через group_ids для данных до миграции.
             rooms_for_inst = await Room.find(
-                {"group_ids": {"$in": list(group_ids)}, "building": {"$ne": None}}
+                {"institute_ids": inst.institute_id, "building": {"$ne": None}}
             ).to_list()
+            if not rooms_for_inst:
+                rooms_for_inst = await Room.find(
+                    {"group_ids": {"$in": list(group_ids)}, "building": {"$ne": None}}
+                ).to_list()
             buildings_for_inst = sorted({r.building for r in rooms_for_inst if r.building})
             result.append({"institute_id": inst.institute_id, "short_name": inst.short_name,
                            "name": inst.name, "buildings": buildings_for_inst})

@@ -351,11 +351,16 @@ async def institutes_with_buildings(authorization: Optional[str] = Header(None))
                 })
                 continue
 
-            # Find buildings that have rooms used by these groups
-            # Room.group_ids stores which groups have classes in that room
+            # Используем Room.institute_ids напрямую (добавлено в модель).
+            # Фоллбек через group_ids если institute_ids ещё не проставлены (до миграции).
             rooms_for_inst = await Room.find(
-                {"group_ids": {"$in": list(group_ids)}, "building": {"$ne": None}}
+                {"institute_ids": inst.institute_id, "building": {"$ne": None}}
             ).to_list()
+            if not rooms_for_inst:
+                # Фоллбек: через group_ids (старые данные до миграции)
+                rooms_for_inst = await Room.find(
+                    {"group_ids": {"$in": list(group_ids)}, "building": {"$ne": None}}
+                ).to_list()
             buildings_for_inst = sorted({r.building for r in rooms_for_inst if r.building})
 
             result.append({

@@ -93,8 +93,9 @@ def _matches_lesson_filters(
 
 @router.get("/", summary="Universal search across groups, teachers, and rooms")
 async def universal_search(
-    q: str = Query(..., min_length=1, description="Search query"),
-    limit: int = Query(20, ge=1, le=100),
+    q:            str           = Query(..., min_length=1, description="Search query"),
+    institute_id: Optional[int] = Query(None, description="Filter by institute"),
+    limit:        int           = Query(20, ge=1, le=100),
 ):
     """
     Search all entity types simultaneously.
@@ -102,15 +103,18 @@ async def universal_search(
     """
     regex = {"$regex": q, "$options": "i"}
 
-    groups = await Group.find({"name": regex}).limit(limit).to_list()
-    teachers = await Teacher.find({"$or": [
-        {"full_name": regex},
-        {"subjects": regex},
-    ]}).limit(limit).to_list()
-    rooms = await Room.find({"$or": [
-        {"name": regex},
-        {"building": regex},
-    ]}).limit(limit).to_list()
+    g_filter: dict = {"name": regex}
+    t_filter: dict = {"$or": [{"full_name": regex}, {"subjects": regex}]}
+    r_filter: dict = {"$or": [{"name": regex}, {"building": regex}]}
+
+    if institute_id:
+        g_filter["institute_id"]    = institute_id
+        t_filter["institute_ids"]   = institute_id
+        r_filter["institute_ids"]   = institute_id
+
+    groups   = await Group.find(g_filter).limit(limit).to_list()
+    teachers = await Teacher.find(t_filter).limit(limit).to_list()
+    rooms    = await Room.find(r_filter).limit(limit).to_list()
 
     return {
         "query": q,
@@ -192,15 +196,17 @@ async def search_rooms(
     subject:      Optional[str] = Query(None, description="Subject taught here"),
     teacher_id:   Optional[int] = Query(None, description="Rooms used by this teacher"),
     group_id:     Optional[int] = Query(None, description="Rooms used by this group"),
+    institute_id: Optional[int] = Query(None, description="Filter rooms by institute"),
     has_schedule: Optional[bool] = Query(None),
     limit:        int            = Query(50, ge=1, le=500),
 ):
     filters: dict = {}
-    if q:          filters["name"]       = {"$regex": q, "$options": "i"}
-    if building:   filters["building"]   = {"$regex": building, "$options": "i"}
-    if subject:    filters["subjects"]   = {"$regex": subject, "$options": "i"}
-    if teacher_id: filters["teacher_ids"] = teacher_id
-    if group_id:   filters["group_ids"]  = group_id
+    if q:            filters["name"]         = {"$regex": q, "$options": "i"}
+    if building:     filters["building"]     = {"$regex": building, "$options": "i"}
+    if subject:      filters["subjects"]     = {"$regex": subject, "$options": "i"}
+    if teacher_id:   filters["teacher_ids"]  = teacher_id
+    if group_id:     filters["group_ids"]    = group_id
+    if institute_id: filters["institute_ids"] = institute_id
     if has_schedule is True:
         filters["schedule_scraped_at"] = {"$ne": None}
     elif has_schedule is False:
