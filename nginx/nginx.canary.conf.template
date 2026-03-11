@@ -1,0 +1,362 @@
+# nginx/nginx.canary.conf
+# Canary routing — генерируется из шаблона через envsubst.
+# Направляет CANARY_PERCENT% трафика на backend_canary:8010,
+# остальное — на backend:8000 (stable).
+#
+# Роутинг:
+#   /webhook/telegram   →  bot:8001
+#   /miniapp/*          →  miniapp:8002
+#   /auth/*             →  miniapp:8002
+#   /graphql            →  stable или canary (по split_clients)
+#   /dashboard/*        →  dashboard:8003
+#   /static/*           →  backend:8000 (всегда stable)
+#   /health             →  backend:8000 (всегда stable)
+#   /*                  →  stable или canary (по split_clients)
+
+worker_processes auto;
+error_log /var/log/nginx/error.log warn;
+pid       /var/run/nginx.pid;
+
+events {
+    worker_connections 2048;
+    multi_accept on;
+}
+
+http {
+    include      /etc/nginx/mime.types;
+    default_type application/octet-stream;
+
+    # ── Logging ───────────────────────────────────────────────────────────────
+    log_format main
+        '$$remote_addr [$$time_local] "$$request" '
+        '$$status $$body_bytes_sent "$$http_referer" '
+        '"$$http_user_agent" "$$http_x_forwarded_for" '
+        'rt=$$request_time uct=$$upstream_connect_time uht=$$upstream_header_time urt=$$upstream_response_time';
+
+    access_log /var/log/nginx/access.log main;
+
+    # ── Performance ───────────────────────────────────────────────────────────
+    sendfile           on;
+    tcp_nopush         on;
+    tcp_nodelay        on;
+    keepalive_timeout  65;
+    gzip               on;
+    gzip_types         text/plain text/css application/json application/javascript
+                       text/xml application/xml application/xml+rss text/javascript;
+    gzip_min_length    1000;
+
+    # ── Security headers (применяются везде) ─────────────────────────────────
+    add_header X-Content-Type-Options  "nosniff"        always;
+    add_header X-Frame-Options         "SAMEORIGIN"     always;
+    add_header X-XSS-Protection        "1; mode=block"  always;
+    add_header Referrer-Policy         "strict-origin-when-cross-origin" always;
+
+    # ── Request size limits ───────────────────────────────────────────────────
+    client_max_body_size    20m;   # нужно для загрузки медиа через dashboard
+    client_body_timeout     30s;
+    client_header_timeout   10s;
+
+    # ── Docker internal DNS ───────────────────────────────────────────────────
+    # Резолвим имена контейнеров динамически — nginx стартует даже если
+    # апстримы ещё не готовы.
+    resolver 127.0.0.11 valid=5s ipv6=off;
+    resolver_timeout 5s;
+
+    # ── Canary: split_clients ─────────────────────────────────────────────────
+    # CANARY_PERCENT подставляется через envsubst при генерации конфига.
+    # Пример: 5% → 5% случайных запросов идут на canary, 95% на stable.
+    # При 0% — весь трафик на stable (поведение как в обычном nginx.conf).
+    split_clients "$$remote_addr$$http_user_agent$$request_id" $$split_canary_flag {
+        ${CANARY_PERCENT}%  "canary";
+        *                   "stable";
+    }
+
+    # ── Upstream пулы ─────────────────────────────────────────────────────────
+    # Stable (основной backend :8000)
+    upstream backend_stable {
+        server backend:8000;
+        keepalive 32;
+    }
+
+    # Canary (тестовый backend :8010 — поднимается через docker-compose.canary.yml)
+    upstream backend_canary {
+        server backend_canary:8000;
+        keepalive 16;
+    }
+
+    # ── Rate limiting zones ───────────────────────────────────────────────────
+    limit_req_zone  $$binary_remote_addr  zone=api_limit:10m       rate=30r/m;
+    limit_req_zone  $$binary_remote_addr  zone=webhook_limit:1m    rate=100r/s;
+    limit_req_zone  $$binary_remote_addr  zone=dashboard_limit:5m  rate=60r/m;
+    limit_req_zone  $$binary_remote_addr  zone=auth_limit:2m       rate=10r/m;
+
+    # ── Main server ───────────────────────────────────────────────────────────
+    server {
+        listen 80;
+        server_name _;
+
+        # ── Canary upstream selection ─────────────────────────────────────────
+        # Приоритеты (от высшего к низшему):
+        #   1. Cookie ncfu_canary=1 → всегда canary (beta-пользователи)
+        #   2. split_clients → процентный rollout
+        #   3. По умолчанию → stable
+        set $$backend_target "stable";
+
+        # split_clients результат
+        if ($$split_canary_flag = "canary") {
+            set $$backend_target "canary";
+        }
+
+        # Cookie override — beta/canary пользователи всегда на canary
+        if ($$cookie_ncfu_canary = "1") {
+            set $$backend_target "canary";
+        }
+
+        # Финальный выбор upstream
+        set $$upstream_backend http://backend_stable;
+        if ($$backend_target = "canary") {
+            set $$upstream_backend http://backend_canary;
+        }
+
+        set $$upstream_bot       http://bot:8001;
+        set $$upstream_miniapp   http://miniapp:8002;
+        set $$upstream_dashboard http://dashboard:8003;
+        set $$upstream_web       http://web:3000;
+
+        # Общие proxy headers
+        proxy_http_version    1.1;
+        proxy_set_header Host              $$host;
+        proxy_set_header X-Real-IP         $$remote_addr;
+        proxy_set_header X-Forwarded-For   $$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $$scheme;
+        proxy_set_header Connection        "";
+        proxy_read_timeout    60s;
+        proxy_connect_timeout 10s;
+        proxy_send_timeout    60s;
+
+        # Буферизация ответов
+        proxy_buffering          on;
+        proxy_buffer_size        8k;
+        proxy_buffers            8 16k;
+        proxy_busy_buffers_size  32k;
+
+        # ── Telegram webhook → bot ────────────────────────────────────────────
+        # Telegram шлёт POST на /webhook/telegram (точный путь из set_webhook).
+        # nginx проксирует его на bot:8001/webhook/telegram.
+        # Только POST — остальные методы отклоняются сразу.
+        location = /webhook/telegram {
+            limit_req zone=webhook_limit burst=50 nodelay;
+
+            if ($$request_method !~ ^(POST)$ ) {
+                return 405;
+            }
+
+            proxy_pass         $$upstream_bot;
+            proxy_read_timeout 30s;
+
+            # Передаём заголовок секрета вебхука Telegram
+            proxy_set_header X-Telegram-Bot-Api-Secret-Token $$http_x_telegram_bot_api_secret_token;
+        }
+
+        # ── Dashboard (отдельный сервис :8003) ───────────────────────────────
+        #
+        # Доступ ТОЛЬКО через секретный ADMIN_PATH-префикс из .env.
+        # nginx.conf генерируется из шаблона при старте — ADMIN_PATH подставляется
+        # через envsubst (см. docker-compose.yml, nginx entrypoint).
+        #
+        # Итоговые URL при ADMIN_PATH=edY5N875HC99:
+        #   /edY5N875HC99/dashboard/admin?secret=...  ← вход
+        #   /edY5N875HC99/dashboard/api/*             ← API
+        #
+        # Прямой /dashboard/* — заблокирован.
+
+        # Статические ассеты SPA (JS/CSS) — разрешены без префикса,
+        # т.к. Vite генерирует абсолютные пути /dashboard/assets/*
+        location /dashboard/assets/ {
+            proxy_pass $$upstream_backend;
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+
+        # Прямой доступ без префикса — запрещён
+        location = /dashboard {
+            return 403;
+        }
+        location /dashboard/ {
+            return 403;
+        }
+
+        # /{ADMIN_PATH}/dashboard/* → dashboard:8003
+        # ADMIN_PATH подставляется через envsubst при старте контейнера nginx
+        location /${NGINX_ADMIN_PATH}/dashboard/ {
+            limit_req zone=dashboard_limit burst=20 nodelay;
+
+            # Убираем /{ADMIN_PATH} из пути перед проксированием:
+            # /{ADMIN_PATH}/dashboard/... → /dashboard/...
+            rewrite ^/${NGINX_ADMIN_PATH}(/dashboard/.*)$ $$1 break;
+            proxy_pass         $$upstream_dashboard;
+            proxy_read_timeout 120s;
+
+            add_header Cache-Control "no-store, no-cache, must-revalidate" always;
+            add_header X-Frame-Options "DENY" always;
+        }
+
+        # Редирект /{ADMIN_PATH} и /{ADMIN_PATH}/dashboard →  /{ADMIN_PATH}/dashboard/admin
+        location = /${NGINX_ADMIN_PATH} {
+            return 301 /${NGINX_ADMIN_PATH}/dashboard/admin;
+        }
+        location = /${NGINX_ADMIN_PATH}/dashboard {
+            return 301 /${NGINX_ADMIN_PATH}/dashboard/admin;
+        }
+
+        # ── Auth (для miniapp и dashboard) ────────────────────────────────────
+        location /auth/ {
+            limit_req zone=auth_limit burst=10 nodelay;
+
+            proxy_pass         $$upstream_miniapp;
+            proxy_read_timeout 30s;
+        }
+
+        # ── Mini App SPA ──────────────────────────────────────────────────────
+        location /miniapp/ {
+            proxy_pass         $$upstream_miniapp;
+            proxy_read_timeout 30s;
+        }
+
+        # ── GraphQL API ───────────────────────────────────────────────────────
+        location /graphql {
+            limit_req zone=api_limit burst=20 nodelay;
+
+            proxy_pass        $$upstream_backend;
+            proxy_set_header  Upgrade    $$http_upgrade;
+            proxy_set_header  Connection "upgrade";
+            proxy_read_timeout 300s;   # для долгих GraphQL запросов
+        }
+
+        # ── Static files (аватары) ────────────────────────────────────────────
+        location /static/ {
+            proxy_pass $$upstream_backend;
+
+            # Агрессивное кеширование статики
+            proxy_hide_header  Cache-Control;
+            add_header         Cache-Control "public, max-age=86400, immutable" always;
+            add_header         Vary "Accept-Encoding" always;
+
+            proxy_read_timeout 15s;
+        }
+
+        # ── Health check (всегда → stable, не логируем) ──────────────────────
+        location = /health {
+            access_log off;
+            proxy_pass http://backend_stable;
+        }
+
+        # ── Canary health (для мониторинга) ───────────────────────────────────
+        location = /canary-health {
+            access_log off;
+            allow 127.0.0.1;
+            allow 172.0.0.0/8;
+            deny all;
+            proxy_pass http://backend_canary;
+        }
+
+        # ── Metrics (только локально) ─────────────────────────────────────────
+        location = /metrics {
+            allow 127.0.0.1;
+            allow 172.0.0.0/8;   # Docker internal networks
+            deny  all;
+            access_log off;
+            proxy_pass $$upstream_backend;
+        }
+
+        # ── REST API (расписание) — всё остальное → backend ──────────────────
+        location / {
+            limit_req zone=api_limit burst=30 nodelay;
+            proxy_pass $$upstream_backend;
+        }
+    }
+
+    # ── Студенческий портал (app.*) ──────────────────────────────────────────
+    server {
+        listen 80;
+        server_name app.${NGINX_DOMAIN:-localhost};
+
+        set $$upstream_web http://web:3000;
+        set $$upstream_backend_app http://backend:8000;
+
+        proxy_http_version    1.1;
+        proxy_set_header Host              $$host;
+        proxy_set_header X-Real-IP         $$remote_addr;
+        proxy_set_header X-Forwarded-For   $$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $$scheme;
+        proxy_set_header Connection        "";
+        proxy_read_timeout    60s;
+        proxy_connect_timeout 10s;
+
+        # Next.js HMR websocket (dev only)
+        location /_next/webpack-hmr {
+            proxy_pass         $$upstream_web;
+            proxy_set_header Upgrade    $$http_upgrade;
+            proxy_set_header Connection "upgrade";
+        }
+
+        # Next.js static assets — aggressive caching
+        location /_next/static/ {
+            proxy_pass $$upstream_web;
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+
+        # PWA assets
+        location /icons/ {
+            proxy_pass $$upstream_web;
+            expires 1y;
+            add_header Cache-Control "public, immutable";
+        }
+
+        location = /manifest.json {
+            proxy_pass $$upstream_web;
+            add_header Cache-Control "public, max-age=86400";
+        }
+
+        location = /sw.js {
+            proxy_pass $$upstream_web;
+            add_header Cache-Control "no-cache, no-store, must-revalidate";
+        }
+
+        # API proxy → backend
+        location /api/ {
+            proxy_pass $$upstream_backend_app;
+        }
+
+        # All other requests → Next.js
+        location / {
+            proxy_pass $$upstream_web;
+        }
+    }
+
+    # ── Для продакшена с TLS терминацией на nginx ─────────────────────────────
+    # Раскомментируй если хочешь завершать SSL на nginx (а не на Cloudflare/etc.)
+    #
+    # server {
+    #     listen 443 ssl http2;
+    #     server_name yourdomain.com;
+    #
+    #     ssl_certificate     /etc/ssl/certs/fullchain.pem;
+    #     ssl_certificate_key /etc/ssl/private/privkey.pem;
+    #     ssl_protocols       TLSv1.2 TLSv1.3;
+    #     ssl_ciphers         HIGH:!aNULL:!MD5;
+    #     ssl_session_cache   shared:SSL:10m;
+    #     ssl_session_timeout 10m;
+    #
+    #     add_header Strict-Transport-Security "max-age=63072000; includeSubDomains; preload" always;
+    #
+    #     # ... те же location блоки что выше ...
+    # }
+    #
+    # server {
+    #     listen 80;
+    #     server_name yourdomain.com;
+    #     return 301 https://$$server_name$$request_uri;
+    # }
+}
