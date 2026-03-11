@@ -16,6 +16,9 @@
 #   make canary 100            — всё на canary
 #   make canary-stable         — canary становится stable
 #   make canary-status         — статус canary
+#   make staging-up            — поднять staging окружение
+#   make staging-down          — остановить staging
+#   make staging-logs backend  — логи staging сервиса
 #   make logs miniapp          — логи сервиса
 #   make shell miniapp         — shell внутри контейнера
 #   make mongo                 — MongoDB shell
@@ -35,13 +38,17 @@ DIM    = \033[2m
 
 KNOWN_TARGETS := help up pull fresh stop down build restart logs status health \
                  check shell mongo redis canary canary-up canary-rollback \
-                 canary-stable canary-status
+                 canary-stable canary-status \
+                 staging-up staging-down staging-status staging-health \
+                 staging-logs staging-build staging-set-webhook
 EXTRA_ARGS    := $(filter-out $(firstword $(MAKECMDGOALS)), $(MAKECMDGOALS))
 TARGETS       := $(or $(EXTRA_ARGS), $(svc))
 BRANCH        ?=
 
 .PHONY: help up pull fresh stop down build restart logs status health check \
         shell mongo redis canary canary-up canary-rollback canary-stable canary-status \
+        staging-up staging-down staging-status staging-health \
+        staging-logs staging-build staging-set-webhook \
         backend bot miniapp dashboard nginx
 
 # ── HELP ──────────────────────────────────────────────────────────────────────
@@ -75,6 +82,15 @@ help: ## Показать все команды
 	@printf "  $(CYAN)%-40s$(RESET) %s\n" "make canary-stable"            "Canary → stable (финальный promote)"
 	@printf "  $(CYAN)%-40s$(RESET) %s\n" "make canary-rollback"          "Экстренный откат canary"
 	@printf "  $(CYAN)%-40s$(RESET) %s\n" "make canary-status"            "Статус canary"
+	@echo ""
+	@echo "$(CYAN)$(BOLD)STAGING$(RESET)"
+	@printf "  $(CYAN)%-40s$(RESET) %s\n" "make staging-up"               "Поднять staging окружение"
+	@printf "  $(CYAN)%-40s$(RESET) %s\n" "make staging-down"             "Остановить staging"
+	@printf "  $(CYAN)%-40s$(RESET) %s\n" "make staging-status"           "Статус контейнеров staging"
+	@printf "  $(CYAN)%-40s$(RESET) %s\n" "make staging-health"           "Health-check staging сервисов"
+	@printf "  $(CYAN)%-40s$(RESET) %s\n" "make staging-logs backend"     "Логи staging сервиса"
+	@printf "  $(CYAN)%-40s$(RESET) %s\n" "make staging-build miniapp"    "Пересобрать сервис в staging"
+	@printf "  $(CYAN)%-40s$(RESET) %s\n" "make staging-set-webhook"      "Зарегистрировать webhook тестового бота"
 	@echo ""
 	@echo "$(CYAN)$(BOLD)МОНИТОРИНГ$(RESET)"
 	@printf "  $(CYAN)%-40s$(RESET) %s\n" "make status"                   "Статус контейнеров"
@@ -154,6 +170,38 @@ canary-stable: ## Сделать canary новым stable
 canary-status: ## Статус canary деплоя
 	$(DEPLOY) canary-status
 
+# ── STAGING ───────────────────────────────────────────────────────────────────
+
+staging-up: ## Поднять staging окружение
+	$(DEPLOY) staging-up
+
+staging-down: ## Остановить staging окружение
+	$(DEPLOY) staging-down
+
+staging-status: ## Статус контейнеров staging
+	$(DEPLOY) staging-status
+
+staging-health: ## Health-check staging сервисов
+	$(DEPLOY) staging-health
+
+staging-set-webhook: ## Зарегистрировать webhook тестового бота
+	$(DEPLOY) staging-set-webhook
+
+staging-logs: ## make staging-logs [сервис] — логи staging
+ifneq ($(TARGETS),)
+	$(DEPLOY) staging-logs "$(TARGETS)"
+else
+	$(DEPLOY) staging-logs
+endif
+
+staging-build: ## make staging-build <сервис> — пересобрать сервис в staging
+ifneq ($(TARGETS),)
+	$(DEPLOY) staging-build "$(TARGETS)"
+else
+	@echo "$(RED)Укажи сервис: make staging-build miniapp$(RESET)"
+	@echo "$(DIM)Доступные: backend bot miniapp dashboard$(RESET)"
+endif
+
 # ── МОНИТОРИНГ ────────────────────────────────────────────────────────────────
 
 status: ## Статус контейнеров
@@ -172,7 +220,6 @@ health: ## Health-check всех сервисов
 			echo "  $(RED)✗$(RESET) $(BOLD)$$svc$(RESET) $(DIM):$$port$(RESET) — $(RED)недоступен$(RESET)"; \
 		fi; \
 	done
-	@# Canary health (если запущен)
 	@if docker ps --filter "name=ncfu_backend_canary" --format "{{.Status}}" 2>/dev/null | grep -q "Up"; then \
 		result=$$(curl -sf --max-time 5 http://localhost:8010/health 2>/dev/null); \
 		if [ $$? -eq 0 ]; then \
@@ -210,7 +257,7 @@ redis: ## Redis CLI
 	@source /etc/ncfu/secrets && \
 	$(COMPOSE) exec redis redis-cli -a "$$REDIS_PASSWORD"
 
-# ── Заглушки для имён сервисов (чтобы make не ругался на неизвестные цели) ────
+# ── Заглушки для имён сервисов ────────────────────────────────────────────────
 backend:  ;
 bot:      ;
 miniapp:  ;
