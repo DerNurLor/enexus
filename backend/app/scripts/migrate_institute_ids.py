@@ -173,14 +173,14 @@ async def migrate_teachers(teacher_inst: dict[int, dict[int, str]], dry_run: boo
     print(f"  No data : {missing}  (no lessons found for these teachers)")
 
 
-async def migrate_teacher_source_url(dry_run: bool):
+async def migrate_teacher_source_url(motor_db, dry_run: bool):
     """
     Одноразовая миграция: проставляет source_url на все записи Teacher
     у которых это поле отсутствует (до добавления поля в модель).
     """
     print("\n── Teacher.source_url backfill ────────────────────────────────────")
     from app.core.config import settings
-    db_teachers = Teacher.get_motor_collection()
+    db_teachers = motor_db["teachers"]
     without_url = await db_teachers.count_documents(
         {"source_url": {"$exists": False}}
     )
@@ -212,7 +212,7 @@ async def main(dry_run: bool):
     )
 
     # Шаг 0: бекфилл source_url на teacher'ов (новое поле)
-    await migrate_teacher_source_url(dry_run)
+    await migrate_teacher_source_url(client[db_name], dry_run)
 
     # Шаг 1: строим маппинги
     group_inst_map = await build_group_institute_map()
