@@ -37,12 +37,13 @@ services:
 
   web:
     container_name: ncfu_staging_web
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: "${NEXT_PUBLIC_API_URL}"
     ports:
-      - target: 3000
-        host_ip: "127.0.0.1"
-        published: "13000"
-        protocol: tcp
-        mode: ingress
+      - "127.0.0.1:13000:3000"
 
   nginx:
     profiles: ["disabled"]
