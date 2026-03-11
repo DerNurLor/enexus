@@ -16,6 +16,82 @@ MIN_FUTURE_WEEKS = 6
 _refresh_in_progress: set[int] = set()
 
 
+# ── Lesson merge ──────────────────────────────────────────────────────────────
+
+def _merge_lessons(lessons: list) -> list[dict]:
+    """
+    Merge duplicate lessons that happen simultaneously across multiple groups.
+
+    Two lessons are considered the same if they share:
+      date, time_start, time_end, subject, teacher_id, room_id,
+      lesson_type, subgroup, week_type
+
+    When merged, group_name and group_id are combined into lists.
+    """
+    merged: dict[tuple, dict] = {}
+
+    for l in lessons:
+        key = (
+            str(l.date) if hasattr(l, "date") else l.get("date", ""),
+            l.time_start if hasattr(l, "time_start") else l.get("time_start", ""),
+            l.time_end   if hasattr(l, "time_end")   else l.get("time_end", ""),
+            l.subject    if hasattr(l, "subject")     else l.get("subject", ""),
+            l.teacher_id if hasattr(l, "teacher_id") else l.get("teacher_id"),
+            l.room_id    if hasattr(l, "room_id")     else l.get("room_id"),
+            l.lesson_type if hasattr(l, "lesson_type") else l.get("lesson_type"),
+            l.subgroup   if hasattr(l, "subgroup")   else l.get("subgroup"),
+            l.week_type  if hasattr(l, "week_type")  else l.get("week_type"),
+        )
+
+        # Get scalar values
+        gid  = l.group_id   if hasattr(l, "group_id")   else l.get("group_id")
+        gname = l.group_name if hasattr(l, "group_name") else l.get("group_name", "")
+
+        if key not in merged:
+            merged[key] = {
+                "subject":      l.subject      if hasattr(l, "subject")      else l.get("subject", ""),
+                "lesson_type":  l.lesson_type  if hasattr(l, "lesson_type")  else l.get("lesson_type"),
+                "time_start":   l.time_start   if hasattr(l, "time_start")   else l.get("time_start", ""),
+                "time_end":     l.time_end     if hasattr(l, "time_end")     else l.get("time_end", ""),
+                "teacher_name": l.teacher_name if hasattr(l, "teacher_name") else l.get("teacher_name"),
+                "teacher_id":   l.teacher_id   if hasattr(l, "teacher_id")   else l.get("teacher_id"),
+                "classroom":    l.room_name    if hasattr(l, "room_name")    else l.get("room_name"),
+                "room_name":    l.room_name    if hasattr(l, "room_name")    else l.get("room_name"),
+                "room_id":      l.room_id      if hasattr(l, "room_id")      else l.get("room_id"),
+                "subgroup":     l.subgroup     if hasattr(l, "subgroup")     else l.get("subgroup"),
+                "week_type":    l.week_type    if hasattr(l, "week_type")    else l.get("week_type"),
+                "note":         l.note         if hasattr(l, "note")         else l.get("note"),
+                # Group info — will be lists when merged
+                "group_ids":   [gid]   if gid   else [],
+                "group_names": [gname] if gname else [],
+                # Keep singular for backwards compat (first group)
+                "group_name":  gname,
+                "group_id":    gid,
+            }
+        else:
+            # Add group to existing merged lesson if not already present
+            if gid and gid not in merged[key]["group_ids"]:
+                merged[key]["group_ids"].append(gid)
+                merged[key]["group_names"].append(gname)
+
+    result = list(merged.values())
+
+    # Post-process: set group_name to comma-joined list when multiple groups
+    for item in result:
+        groups = item["group_names"]
+        if len(groups) > 1:
+            # Sort group names for stable output
+            groups_sorted = sorted(groups)
+            item["group_name"] = ", ".join(groups_sorted)
+            item["group_names"] = groups_sorted
+            item["group_id"] = None   # ambiguous — multiple groups
+        elif len(groups) == 1:
+            item["group_name"] = groups[0]
+        item.pop("group_ids", None)
+
+    return result
+
+
 # ── Staleness check ───────────────────────────────────────────────────────────
 
 def _needs_refresh(group: Group) -> tuple[bool, str]:
@@ -125,6 +201,25 @@ def _schedule_dict(group: Group) -> dict:
     return {k: v.model_dump() for k, v in group.schedule.items()} if group.schedule else {}
 
 
+def _lesson_to_dict(l) -> dict:
+    return {
+        "subject":      l.subject,
+        "lesson_type":  l.lesson_type,
+        "time_start":   l.time_start,
+        "time_end":     l.time_end,
+        "teacher_name": l.teacher_name,
+        "teacher_id":   l.teacher_id,
+        "classroom":    l.room_name,
+        "room_name":    l.room_name,
+        "room_id":      l.room_id,
+        "group_name":   l.group_name,
+        "group_id":     l.group_id,
+        "subgroup":     l.subgroup,
+        "week_type":    l.week_type,
+        "note":         l.note,
+    }
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.get("/group/{group_id}", summary="Full schedule for a group")
@@ -141,7 +236,7 @@ async def get_group_schedule(group_id: int, background_tasks: BackgroundTasks):
         "academic_year":       group.academic_year,
         "schedule_scraped_at": group.schedule_scraped_at,
         "days_count":          len(group.schedule) if group.schedule else 0,
-        "refreshing":          refresh_reason,   # None = data is fresh, str = reason for background update
+        "refreshing":          refresh_reason,
         "schedule":            _schedule_dict(group),
     }
 
@@ -169,25 +264,7 @@ async def get_schedule_for_day(
         "name":       group.name,
         "date":       day_str,
         "refreshing": None,
-        "lessons":    [
-            {
-                "subject":      l.subject,
-                "lesson_type":  l.lesson_type,
-                "time_start":   l.time_start,
-                "time_end":     l.time_end,
-                "teacher_name": l.teacher_name,
-                "teacher_id":   l.teacher_id,
-                "classroom":    l.room_name,
-                "room_name":    l.room_name,
-                "room_id":      l.room_id,
-                "group_name":   l.group_name,
-                "group_id":     l.group_id,
-                "subgroup":     l.subgroup,
-                "week_type":    l.week_type,
-                "note":         l.note,
-            }
-            for l in lessons
-        ],
+        "lessons":    [_lesson_to_dict(l) for l in lessons],
         "message": None if lessons else "No classes this day",
     }
 
@@ -255,25 +332,6 @@ async def get_schedule_for_range(
     }
 
 
-def _lesson_to_dict(l) -> dict:
-    return {
-        "subject":      l.subject,
-        "lesson_type":  l.lesson_type,
-        "time_start":   l.time_start,
-        "time_end":     l.time_end,
-        "teacher_name": l.teacher_name,
-        "teacher_id":   l.teacher_id,
-        "classroom":    l.room_name,
-        "room_name":    l.room_name,
-        "room_id":      l.room_id,
-        "group_name":   l.group_name,
-        "group_id":     l.group_id,
-        "subgroup":     l.subgroup,
-        "week_type":    l.week_type,
-        "note":         l.note,
-    }
-
-
 @router.get("/teacher/{teacher_id}/day", summary="Schedule for a teacher on a specific date")
 async def get_teacher_day(
     teacher_id: int,
@@ -290,13 +348,17 @@ async def get_teacher_day(
         LessonDoc.date == day,
     ).sort("+time_start").to_list()
 
+    # Merge duplicate lessons (same pair, multiple groups — e.g. lectures)
+    merged = _merge_lessons(lessons)
+    merged.sort(key=lambda x: x["time_start"])
+
     return {
         "teacher_id": teacher_id,
         "name":       teacher.full_name,
         "date":       day.isoformat(),
         "refreshing": None,
-        "lessons":    [_lesson_to_dict(l) for l in lessons],
-        "message":    None if lessons else "No classes this day",
+        "lessons":    merged,
+        "message":    None if merged else "No classes this day",
     }
 
 
@@ -316,11 +378,15 @@ async def get_room_day(
         LessonDoc.date == day,
     ).sort("+time_start").to_list()
 
+    # Merge duplicate lessons (same pair, multiple groups — e.g. lectures)
+    merged = _merge_lessons(lessons)
+    merged.sort(key=lambda x: x["time_start"])
+
     return {
         "room_id":    room_id,
         "name":       room.name,
         "date":       day.isoformat(),
         "refreshing": None,
-        "lessons":    [_lesson_to_dict(l) for l in lessons],
-        "message":    None if lessons else "No classes this day",
+        "lessons":    merged,
+        "message":    None if merged else "No classes this day",
     }
