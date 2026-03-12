@@ -243,7 +243,8 @@ async def search_groups(
     has_schedule: Optional[bool] = Query(None),
     limit:        int            = Query(50, ge=1, le=500),
 ):
-    from app.search.service import build_group_search, rank_group_candidates, normalize_group_name
+    from app.search.service import rank_group_candidates, normalize_group_name, normalize_group_variants
+    import re as _re
 
     base_filters: dict = {}
     if institute_id: base_filters["institute_id"]    = institute_id
@@ -255,27 +256,56 @@ async def search_groups(
         base_filters["schedule_scraped_at"] = None
 
     if q:
-        # ── Умный поиск групп ──────────────────────────────────────────────
-        # Шаг 1: строим гибкий MongoDB-фильтр (нормализация + $or regex)
-        search_filter = build_group_search(q)
-        if search_filter:
-            filters = {**base_filters, **search_filter}
-        else:
-            filters = {**base_filters, "name": {"$regex": q, "$options": "i"}}
+        variants = normalize_group_variants(q)
+        canonical = variants[0]
+        fetch_limit = limit * 4
+        seen_ids: set = set()
+        candidates = []
 
-        # Берём с запасом для ранжирования
-        candidates = await Group.find(filters).limit(limit * 4).to_list()
+        # ── Шаг 1: $text поиск (быстрый, по индексу) ──────────────────────
+        text_q = _re.sub(r'-', ' ', canonical)
+        if len(text_q.strip()) >= 3:
+            try:
+                text_filter = {**base_filters, "$text": {"$search": text_q, "$language": "russian"}}
+                text_results = await Group.find(text_filter).limit(fetch_limit).to_list()
+                for g in text_results:
+                    if g.id not in seen_ids:
+                        seen_ids.add(g.id)
+                        candidates.append(g)
+            except Exception:
+                pass  # $text индекс может отсутствовать
 
-        # Шаг 2: если мало результатов — fallback на prefix regex
+        # ── Шаг 2: regex по каждому варианту отдельно ─────────────────────
+        for v in variants:
+            if not v or len(candidates) >= fetch_limit:
+                break
+            # Гибкий regex: разрешаем любые разделители между токенами
+            flex = _re.escape(v)
+            flex = _re.sub(r'(\\\ |\\-|_)+', r'[\\s\\-_]*', flex)
+            regex_filter = {**base_filters, "name": {"$regex": flex, "$options": "i"}}
+            try:
+                regex_results = await Group.find(regex_filter).limit(fetch_limit).to_list()
+                for g in regex_results:
+                    if g.id not in seen_ids:
+                        seen_ids.add(g.id)
+                        candidates.append(g)
+            except Exception:
+                pass
+
+        # ── Шаг 3: fallback по префиксу если мало результатов ─────────────
         if len(candidates) < 3:
-            norm = normalize_group_name(q)
-            fallback_filter = {
-                **base_filters,
-                "name": {"$regex": norm[:4], "$options": "i"},
-            }
-            candidates = await Group.find(fallback_filter).limit(limit * 4).to_list()
+            prefix = canonical[:4]
+            prefix_filter = {**base_filters, "name": {"$regex": f"^{_re.escape(prefix)}", "$options": "i"}}
+            try:
+                prefix_results = await Group.find(prefix_filter).limit(fetch_limit).to_list()
+                for g in prefix_results:
+                    if g.id not in seen_ids:
+                        seen_ids.add(g.id)
+                        candidates.append(g)
+            except Exception:
+                pass
 
-        # Шаг 3: ранжируем по релевантности (штраф за филиалы, fuzzy score)
+        # ── Шаг 4: ранжируем по fuzzy-score ───────────────────────────────
         groups = rank_group_candidates(candidates, q, get_name=lambda g: g.name)[:limit]
     else:
         groups = await Group.find(base_filters).sort("name").limit(limit).to_list()

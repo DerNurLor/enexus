@@ -1,5 +1,4 @@
 'use client'
-
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState, useEffect } from 'react'
 import { useScheduleStore } from '@/lib/store'
@@ -17,11 +16,8 @@ function TgAuthInit() {
     applyServerSettings,
     setFavorites,
   } = useScheduleStore()
-
   useEffect(() => {
     if (!isTelegramWebApp()) {
-      // Обычный браузер — пробуем тихий рефреш через saved refresh token
-      // authenticateWithTelegram справится с этим сам (нет initData → _silentRefresh)
       authenticateWithTelegram().then((result) => {
         if (result) {
           setToken(result.token)
@@ -34,8 +30,6 @@ function TgAuthInit() {
       })
       return
     }
-
-    // TG Mini App: full auth
     authenticateWithTelegram().then((result) => {
       if (result) {
         setToken(result.token)
@@ -47,6 +41,20 @@ function TgAuthInit() {
       setTgAuthReady(true)
     })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  return null
+}
+
+/** Применяет тему к <html>: class="dark" | class="light" | ничего (auto) */
+function ThemeApplier() {
+  const theme = useScheduleStore((s) => s.settings.theme)
+
+  useEffect(() => {
+    const html = document.documentElement
+    html.classList.remove('dark', 'light')
+    if (theme === 'dark')  html.classList.add('dark')
+    if (theme === 'light') html.classList.add('light')
+    // 'auto' — классов нет, работает @media prefers-color-scheme
+  }, [theme])
 
   return null
 }
@@ -60,10 +68,10 @@ export function Providers({ children }: { children: React.ReactNode }) {
       },
     },
   }))
-
   return (
     <QueryClientProvider client={queryClient}>
       <TgAuthInit />
+      <ThemeApplier />
       {children}
     </QueryClientProvider>
   )
