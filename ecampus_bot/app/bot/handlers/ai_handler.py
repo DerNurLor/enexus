@@ -680,7 +680,7 @@ query($rn: String, $from: String, $to: String) {
 }"""
 
 _GQL_ROOM_SEARCH_BY_NUM = """
-query($q: String, $b: String) {
+query($q: String) {
   rooms(q: $q, first: 20) {
     nodes { roomId name building }
   }
