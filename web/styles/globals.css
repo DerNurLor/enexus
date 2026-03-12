@@ -28,6 +28,58 @@
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* ── Светлая тема ─────────────────────────────────────────────────────────── */
+html.light {
+  --bg: #f2f2f7;
+  --surface: #ffffff;
+  --card: #ffffff;
+  --border: #e0e0e5;
+  --cyan: #0a84a8;
+  --cyan-dim: rgba(10, 132, 168, 0.10);
+
+  --t-primary: #1c1c1e;
+  --t-secondary: #6b6b72;
+  --t-muted: #aeaeb2;
+
+  --lab: #1a8f48;
+  --lecture: #1a6fb5;
+  --seminar: #c45c0a;
+  --practice: #6b44c4;
+}
+
+html.light body::before {
+  background:
+    radial-gradient(ellipse 60% 50% at 15% 20%, rgba(10,132,168,0.06) 0%, transparent 70%),
+    radial-gradient(ellipse 40% 35% at 85% 75%, rgba(26,111,181,0.04) 0%, transparent 70%);
+}
+
+/* ── Авто тема (системные настройки) ─────────────────────────────────────── */
+@media (prefers-color-scheme: light) {
+  html:not(.dark) {
+    --bg: #f2f2f7;
+    --surface: #ffffff;
+    --card: #ffffff;
+    --border: #e0e0e5;
+    --cyan: #0a84a8;
+    --cyan-dim: rgba(10, 132, 168, 0.10);
+
+    --t-primary: #1c1c1e;
+    --t-secondary: #6b6b72;
+    --t-muted: #aeaeb2;
+
+    --lab: #1a8f48;
+    --lecture: #1a6fb5;
+    --seminar: #c45c0a;
+    --practice: #6b44c4;
+  }
+
+  html:not(.dark) body::before {
+    background:
+      radial-gradient(ellipse 60% 50% at 15% 20%, rgba(10,132,168,0.06) 0%, transparent 70%),
+      radial-gradient(ellipse 40% 35% at 85% 75%, rgba(26,111,181,0.04) 0%, transparent 70%);
+  }
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -199,4 +251,3 @@ button, a {
   transform: translateY(-1px);
   box-shadow: 0 4px 20px rgba(0,0,0,0.3);
 }
-
