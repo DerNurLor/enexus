@@ -243,17 +243,42 @@ async def search_groups(
     has_schedule: Optional[bool] = Query(None),
     limit:        int            = Query(50, ge=1, le=500),
 ):
-    filters: dict = {}
-    if q:            filters["name"]           = {"$regex": q, "$options": "i"}
-    if institute_id: filters["institute_id"]   = institute_id
-    if speciality:   filters["speciality_name"] = {"$regex": speciality, "$options": "i"}
-    if course:       filters["course"]         = course
-    if has_schedule is True:
-        filters["schedule_scraped_at"] = {"$ne": None}
-    elif has_schedule is False:
-        filters["schedule_scraped_at"] = None
+    from app.search.service import build_group_search, rank_group_candidates, normalize_group_name
 
-    groups = await Group.find(filters).sort("name").limit(limit).to_list()
+    base_filters: dict = {}
+    if institute_id: base_filters["institute_id"]    = institute_id
+    if speciality:   base_filters["speciality_name"] = {"$regex": speciality, "$options": "i"}
+    if course:       base_filters["course"]          = course
+    if has_schedule is True:
+        base_filters["schedule_scraped_at"] = {"$ne": None}
+    elif has_schedule is False:
+        base_filters["schedule_scraped_at"] = None
+
+    if q:
+        # ── Умный поиск групп ──────────────────────────────────────────────
+        # Шаг 1: строим гибкий MongoDB-фильтр (нормализация + $or regex)
+        search_filter = build_group_search(q)
+        if search_filter:
+            filters = {**base_filters, **search_filter}
+        else:
+            filters = {**base_filters, "name": {"$regex": q, "$options": "i"}}
+
+        # Берём с запасом для ранжирования
+        candidates = await Group.find(filters).limit(limit * 4).to_list()
+
+        # Шаг 2: если мало результатов — fallback на prefix regex
+        if len(candidates) < 3:
+            norm = normalize_group_name(q)
+            fallback_filter = {
+                **base_filters,
+                "name": {"$regex": norm[:4], "$options": "i"},
+            }
+            candidates = await Group.find(fallback_filter).limit(limit * 4).to_list()
+
+        # Шаг 3: ранжируем по релевантности (штраф за филиалы, fuzzy score)
+        groups = rank_group_candidates(candidates, q, get_name=lambda g: g.name)[:limit]
+    else:
+        groups = await Group.find(base_filters).sort("name").limit(limit).to_list()
 
     return {
         "total": len(groups),
