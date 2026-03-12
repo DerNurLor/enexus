@@ -10,7 +10,8 @@ export interface Lesson {
   room_name:    string | null
   room_id:      number | null
   group_name:   string | null
-  group_names:  string[] | null   // present when lesson is merged across multiple groups
+  group_names:  string[] | null
+  groups:       { id: number; name: string }[] | null  // full list with ids for merged lessons
   group_id:     number | null
   subgroup:     string | null
   week_type:    string | null

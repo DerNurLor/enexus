@@ -11,12 +11,13 @@ export interface LessonCardData {
   type:         LessonType
   teacher:      string
   teacherId?:   number | null
-  showTeacher?: boolean        // default true
+  showTeacher?: boolean
   room:         string
   roomId?:      number | null
-  showRoom?:    boolean        // default true
+  showRoom?:    boolean
   groupName?:   string | null
-  groupNames?:  string[] | null  // list of groups when merged
+  groupNames?:  string[] | null
+  groups?:      { id: number; name: string }[] | null  // full list with ids
   groupId?:     number | null
   timeStart:    string
   timeEnd:      string
@@ -38,8 +39,15 @@ export function LessonCard({ lesson }: { lesson: LessonCardData }) {
   const showTeacher = lesson.showTeacher !== false
   const showRoom    = lesson.showRoom    !== false
 
-  // Multiple groups when merged (e.g. lectures with several groups)
-  const multiGroup = lesson.groupNames && lesson.groupNames.length > 1
+  // Use groups array if available, otherwise fall back to single group
+  const groups: { id: number; name: string }[] =
+    lesson.groups && lesson.groups.length > 0
+      ? lesson.groups
+      : lesson.groupId && lesson.groupName
+        ? [{ id: lesson.groupId, name: lesson.groupName }]
+        : []
+
+  const showGroupRow = groups.length > 0
 
   function handleTeacherClick(e: React.MouseEvent) {
     if (!lesson.teacherId) return
@@ -57,19 +65,15 @@ export function LessonCard({ lesson }: { lesson: LessonCardData }) {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
-  function handleGroupClick(e: React.MouseEvent) {
-    if (!lesson.groupId || !lesson.groupName) return
+  function handleGroupClick(e: React.MouseEvent, id: number, name: string) {
     e.stopPropagation()
     setMode('group')
-    setGroup(lesson.groupId, lesson.groupName)
+    setGroup(id, name)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   const hasTeacherLink = showTeacher && !!lesson.teacherId
   const hasRoomLink    = showRoom    && !!lesson.roomId
-  // Single group: clickable. Multiple groups: just text.
-  const hasSingleGroupLink = !multiGroup && !!(lesson.groupId && lesson.groupName)
-  const showGroupRow = !!(multiGroup ? lesson.groupNames?.length : lesson.groupName)
 
   return (
     <div className="card flex gap-0 overflow-hidden"
@@ -140,21 +144,20 @@ export function LessonCard({ lesson }: { lesson: LessonCardData }) {
           {showGroupRow && (
             <div className="flex items-start gap-1">
               <Users size={11} style={{ color: 'var(--t-muted)', marginTop: 2 }} />
-              {multiGroup ? (
-                // Multiple groups — plain text, not clickable
-                <span className="text-xs leading-tight" style={{ color: 'var(--t-secondary)' }}>
-                  {lesson.groupNames!.join(', ')}
-                </span>
-              ) : (
-                // Single group — clickable link
-                <button
-                  onClick={hasSingleGroupLink ? handleGroupClick : undefined}
-                  className={`text-xs transition-colors ${hasSingleGroupLink ? 'hover:text-[var(--cyan)] cursor-pointer underline-offset-2 hover:underline' : 'cursor-default'}`}
-                  style={{ color: 'var(--t-secondary)', background: 'none', border: 'none', padding: 0 }}
-                >
-                  {lesson.groupName}
-                </button>
-              )}
+              <span className="text-xs leading-snug" style={{ color: 'var(--t-secondary)' }}>
+                {groups.map((g, i) => (
+                  <span key={g.id}>
+                    {i > 0 && <span style={{ color: 'var(--t-muted)' }}>, </span>}
+                    <button
+                      onClick={(e) => handleGroupClick(e, g.id, g.name)}
+                      className="hover:text-[var(--cyan)] cursor-pointer underline-offset-2 hover:underline transition-colors"
+                      style={{ color: 'var(--t-secondary)', background: 'none', border: 'none', padding: 0 }}
+                    >
+                      {g.name}
+                    </button>
+                  </span>
+                ))}
+              </span>
             </div>
           )}
         </div>
