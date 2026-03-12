@@ -27,6 +27,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="ru" suppressHydrationWarning>
       <head>
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
+        {/* Telegram WebApp SDK — нужен для авторизации и initData */}
+        <script src="https://telegram.org/js/telegram-web-app.js" />
       </head>
       <body>
         <Providers>
