@@ -55,16 +55,7 @@ function QuotaSection({ token }: { token: string | null }) {
     refetchInterval: 60_000,
   })
 
-  if (!token) return (
-    <div className="card px-5 py-4 mb-4">
-      <p className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--t-muted)' }}>
-        Лимит запросов
-      </p>
-      <p className="text-xs" style={{ color: 'var(--t-muted)' }}>
-        Войдите через Telegram, чтобы видеть лимит
-      </p>
-    </div>
-  )
+  if (!token) return null
 
   const pct = quota && quota.cap > 0 ? Math.min(quota.used / quota.cap * 100, 100) : 0
   const barColor = pct >= 100 ? '#ef4444' : pct >= 70 ? '#f97316' : 'var(--cyan)'
@@ -323,7 +314,17 @@ export default function ProfilePage() {
     tgUser, authToken, isAuthenticated, tgAuthReady, settings,
   } = useScheduleStore()
 
-  const [step, setStep] = useState<OnboardStep>(profileComplete ? 'done' : 'choose-mode')
+  const [step, setStep] = useState<OnboardStep>('done') // реальное значение выставится после tgAuthReady
+
+  // Выставляем начальный шаг только после того как авторизация завершена
+  useEffect(() => {
+    if (!tgAuthReady) return
+    if (step !== 'done' && step !== 'choose-role' && step !== 'choose-group' && step !== 'choose-teacher') return
+    // Если мы в состоянии done но профиля нет и нет tgUser — переходим на онбординг
+    if (step === 'done' && !profileComplete && !tgUser) {
+      setStep('choose-mode')
+    }
+  }, [tgAuthReady]) // eslint-disable-line react-hooks/exhaustive-deps
   const [selectedRole, setRole] = useState<UserRole>('student')
   const [query, setQuery]       = useState('')
   const [selectedGroupId, setSGId]      = useState<number | null>(null)
@@ -389,6 +390,20 @@ export default function ProfilePage() {
         profile_teacher_name: null,
       })
     }
+  }
+
+  // ── Ждём завершения авторизации ─────────────────────────────────────────────
+  if (!tgAuthReady) {
+    return (
+      <div className="px-4 lg:px-0">
+        <PageHeader title="Профиль" />
+        <div className="flex flex-col gap-3 mt-4">
+          {[1,2,3].map(i => (
+            <div key={i} className="card px-5 py-4 h-20 animate-pulse" />
+          ))}
+        </div>
+      </div>
+    )
   }
 
   // ── DONE state ──────────────────────────────────────────────────────────────
