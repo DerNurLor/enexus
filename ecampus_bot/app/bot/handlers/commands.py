@@ -230,7 +230,7 @@ async def cmd_suggest(message: Message) -> None:
 
 async def cmd_about(message: Message) -> None:
     """Show information about the bot, version, and links."""
-    miniapp_url = f"{settings.webhook_base_url}/miniapp"
+    miniapp_url = f"{settings.webhook_base_url}"
     await message.answer(
         "🎓 <b>Бот расписания СКФУ</b>\n\n"
             "Умный помощник для студентов и преподавателей "
@@ -257,7 +257,7 @@ async def cmd_miniapp(message: Message) -> None:
     if not tg_user:
         return
 
-    miniapp_url = f"{settings.webhook_base_url}/miniapp"
+    miniapp_url = f"{settings.webhook_base_url}"
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
             text="📅 Открыть расписание",
