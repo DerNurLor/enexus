@@ -314,17 +314,12 @@ export default function ProfilePage() {
     tgUser, authToken, isAuthenticated, tgAuthReady, settings,
   } = useScheduleStore()
 
-  const [step, setStep] = useState<OnboardStep>('done') // реальное значение выставится после tgAuthReady
+  const [step, setStep] = useState<OnboardStep>('done')
 
-  // Выставляем начальный шаг только после того как авторизация завершена
+  // DEBUG
   useEffect(() => {
-    if (!tgAuthReady) return
-    if (step !== 'done' && step !== 'choose-role' && step !== 'choose-group' && step !== 'choose-teacher') return
-    // Если мы в состоянии done но профиля нет и нет tgUser — переходим на онбординг
-    if (step === 'done' && !profileComplete && !tgUser) {
-      setStep('choose-mode')
-    }
-  }, [tgAuthReady]) // eslint-disable-line react-hooks/exhaustive-deps
+    console.log('[Profile] tgAuthReady:', tgAuthReady, 'profileComplete:', profileComplete, 'tgUser:', !!tgUser, 'step:', step)
+  })
   const [selectedRole, setRole] = useState<UserRole>('student')
   const [query, setQuery]       = useState('')
   const [selectedGroupId, setSGId]      = useState<number | null>(null)
