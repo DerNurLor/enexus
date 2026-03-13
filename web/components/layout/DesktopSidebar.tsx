@@ -1,3 +1,4 @@
+'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { CalendarDays, User, GraduationCap, DoorOpen, Smartphone, Send } from 'lucide-react'
@@ -9,8 +10,8 @@ const NAV_ITEMS = [
 ]
 
 // TODO: замени на реальные ссылки
-const ANDROID_APK_URL = '/downloads/ncfu.apk'
-const TELEGRAM_BOT_URL = 'https://t.me/ncfu_schedule_bot'
+const ANDROID_APK_URL = '/downloads/enexus.apk'
+const TELEGRAM_BOT_URL = 'https://t.me/awesome_ecampus_bot'
 
 export function DesktopSidebar() {
   const pathname = usePathname()
