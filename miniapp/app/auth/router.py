@@ -175,6 +175,7 @@ async def telegram_login(
             first_name=tg_user.get("first_name", ""),
             last_name=tg_user.get("last_name"),
             language_code=tg_user.get("language_code"),
+            photo_url=tg_user.get("photo_url"),
         )
         await user.insert()
         logger.info(f"New user registered: tg_id={tg_id}")
@@ -183,6 +184,8 @@ async def telegram_login(
         user.username = tg_user.get("username", user.username)
         user.first_name = tg_user.get("first_name", user.first_name)
         user.last_name = tg_user.get("last_name", user.last_name)
+        if tg_user.get("photo_url"):
+            user.photo_url = tg_user.get("photo_url")
         user.last_active = _utcnow()
         await user.save()
         background.add_task(_log, "login", user, request)
