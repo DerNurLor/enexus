@@ -1,8 +1,6 @@
-'use client'
-
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { CalendarDays, User, GraduationCap, DoorOpen } from 'lucide-react'
+import { CalendarDays, User, GraduationCap, DoorOpen, Smartphone, Send } from 'lucide-react'
 
 const NAV_ITEMS = [
   { href: '/schedule', label: 'Расписание', icon: CalendarDays },
@@ -10,9 +8,12 @@ const NAV_ITEMS = [
   { href: '/profile',  label: 'Профиль',    icon: User },
 ]
 
+// TODO: замени на реальные ссылки
+const ANDROID_APK_URL = '/downloads/ncfu.apk'
+const TELEGRAM_BOT_URL = 'https://t.me/ncfu_schedule_bot'
+
 export function DesktopSidebar() {
   const pathname = usePathname()
-
   return (
     <aside className="fixed left-0 top-0 bottom-0 w-64 z-50 flex flex-col"
       style={{ background: 'var(--surface)', borderRight: '1px solid var(--border)' }}>
@@ -42,6 +43,22 @@ export function DesktopSidebar() {
           )
         })}
       </nav>
+
+      {/* Кнопки приложения и бота */}
+      <div className="p-3 flex flex-col gap-2" style={{ borderTop: '1px solid var(--border)' }}>
+        <a href={ANDROID_APK_URL} download
+          className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 hover:bg-white/5"
+          style={{ color: 'var(--t-secondary)', borderLeft: '3px solid transparent', paddingLeft: 9 }}>
+          <Smartphone size={18} strokeWidth={1.8} />
+          Скачать для Android
+        </a>
+        <a href={TELEGRAM_BOT_URL} target="_blank" rel="noopener noreferrer"
+          className="flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 hover:bg-white/5"
+          style={{ color: 'var(--t-secondary)', borderLeft: '3px solid transparent', paddingLeft: 9 }}>
+          <Send size={18} strokeWidth={1.8} />
+          Telegram-бот
+        </a>
+      </div>
 
       <div className="p-4" style={{ borderTop: '1px solid var(--border)' }}>
         <div className="text-[10px] text-center" style={{ color: 'var(--t-muted)' }}>© 2026 НЦФУ</div>
