@@ -5,7 +5,6 @@ import { useScheduleStore } from '@/lib/store'
 import {
   authenticateWithTelegram,
   setToken,
-  isTelegramWebApp,
 } from '@/lib/auth'
 
 function TgAuthInit() {
@@ -16,9 +15,15 @@ function TgAuthInit() {
     applyServerSettings,
     setFavorites,
   } = useScheduleStore()
+
   useEffect(() => {
-    if (!isTelegramWebApp()) {
-      authenticateWithTelegram().then((result) => {
+    // Гарантируем разблокировку страницы даже если fetch завис
+    const timeout = setTimeout(() => {
+      setTgAuthReady(true)
+    }, 5000)
+
+    authenticateWithTelegram()
+      .then((result) => {
         if (result) {
           setToken(result.token)
           setAuthToken(result.token)
@@ -26,21 +31,18 @@ function TgAuthInit() {
           applyServerSettings(result.settings)
           if (result.favorites.length > 0) setFavorites(result.favorites)
         }
+      })
+      .catch(() => {
+        // Ошибка авторизации — продолжаем в анонимном режиме
+      })
+      .finally(() => {
+        clearTimeout(timeout)
         setTgAuthReady(true)
       })
-      return
-    }
-    authenticateWithTelegram().then((result) => {
-      if (result) {
-        setToken(result.token)
-        setAuthToken(result.token)
-        setTgUser(result.user)
-        applyServerSettings(result.settings)
-        if (result.favorites.length > 0) setFavorites(result.favorites)
-      }
-      setTgAuthReady(true)
-    })
+
+    return () => clearTimeout(timeout)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   return null
 }
 
