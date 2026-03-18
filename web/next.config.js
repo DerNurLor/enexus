@@ -10,7 +10,12 @@ const withPWA = require('@ducanh2912/next-pwa').default({
   workboxOptions: {
     runtimeCaching: [
       {
-        urlPattern: /\/(schedule|profile)?$/,
+        // Страница профиля — всегда только сеть, без кеша (динамичный контент)
+        urlPattern: /\/profile$/,
+        handler: 'NetworkOnly',
+      },
+      {
+        urlPattern: /\/schedule?$/,
         handler: 'NetworkFirst',
         options: {
           cacheName: 'pages-cache',

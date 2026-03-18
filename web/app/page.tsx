@@ -55,16 +55,7 @@ function QuotaSection({ token }: { token: string | null }) {
     refetchInterval: 60_000,
   })
 
-  if (!token) return (
-    <div className="card px-5 py-4 mb-4">
-      <p className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--t-muted)' }}>
-        Лимит запросов
-      </p>
-      <p className="text-xs" style={{ color: 'var(--t-muted)' }}>
-        Войдите через Telegram, чтобы видеть лимит
-      </p>
-    </div>
-  )
+  if (!token) return null
 
   const pct = quota && quota.cap > 0 ? Math.min(quota.used / quota.cap * 100, 100) : 0
   const barColor = pct >= 100 ? '#ef4444' : pct >= 70 ? '#f97316' : 'var(--cyan)'
@@ -323,7 +314,12 @@ export default function ProfilePage() {
     tgUser, authToken, isAuthenticated, tgAuthReady, settings,
   } = useScheduleStore()
 
-  const [step, setStep] = useState<OnboardStep>(profileComplete ? 'done' : 'choose-mode')
+  const [step, setStep] = useState<OnboardStep>('done')
+
+  // DEBUG
+  useEffect(() => {
+    console.log('[Profile] tgAuthReady:', tgAuthReady, 'profileComplete:', profileComplete, 'tgUser:', !!tgUser, 'step:', step)
+  })
   const [selectedRole, setRole] = useState<UserRole>('student')
   const [query, setQuery]       = useState('')
   const [selectedGroupId, setSGId]      = useState<number | null>(null)
@@ -391,7 +387,55 @@ export default function ProfilePage() {
     }
   }
 
+  // ── Ждём завершения авторизации ─────────────────────────────────────────────
+  if (!tgAuthReady) {
+    return (
+      <div className="px-4 lg:px-0">
+        <PageHeader title="Профиль" />
+        <div className="flex flex-col gap-3 mt-4">
+          {[1,2,3].map(i => (
+            <div key={i} className="card px-5 py-4 h-20 animate-pulse" />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
   // ── DONE state ──────────────────────────────────────────────────────────────
+  // Анонимный пользователь без профиля с step='done' → показываем choose-mode
+  if (!profileComplete && !tgUser && step === 'done') {
+    return (
+      <div className="px-4 lg:px-0">
+        <PageHeader title="Профиль" />
+        <div className="flex flex-col items-center py-12 gap-6 animate-fade-up">
+          <div className="w-20 h-20 rounded-full flex items-center justify-center"
+            style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+            <User size={36} style={{ color: 'var(--t-muted)' }} />
+          </div>
+          <div className="text-center">
+            <h2 className="text-xl font-bold mb-2" style={{ color: 'var(--t-primary)' }}>Привет!</h2>
+            <p className="text-sm max-w-xs leading-relaxed" style={{ color: 'var(--t-secondary)' }}>
+              Настройте профиль, чтобы расписание открывалось автоматически при запуске
+            </p>
+          </div>
+          <div className="w-full max-w-xs flex flex-col gap-3">
+            <button onClick={() => setStep('choose-role')}
+              className="w-full h-12 rounded-2xl flex items-center justify-center gap-2 text-sm font-semibold text-black transition-opacity hover:opacity-90"
+              style={{ background: 'var(--cyan)' }}>
+              <GraduationCap size={16} /> Настроить профиль
+            </button>
+            <button onClick={() => router.push('/schedule')}
+              className="w-full h-12 rounded-2xl flex items-center justify-center gap-2 text-sm font-medium transition-colors hover:bg-white/5"
+              style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--t-secondary)' }}>
+              Без профиля
+            </button>
+          </div>
+        </div>
+        <SettingsSection />
+      </div>
+    )
+  }
+
   if ((profileComplete && profile && step === 'done') || (tgUser && step === 'done')) {
     return (
       <div className="px-4 lg:px-0">
