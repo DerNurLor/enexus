@@ -320,6 +320,19 @@ export default function ProfilePage() {
   useEffect(() => {
     console.log('[Profile] tgAuthReady:', tgAuthReady, 'profileComplete:', profileComplete, 'tgUser:', !!tgUser, 'step:', step)
   })
+<<<<<<< HEAD
+=======
+
+  // Исправление: когда авторизация завершена (tgAuthReady=true), но нет ни профиля
+  // ни TG-юзера, а step='done' (начальное значение) — переходим в choose-mode.
+  // Без этого все условия рендера проваливаются и возвращается null (пустая страница).
+  // Воспроизводится в браузере и electron у анонимного пользователя без профиля.
+  useEffect(() => {
+    if (tgAuthReady && step === 'done' && !profileComplete && !tgUser) {
+      setStep('choose-mode')
+    }
+  }, [tgAuthReady, profileComplete, tgUser, step])
+>>>>>>> feature/profile-fix
   const [selectedRole, setRole] = useState<UserRole>('student')
   const [query, setQuery]       = useState('')
   const [selectedGroupId, setSGId]      = useState<number | null>(null)

@@ -257,7 +257,7 @@ async def cmd_miniapp(message: Message) -> None:
     if not tg_user:
         return
 
-    miniapp_url = f"{settings.webhook_base_url}"
+    miniapp_url = f"{settings.webhook_base_url}/miniapp"
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
             text="📅 Открыть расписание",
