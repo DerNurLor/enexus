@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback, Suspense } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { Search, CalendarRange, X, WifiOff, Clock } from 'lucide-react'
 import { format, addDays, startOfWeek, getISOWeek } from 'date-fns'
 import { ru } from 'date-fns/locale'
@@ -334,11 +335,11 @@ function SchedulePageInner() {
             Введите название группы,<br />преподавателя или аудитории
           </span>
           {!profileComplete && (
-            <a href="/profile"
+            <Link href="/profile"
               className="mt-2 text-xs px-4 py-2 rounded-xl transition-colors hover:bg-white/5"
               style={{ color: 'var(--cyan)', border: '1px solid rgba(92,225,230,0.3)' }}>
               Настроить профиль →
-            </a>
+            </Link>
           )}
         </div>
       ) : (isLoading || isFetching) && !showingCache ? (
