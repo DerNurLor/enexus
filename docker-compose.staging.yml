@@ -319,6 +319,7 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: "${WEB_URL}"
+        NEXT_PUBLIC_TG_BOT_USERNAME: "qdsvqiewqw_ecampus_bot"
         CACHEBUST: "${CACHEBUST:-1}"
     image: ncfu_web:staging
     container_name: ncfu_staging_web

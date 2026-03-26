@@ -61,6 +61,8 @@ def create_app() -> FastAPI:
     app.include_router(miniapp_router)
 
     from app.auth.router import router as auth_router
+    from app.auth.widget_router import router as widget_router
+    app.include_router(widget_router)
     app.include_router(auth_router)
 
     # ── Static assets (React build) ───────────────────────────────────────────

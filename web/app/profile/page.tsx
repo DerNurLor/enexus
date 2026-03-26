@@ -13,6 +13,7 @@ import type { UserRole } from '@/lib/store'
 import { api } from '@/lib/api'
 import { saveSettingsToServer, fetchQuota } from '@/lib/auth'
 import { useRouter } from 'next/navigation'
+import { TelegramAuthSection } from '@/components/auth/TelegramAuthSection'
 
 type OnboardStep = 'choose-mode' | 'choose-role' | 'choose-group' | 'choose-teacher' | 'done'
 
@@ -57,7 +58,7 @@ function QuotaSection({ token }: { token: string | null }) {
 
   if (!token) return null
 
-  const pct = quota && quota.cap > 0 ? Math.min(quota.used / quota.cap * 100, 100) : 0
+  const pct = quota && quota.limit > 0 ? Math.min(quota.used / quota.limit * 100, 100) : 0
   const barColor = pct >= 100 ? '#ef4444' : pct >= 70 ? '#f97316' : 'var(--cyan)'
 
   return (
@@ -68,7 +69,7 @@ function QuotaSection({ token }: { token: string | null }) {
         </p>
         {quota && (
           <span className="text-xs font-mono font-bold" style={{ color: barColor }}>
-            {quota.used} / {quota.cap}
+            {quota.used} / {quota.limit}
           </span>
         )}
       </div>
@@ -81,10 +82,10 @@ function QuotaSection({ token }: { token: string | null }) {
               style={{ width: `${pct}%`, background: barColor }} />
           </div>
           <div className="flex justify-between text-[10px]" style={{ color: 'var(--t-muted)' }}>
-            <span>{quota.exhausted ? '🔴 Лимит исчерпан' : `Осталось: ${quota.remaining}`}</span>
+            <span>{pct >= 100 ? `🔴 Лимит исчерпан` : `Осталось: ${quota.limit - quota.used}`}</span>
             <span>
-              {quota.ttl_secs > 0
-                ? `Сброс через ${Math.floor(quota.ttl_secs / 3600)}ч ${Math.floor((quota.ttl_secs % 3600) / 60)}м`
+              {quota.reset_in > 0
+                ? `Сброс через ${Math.floor(quota.reset_in / 3600)}ч ${Math.floor((quota.reset_in % 3600) / 60)}м`
                 : 'Лимит сброшен'}
             </span>
           </div>
@@ -216,6 +217,8 @@ function ProfileDone({ onReset }: { onReset: () => void }) {
 
   return (
     <div className="animate-fade-up">
+      {/* Авторизация для браузера */}
+      {!tgUser && <TelegramAuthSection user={null} token={null} />}
       {/* TG-профиль */}
       {tgUser && (
         <div className="card px-5 py-5 mb-4">
@@ -320,8 +323,6 @@ export default function ProfilePage() {
   useEffect(() => {
     console.log('[Profile] tgAuthReady:', tgAuthReady, 'profileComplete:', profileComplete, 'tgUser:', !!tgUser, 'step:', step)
   })
-<<<<<<< HEAD
-=======
 
   // Исправление: когда авторизация завершена (tgAuthReady=true), но нет ни профиля
   // ни TG-юзера, а step='done' (начальное значение) — переходим в choose-mode.
@@ -332,7 +333,6 @@ export default function ProfilePage() {
       setStep('choose-mode')
     }
   }, [tgAuthReady, profileComplete, tgUser, step])
->>>>>>> feature/profile-fix
   const [selectedRole, setRole] = useState<UserRole>('student')
   const [query, setQuery]       = useState('')
   const [selectedGroupId, setSGId]      = useState<number | null>(null)
@@ -430,7 +430,9 @@ export default function ProfilePage() {
       <div className="px-4 lg:px-0">
         <PageHeader title="Профиль" />
         <div className="animate-fade-up">
-          {/* TG-профиль */}
+          {/* Авторизация для браузера */}
+      {!tgUser && <TelegramAuthSection user={null} token={null} />}
+      {/* TG-профиль */}
           <div className="card px-5 py-5 mb-4">
             <div className="flex items-center gap-4">
               <div className="relative shrink-0">

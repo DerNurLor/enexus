@@ -317,6 +317,7 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: "${WEB_URL}"
+        NEXT_PUBLIC_TG_BOT_USERNAME: "ncfu_schedule_bot"
     image: ncfu_web:latest
     container_name: ncfu_web
     restart: unless-stopped

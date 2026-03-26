@@ -19,7 +19,7 @@ async def connect_auth_db() -> None:
     logger.info(f"Connecting auth DB → {settings.mongo_uri}/{settings.auth_mongo_db}")
     _auth_client = AsyncIOMotorClient(settings.mongo_uri)
     await init_beanie(
-        database=_auth_client[settings.auth_mongo_db],
+        database=_auth_client.get_database(settings.auth_mongo_db),
         document_models=_get_all_models(),
     )
     logger.info("Auth DB ready.")
@@ -35,7 +35,7 @@ async def close_auth_db() -> None:
 
 def get_auth_db():
     assert _auth_client is not None, "Auth DB not initialised"
-    return _auth_client[settings.auth_mongo_db]
+    return _auth_client.get_database(settings.auth_mongo_db)
 
 
 async def _seed_default_roles() -> None:
