@@ -18,7 +18,7 @@ async def connect_db() -> None:
     logger.info(f"Connecting to MongoDB at {settings.mongo_uri}...")
     _client = AsyncIOMotorClient(settings.mongo_uri)
     await init_beanie(
-        database=_client[settings.mongo_db],
+        database=_client.get_database(settings.mongo_db),
         document_models=[LessonDoc, Institute, Group, Teacher, Room, ScrapeLog],
     )
     logger.info("MongoDB ready.")
@@ -33,4 +33,4 @@ async def close_db() -> None:
 
 def get_motor_db():
     assert _client is not None
-    return _client[settings.mongo_db]
+    return _client.get_database(settings.mongo_db)

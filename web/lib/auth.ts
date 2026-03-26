@@ -77,6 +77,11 @@ export interface TelegramWidgetData {
 }
 
 export interface ServerSettings {
+  profile_role?:         string | null
+  profile_group_id?:     number | null
+  profile_group_name?:   string | null
+  profile_teacher_id?:   number | null
+  profile_teacher_name?: string | null
   weekFromMonday?:   boolean
   time24h?:          boolean
   compact?:          boolean
@@ -85,6 +90,12 @@ export interface ServerSettings {
   default_teacher?:  string | null
   theme?:            string
   accent_color?:     string
+}
+
+export interface QuotaStatus {
+  used:     number
+  limit:    number
+  reset_in: number
 }
 
 export interface FavoriteItem {
@@ -206,7 +217,7 @@ export async function fetchQuota(): Promise<{
 } | null> {
   if (!_token) return null
   try {
-    const res = await fetch(`${MINIAPP_BASE}/api/quota`, { headers: getAuthHeader() })
+    const res = await fetch(`${MINIAPP_BASE}/api/profile/limits`, { headers: getAuthHeader() })
     if (!res.ok) return null
     return res.json()
   } catch {
@@ -292,3 +303,6 @@ export async function loginWithWidgetAndInit(
 export function logout() {
   clearToken()
 }
+
+// Алиас для обратной совместимости с Providers.tsx
+export const authenticateWithTelegram = initAuth
