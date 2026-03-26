@@ -2,6 +2,22 @@ plugins {
     id 'com.android.application'
 }
 
+// ── Автоматическая версия ─────────────────────────────────────────────────────
+// versionCode = число коммитов в git (автоинкремент при каждом коммите)
+// versionName = читаемая версия, задаётся вручную здесь
+def getVersionCode = { ->
+    try {
+        def stdout = new ByteArrayOutputStream()
+        exec {
+            commandLine 'git', 'rev-list', '--count', 'HEAD'
+            standardOutput = stdout
+        }
+        return stdout.toString().trim().toInteger()
+    } catch (Exception e) {
+        return 1  // fallback если нет git
+    }
+}
+
 android {
     compileSdk 34
     namespace 'xyz.isabelline.enexus.ncfu'
@@ -10,8 +26,11 @@ android {
         applicationId "xyz.isabelline.enexus.ncfu"
         minSdk 21
         targetSdk 34
-        versionCode 1
-        versionName "1.0.0"
+
+        // versionCode автоматически = кол-во коммитов
+        // При каждом git commit → новый versionCode → можно обновить APK
+        versionCode getVersionCode()
+        versionName "1.0.1"   // ← меняй вручную при крупных релизах
     }
 
     signingConfigs {
@@ -31,6 +50,7 @@ android {
         }
         debug {
             applicationIdSuffix ".debug"
+            versionNameSuffix "-debug"
         }
     }
 
@@ -47,4 +67,5 @@ configurations.all {
 
 dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.0'
+    implementation 'androidx.coordinatorlayout:coordinatorlayout:1.2.0'
 }
