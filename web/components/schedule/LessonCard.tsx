@@ -23,6 +23,7 @@ export interface LessonCardData {
   timeEnd:      string
   subgroup?:    string
   note?:        string
+  grade?:       string | null
 }
 
 const TYPE_CONFIG: Record<LessonType, { label: string; color: string; bg: string }> = {
@@ -98,6 +99,15 @@ export function LessonCard({ lesson }: { lesson: LessonCardData }) {
           <div className="flex-1 min-w-0">
             <span className="text-sm font-semibold leading-tight" style={{ color: 'var(--t-primary)' }}>
               {lesson.subject}
+              {lesson.grade && (
+                <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                  style={{
+                    background: lesson.grade === 'отлично' ? '#10b98120' : lesson.grade === 'хорошо' ? '#3b82f620' : '#f59e0b20',
+                    color: lesson.grade === 'отлично' ? '#10b981' : lesson.grade === 'хорошо' ? '#3b82f6' : '#f59e0b',
+                  }}>
+                  {lesson.grade}
+                </span>
+              )}
             </span>
             {lesson.subgroup && (
               <span className="ml-2 text-[10px]" style={{ color: 'var(--t-muted)' }}>

@@ -14,10 +14,11 @@ function TgAuthInit() {
     setTgAuthReady,
     applyServerSettings,
     setFavorites,
+    tgUser,
+    authToken,
   } = useScheduleStore()
 
   useEffect(() => {
-    // Гарантируем разблокировку страницы даже если fetch завис
     const timeout = setTimeout(() => {
       setTgAuthReady(true)
     }, 5000)
@@ -32,9 +33,7 @@ function TgAuthInit() {
           if (result.favorites.length > 0) setFavorites(result.favorites)
         }
       })
-      .catch(() => {
-        // Ошибка авторизации — продолжаем в анонимном режиме
-      })
+      .catch(() => {})
       .finally(() => {
         clearTimeout(timeout)
         setTgAuthReady(true)
@@ -46,18 +45,14 @@ function TgAuthInit() {
   return null
 }
 
-/** Применяет тему к <html>: class="dark" | class="light" | ничего (auto) */
 function ThemeApplier() {
   const theme = useScheduleStore((s) => s.settings.theme)
-
   useEffect(() => {
     const html = document.documentElement
     html.classList.remove('dark', 'light')
     if (theme === 'dark')  html.classList.add('dark')
     if (theme === 'light') html.classList.add('light')
-    // 'auto' — классов нет, работает @media prefers-color-scheme
   }, [theme])
-
   return null
 }
 
