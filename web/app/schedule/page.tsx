@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback, Suspense } from 'react'
+import { useState, useRef, useEffect, useCallback, Suspense, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
@@ -83,8 +83,44 @@ function SchedulePageInner() {
   const queryClient = useQueryClient()
   const searchParams = useSearchParams()
   const { mode, groupId, groupName, teacherId, teacherName, roomId, roomName,
-          setMode, setGroup, setTeacher, setRoom, profile, profileComplete } =
+          setMode, setGroup, setTeacher, setRoom, profile, profileComplete, authToken } =
     useScheduleStore()
+
+  // Загружаем оценки из eCampus если пользователь авторизован и смотрит свою группу
+  const isOwnGroup = !!(profile?.groupId && groupId && profile.groupId === groupId)
+  const { data: ecampusData } = useQuery({
+    queryKey: ['ecampus-data-schedule', authToken],
+    queryFn: async () => {
+      const { getToken } = await import('@/lib/auth')
+      const token = getToken()
+      if (!token) return null
+      const base = (process.env.NEXT_PUBLIC_API_URL || '') + '/api/ecampus'
+      const res = await fetch(`${base}/data`, { headers: { Authorization: `Bearer ${token}` } })
+      if (!res.ok) return null
+      return res.json()
+    },
+    enabled: !!authToken && isOwnGroup,
+    staleTime: 300_000,
+  })
+
+  // Строим индекс оценок: название предмета -> массив занятий с оценками
+  const gradesIndex = useMemo(() => {
+    if (!ecampusData?.courses) return {}
+    const index: Record<string, string> = {}
+    for (const course of ecampusData.courses) {
+      const lessons = course.lessons || {}
+      for (const lessonList of Object.values(lessons) as any[][]) {
+        for (const lesson of lessonList) {
+          if (lesson.GradeText && lesson.Date) {
+            const dateKey = lesson.Date.split('T')[0]
+            const key = `${course.Name?.toLowerCase().slice(0, 15)}_${dateKey}`
+            index[key] = lesson.GradeText
+          }
+        }
+      }
+    }
+    return index
+  }, [ecampusData])
   const [query, setQuery]               = useState('')
   const [showDropdown, setShowDropdown] = useState(false)
   const [selectedDate, setSelectedDate] = useState(new Date())
@@ -99,6 +135,11 @@ function SchedulePageInner() {
     const urlMode = searchParams.get('mode') as 'group' | 'teacher' | 'room' | null
     const urlId   = searchParams.get('id')
     const urlName = searchParams.get('name')
+    const urlDate = searchParams.get('date')
+    if (urlDate) {
+      const parsed = new Date(urlDate)
+      if (!isNaN(parsed.getTime())) setSelectedDate(parsed)
+    }
     if (urlMode && urlId && urlName) {
       const id = parseInt(urlId, 10)
       if (!isNaN(id)) {
@@ -269,6 +310,11 @@ function SchedulePageInner() {
                 timeEnd:     lesson.time_end,
                 subgroup:    lesson.subgroup ?? undefined,
                 note:        lesson.note ?? undefined,
+                grade:       isOwnGroup ? (() => {
+                  const dateKey = dateStr
+                  const subjectKey = lesson.subject?.toLowerCase().slice(0, 15) || ''
+                  return gradesIndex[`${subjectKey}_${dateKey}`] || null
+                })() : null,
               }} />
             </div>
           )

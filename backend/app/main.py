@@ -30,6 +30,8 @@ async def lifespan(app: FastAPI):
     await connect_auth_db()
     await init_redis()
     setup_scheduler()
+    from app.scheduler.scheduler import start_ecampus_worker
+    await start_ecampus_worker()
     os.makedirs(f"{settings.static_dir}/avatars", exist_ok=True)
     yield
     shutdown_scheduler()
@@ -120,6 +122,8 @@ def create_app() -> FastAPI:
         app.include_router(route.router)
 
     from app.dashboard.router import router as dashboard_router
+    from app.ecampus.router import router as ecampus_router
+    app.include_router(ecampus_router)
     from app.dashboard.api import api as dashboard_api
     from app.dashboard.api_chats import router as chats_router
     # API роутеры ПЕРЕД dashboard_router, иначе catch-all /{path:path} перехватит /api/*

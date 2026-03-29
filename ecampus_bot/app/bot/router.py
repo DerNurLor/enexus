@@ -105,6 +105,14 @@ async def cmd_start(message: TelegramMessage) -> None:
     from app.bot.handlers.commands import _get_or_create_user
     if message.from_user:
         await _get_or_create_user(message.from_user)
+
+    # Обрабатываем deep link: /start login
+    args = message.text.split(maxsplit=1)[1] if message.text and len(message.text.split()) > 1 else ""
+    if args.startswith("login"):
+        from app.bot.handlers.bot_login import cmd_start_login
+        await cmd_start_login(message, args)
+        return
+
     # Сохраняем входящее сообщение пользователя (/start)
     asyncio.ensure_future(store_message(message, role="user"))
 

@@ -93,9 +93,12 @@ export interface ServerSettings {
 }
 
 export interface QuotaStatus {
-  used:     number
-  limit:    number
-  reset_in: number
+  used:      number
+  cap:       number
+  remaining: number
+  ttl_secs:  number
+  ttl_hours: number
+  exhausted: boolean
 }
 
 export interface FavoriteItem {
@@ -147,10 +150,24 @@ export async function loginWithWidget(data: TelegramWidgetData): Promise<{
 }
 
 /** Тихий рефреш — пробуем обновить токены по saved refresh_token */
+let _refreshInProgress: Promise<string | null> | null = null
+
 async function _silentRefresh(): Promise<string | null> {
+  // Предотвращаем параллельные вызовы — возвращаем тот же промис
+  if (_refreshInProgress) {
+    console.log('[auth] silentRefresh already in progress, waiting...')
+    return _refreshInProgress
+  }
+  _refreshInProgress = _doSilentRefresh().finally(() => { _refreshInProgress = null })
+  return _refreshInProgress
+}
+
+async function _doSilentRefresh(): Promise<string | null> {
   if (typeof window === 'undefined') return null
   const refresh = localStorage.getItem(REFRESH_KEY)
+  console.log('[auth] silentRefresh called, token:', refresh ? 'EXISTS' : 'EMPTY')
   if (!refresh) return null
+  console.log('[auth] sending refresh request...')
 
   try {
     const res = await fetch(`${AUTH_BASE}/refresh`, {
@@ -158,8 +175,10 @@ async function _silentRefresh(): Promise<string | null> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: refresh }),
     })
+    console.log('[auth] refresh response:', res.status)
     if (!res.ok) {
-      localStorage.removeItem(REFRESH_KEY)
+      // Не удаляем токен при 401 — возможно временная ошибка сервера
+      // Токен удаляется только при явном logout()
       return null
     }
     const { access_token, refresh_token } = await res.json()
@@ -167,7 +186,7 @@ async function _silentRefresh(): Promise<string | null> {
     if (refresh_token) localStorage.setItem(REFRESH_KEY, refresh_token)
     return access_token
   } catch {
-    localStorage.removeItem(REFRESH_KEY)
+    // Сетевая ошибка — не удаляем токен
     return null
   }
 }
@@ -212,9 +231,7 @@ export async function saveSettingsToServer(settings: ServerSettings): Promise<vo
   })
 }
 
-export async function fetchQuota(): Promise<{
-  used: number; limit: number; reset_in: number
-} | null> {
+export async function fetchQuota(): Promise<QuotaStatus | null> {
   if (!_token) return null
   try {
     const res = await fetch(`${MINIAPP_BASE}/api/profile/limits`, { headers: getAuthHeader() })
@@ -241,11 +258,14 @@ export interface AuthResult {
 export async function initAuth(): Promise<AuthResult | null> {
   let token: string | null = null
 
-  // 1. Пробуем Mini App initData
-  const initData = getTelegramInitData()
-  if (initData) {
+  // 1. Mini App — только если реально открыто ВНУТРИ Telegram
+  // tg.platform !== 'unknown' отличает реальный Mini App от просто загруженного SDK
+  const tg = typeof window !== 'undefined' ? (window as any).Telegram?.WebApp : null
+  const isRealMiniApp = !!(tg?.initData && tg.initData.length > 0 && tg?.platform && tg.platform !== 'unknown')
+
+  if (isRealMiniApp) {
     try {
-      const { access_token, refresh_token } = await loginWithInitData(initData)
+      const { access_token, refresh_token } = await loginWithInitData(tg.initData)
       token = access_token
       _token = token
       if (typeof window !== 'undefined') {
@@ -256,7 +276,7 @@ export async function initAuth(): Promise<AuthResult | null> {
     }
   }
 
-  // 2. Тихий рефреш через saved refresh_token
+  // 2. Браузер/PWA/десктоп — тихий рефреш через saved refresh_token
   if (!token) {
     token = await _silentRefresh()
   }
@@ -270,6 +290,7 @@ export async function initAuth(): Promise<AuthResult | null> {
     fetchFavorites(),
   ])
 
+  console.log('[auth] initAuth result:', !!user, !!token)
   return { token, user, settings, favorites }
 }
 
@@ -306,3 +327,22 @@ export function logout() {
 
 // Алиас для обратной совместимости с Providers.tsx
 export const authenticateWithTelegram = initAuth
+
+export async function loginWithBotToken(botToken: string): Promise<AuthResult> {
+  const res = await fetch(`${AUTH_BASE}/bot/exchange`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: botToken }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}))
+    // Сбрасываем старый токен — он мог устареть
+    _token = null
+    throw new Error(err.detail || 'Токен входа истёк. Запросите новый через бота: /start login')
+  }
+  const { access_token, refresh_token } = await res.json()
+  _token = access_token
+  if (typeof window !== 'undefined') localStorage.setItem(REFRESH_KEY, refresh_token)
+  const [user, settings, favorites] = await Promise.all([fetchMe(), fetchSettings(), fetchFavorites()])
+  return { token: access_token, user, settings, favorites }
+}

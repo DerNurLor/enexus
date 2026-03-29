@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef, Suspense } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   User, GraduationCap, BookOpen, Search, Check, ChevronRight,
@@ -12,8 +12,10 @@ import { useScheduleStore } from '@/lib/store'
 import type { UserRole } from '@/lib/store'
 import { api } from '@/lib/api'
 import { saveSettingsToServer, fetchQuota } from '@/lib/auth'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { loginWithBotToken } from '@/lib/auth'
 import { TelegramAuthSection } from '@/components/auth/TelegramAuthSection'
+import { ECampusSection } from '@/components/ecampus/ECampusSection'
 
 type OnboardStep = 'choose-mode' | 'choose-role' | 'choose-group' | 'choose-teacher' | 'done'
 
@@ -58,7 +60,7 @@ function QuotaSection({ token }: { token: string | null }) {
 
   if (!token) return null
 
-  const pct = quota && quota.limit > 0 ? Math.min(quota.used / quota.limit * 100, 100) : 0
+  const pct = quota && quota.cap > 0 ? Math.min(quota.used / quota.cap * 100, 100) : 0
   const barColor = pct >= 100 ? '#ef4444' : pct >= 70 ? '#f97316' : 'var(--cyan)'
 
   return (
@@ -69,7 +71,7 @@ function QuotaSection({ token }: { token: string | null }) {
         </p>
         {quota && (
           <span className="text-xs font-mono font-bold" style={{ color: barColor }}>
-            {quota.used} / {quota.limit}
+            {quota.used} / {quota.cap}
           </span>
         )}
       </div>
@@ -82,10 +84,10 @@ function QuotaSection({ token }: { token: string | null }) {
               style={{ width: `${pct}%`, background: barColor }} />
           </div>
           <div className="flex justify-between text-[10px]" style={{ color: 'var(--t-muted)' }}>
-            <span>{pct >= 100 ? `🔴 Лимит исчерпан` : `Осталось: ${quota.limit - quota.used}`}</span>
+            <span>{pct >= 100 ? `🔴 Лимит исчерпан` : `Осталось: ${quota.cap - quota.used}`}</span>
             <span>
-              {quota.reset_in > 0
-                ? `Сброс через ${Math.floor(quota.reset_in / 3600)}ч ${Math.floor((quota.reset_in % 3600) / 60)}м`
+              {quota.ttl_secs > 0
+                ? `Сброс через ${Math.floor(quota.ttl_secs / 3600)}ч ${Math.floor((quota.ttl_secs % 3600) / 60)}м`
                 : 'Лимит сброшен'}
             </span>
           </div>
@@ -285,6 +287,7 @@ function ProfileDone({ onReset }: { onReset: () => void }) {
 
       {/* Квота */}
       <QuotaSection token={authToken} />
+      <ECampusSection token={authToken} />
 
       {/* Настройки */}
       <SettingsSection />
@@ -309,12 +312,32 @@ function ProfileDone({ onReset }: { onReset: () => void }) {
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
-export default function ProfilePage() {
+function ProfilePageInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+
+  // Обрабатываем ?bot_token= при возврате с бота — работает даже если tgUser уже есть в store
+  useEffect(() => {
+    const botToken = searchParams.get('bot_token')
+    if (!botToken) return
+    // Немедленно убираем токен из URL чтобы не вызвать повторно при ререндере
+    router.replace('/profile')
+    loginWithBotToken(botToken)
+      .then(result => {
+        setAuthToken(result.token)
+        setTgUser(result.user)
+        setTgAuthReady(true)
+        if (result.settings) applyServerSettings(result.settings)
+        if (result.favorites?.length) setFavorites(result.favorites)
+      })
+      .catch((e) => console.error('bot token exchange failed:', e))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   const qc = useQueryClient()
   const {
     profile, profileComplete, setProfile, clearProfile,
     tgUser, authToken, isAuthenticated, tgAuthReady, settings,
+    setTgUser, setAuthToken, setTgAuthReady, applyServerSettings, setFavorites,
   } = useScheduleStore()
 
   const [step, setStep] = useState<OnboardStep>('done')
@@ -462,6 +485,7 @@ export default function ProfilePage() {
           </div>
 
           <QuotaSection token={authToken} />
+      <ECampusSection token={authToken} />
           <SettingsSection />
 
           <div className="card px-5 py-5 mb-4">
@@ -674,4 +698,12 @@ export default function ProfilePage() {
   }
 
   return null
+}
+
+export default function ProfilePage() {
+  return (
+    <Suspense>
+      <ProfilePageInner />
+    </Suspense>
+  )
 }
