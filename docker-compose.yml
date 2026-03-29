@@ -101,6 +101,7 @@ services:
     environment:
       MONGO_URI:        "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${MONGO_DB:-ncfu_schedule}?authSource=admin"
       AUTH_MONGO_URI:   "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${AUTH_MONGO_DB:-ncfu_auth}?authSource=admin"
+      ECAMPUS_ENCRYPTION_KEY: "${ECAMPUS_ENCRYPTION_KEY}"
       REDIS_URL:        "redis://:${REDIS_PASSWORD}@redis:6379/0"
       APP_ENV:          "${APP_ENV:-production}"
       OPENAI_API_KEY:   "${OPENAI_API_KEY}"
@@ -183,6 +184,7 @@ services:
     environment:
       MONGO_URI:        "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${MONGO_DB:-ncfu_schedule}?authSource=admin"
       AUTH_MONGO_URI:   "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${AUTH_MONGO_DB:-ncfu_auth}?authSource=admin"
+      ECAMPUS_ENCRYPTION_KEY: "${ECAMPUS_ENCRYPTION_KEY}"
       REDIS_URL:        "redis://:${REDIS_PASSWORD}@redis:6379/0"
       BACKEND_URL:      "http://backend:8000"
       APP_ENV:          "${APP_ENV:-production}"
@@ -222,6 +224,7 @@ services:
     environment:
       MONGO_URI:        "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${MONGO_DB:-ncfu_schedule}?authSource=admin"
       AUTH_MONGO_URI:   "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/${AUTH_MONGO_DB:-ncfu_auth}?authSource=admin"
+      ECAMPUS_ENCRYPTION_KEY: "${ECAMPUS_ENCRYPTION_KEY}"
       REDIS_URL:        "redis://:${REDIS_PASSWORD}@redis:6379/0"
       APP_ENV:          "${APP_ENV:-production}"
       JWT_SECRET:       "${JWT_SECRET}"
@@ -317,7 +320,7 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: "${WEB_URL}"
-        NEXT_PUBLIC_TG_BOT_USERNAME: "ncfu_schedule_bot"
+        NEXT_PUBLIC_TG_BOT_USERNAME: "awesome_ecampus_bot"
     image: ncfu_web:latest
     container_name: ncfu_web
     restart: unless-stopped

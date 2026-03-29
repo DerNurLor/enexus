@@ -30,6 +30,14 @@ def setup_scheduler() -> None:
         misfire_grace_time=3600,
     )
 
+    _scheduler.add_job(
+        _run_ecampus_sync,
+        CronTrigger(hour=3, minute=0, timezone="UTC"),
+        id="daily_ecampus_sync",
+        name="Daily eCampus sync",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
     _scheduler.start()
     logger.info(f"Scheduler started — scrape every {settings.scrape_interval_hours}h, cleanup at {settings.cleanup_hour_utc}:00 UTC")
     loop = asyncio.get_event_loop()
@@ -82,3 +90,22 @@ async def _run_cleanup() -> None:
         )
     except Exception as exc:
         logger.error(f"Log cleanup job crashed: {exc}")
+
+
+async def _run_ecampus_sync() -> None:
+    """Ежедневная синхронизация всех пользователей eCampus."""
+    try:
+        from app.ecampus.sync_service import sync_all_users
+        result = await sync_all_users()
+        logger.info(f"eCampus daily sync enqueued: {result}")
+    except Exception as exc:
+        logger.error(f"eCampus daily sync error: {exc}")
+
+
+async def start_ecampus_worker() -> None:
+    """Запускает воркер очереди задач eCampus."""
+    import asyncio
+    from app.ecampus.queue import get_queue
+    from app.ecampus.sync_service import task_handler
+    logger.info("Starting eCampus queue worker...")
+    asyncio.create_task(get_queue().start_worker(task_handler))
