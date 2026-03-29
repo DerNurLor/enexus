@@ -1,8 +1,20 @@
 'use client'
-import { useState, useCallback } from 'react'
-import { LogOut, Shield } from 'lucide-react'
-import { TelegramLoginButton, type TelegramAuthData } from './TelegramLoginButton'
-import { loginWithWidgetAndInit, logout, type TgUserInfo } from '@/lib/auth'
+/**
+ * TelegramAuthSection.tsx
+ *
+ * Авторизация через бота вместо Telegram Login Widget.
+ *
+ * Поток:
+ *  1. Пользователь нажимает «Войти через Telegram»
+ *  2. Открывается t.me/ncfu_schedule_bot?start=login
+ *  3. Бот отправляет кнопку «Подтвердить вход» → URL /profile?bot_token=OTP
+ *  4. Пользователь нажимает → попадает на /profile с ?bot_token=
+ *  5. Страница вызывает POST /auth/bot/exchange → получает JWT
+ */
+import { useState, useCallback, useEffect } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
+import { LogOut, Shield, ExternalLink } from 'lucide-react'
+import { loginWithBotToken, logout, type TgUserInfo } from '@/lib/auth'
 import { useScheduleStore } from '@/lib/store'
 
 const BOT_USERNAME = process.env.NEXT_PUBLIC_TG_BOT_USERNAME || 'ncfu_schedule_bot'
@@ -23,26 +35,36 @@ interface Props {
 export function TelegramAuthSection({ user, token }: Props) {
   const [loading, setLoading] = useState(false)
   const [error,   setError]   = useState<string | null>(null)
+  const searchParams = useSearchParams()
+  const router = useRouter()
 
   const { setTgUser, setAuthToken, setTgAuthReady, applyServerSettings, setFavorites } =
     useScheduleStore()
 
-  const handleAuth = useCallback(async (data: TelegramAuthData) => {
+  // Обрабатываем ?bot_token= при возврате с бота
+  useEffect(() => {
+    const botToken = searchParams.get('bot_token')
+    if (!botToken || user) return
+
     setLoading(true)
     setError(null)
-    try {
-      const result = await loginWithWidgetAndInit(data)
-      setAuthToken(result.token)
-      setTgUser(result.user)
-      setTgAuthReady(true)
-      if (result.settings)           applyServerSettings(result.settings)
-      if (result.favorites?.length)  setFavorites(result.favorites)
-    } catch (e: any) {
-      setError(e.message || 'Ошибка авторизации')
-    } finally {
-      setLoading(false)
-    }
-  }, [setTgUser, setAuthToken, setTgAuthReady, applyServerSettings, setFavorites])
+
+    loginWithBotToken(botToken)
+      .then(result => {
+        setAuthToken(result.token)
+        setTgUser(result.user)
+        setTgAuthReady(true)
+        if (result.settings)          applyServerSettings(result.settings)
+        if (result.favorites?.length) setFavorites(result.favorites)
+        // Убираем токен из URL
+        router.replace('/profile')
+      })
+      .catch(e => {
+        setError(e.message || 'Ошибка авторизации')
+        router.replace('/profile')
+      })
+      .finally(() => setLoading(false))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleLogout = useCallback(() => {
     logout()
@@ -53,7 +75,7 @@ export function TelegramAuthSection({ user, token }: Props) {
 
   // ── Авторизован ──────────────────────────────────────────────────────────
   if (user && token) {
-    const displayName = [user.first_name, user.last_name].filter(Boolean).join(' ')
+    const displayName  = [user.first_name, user.last_name].filter(Boolean).join(' ')
     const nonUserRoles = user.roles.filter(r => r !== 'user')
 
     return (
@@ -114,11 +136,36 @@ export function TelegramAuthSection({ user, token }: Props) {
     )
   }
 
+  // ── Идёт авторизация (вернулись с бота) ─────────────────────────────────
+  if (loading) {
+    return (
+      <div className="card px-5 py-4 mb-4">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+            style={{ background: 'var(--cyan-dim)' }}>
+            <div className="w-4 h-4 border-2 rounded-full animate-spin"
+              style={{ borderColor: 'var(--cyan)', borderTopColor: 'transparent' }} />
+          </div>
+          <div>
+            <div className="text-sm font-semibold" style={{ color: 'var(--t-primary)' }}>
+              Выполняется вход...
+            </div>
+            <div className="text-[11px]" style={{ color: 'var(--t-muted)' }}>
+              Проверяем подтверждение от Telegram
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   // ── Не авторизован ───────────────────────────────────────────────────────
+  const botUrl = `https://t.me/${BOT_USERNAME}?start=login`
+
   return (
     <div className="card px-5 py-4 mb-4">
       <div className="flex items-center justify-between gap-4">
-        {/* Левая часть — текст */}
+        {/* Левая часть */}
         <div className="flex items-center gap-2.5 min-w-0">
           <div className="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center"
             style={{ background: 'var(--cyan-dim)' }}>
@@ -134,15 +181,15 @@ export function TelegramAuthSection({ user, token }: Props) {
           </div>
         </div>
 
-        {/* Правая часть — виджет */}
-        <div className="shrink-0">
-          <TelegramLoginButton
-            botUsername={BOT_USERNAME}
-            onAuth={handleAuth}
-            onError={setError}
-            loading={loading}
-          />
-        </div>
+        {/* Кнопка */}
+        <a href={botUrl} target="_blank" rel="noopener noreferrer"
+          className="shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-semibold transition-all hover:opacity-80"
+          style={{ background: '#2AABEE', color: '#fff' }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="white">
+            <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.447 1.394c-.16.16-.295.295-.605.295l.213-3.053 5.56-5.023c.242-.213-.054-.333-.373-.12l-6.871 4.326-2.962-.924c-.643-.204-.657-.643.136-.953l11.57-4.461c.537-.194 1.006.131.833.941z"/>
+          </svg>
+          Войти
+        </a>
       </div>
 
       {error && (

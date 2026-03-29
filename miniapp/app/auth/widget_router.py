@@ -137,8 +137,8 @@ async def telegram_widget_login(
         )
 
     # Выдаём токены
-    access_token  = create_access_token(str(user.id))
-    refresh_token = create_refresh_token(str(user.id))
+    access_token  = create_access_token(str(user.id), user.tg_id, user.roles)
+    refresh_token = create_refresh_token(str(user.id), user.tg_id)
 
     logger.info(f"Widget auth: success tg_id={body.id} username={body.username}")
 
