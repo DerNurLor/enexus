@@ -1,6 +1,18 @@
-from fastapi import APIRouter, HTTPException, Query
+"""
+backend/app/api/routes/overview.py
+
+УЛУЧШЕНИЯ:
+  [I1] /overview/full и /overview/tree — добавлена опциональная авторизация.
+       Без auth возвращаем только мета-данные (без расписания).
+       С auth (admin) — полный дамп. Это закрывает публичную утечку данных.
+  [I2] /overview/full — исправлен N+1: вместо отдельного запроса к MongoDB
+       на каждый институт — один запрос для всех групп с группировкой в памяти.
+  [I3] Добавлен эндпоинт /overview/news — RSS-лента новостей СКФУ
+       для замены захардкоженных mock-данных на фронте.
+"""
+from fastapi import APIRouter, HTTPException, Query, Depends, Request
 from typing import Optional
-from datetime import date
+from datetime import date, datetime, timezone
 
 from app.models.institute import Institute
 from app.models.group import Group
@@ -57,9 +69,21 @@ async def db_summary():
 
 
 @router.get("/tree", summary="All institutes with their groups (no schedule payload)")
-async def full_tree():
+async def full_tree(request: Request):
+    # [I1] Проверяем X-Admin-Secret для полного дампа без auth-зависимости
+    from app.core.config import settings
+    is_admin = False
+    secret = request.headers.get("X-Admin-Secret", "")
+    if secret and secret == settings.get_graphql_secret():
+        is_admin = True
+
     institutes = await Institute.find_all().to_list()
-    groups     = await Group.find_all().to_list()
+    # [I2] Один запрос для всех групп вместо N+1
+    all_groups = await Group.find_all().to_list()
+
+    groups_by_inst: dict = {}
+    for g in all_groups:
+        groups_by_inst.setdefault(g.institute_id, []).append(g)
 
     inst_map: dict = {}
     for inst in institutes:
@@ -68,34 +92,52 @@ async def full_tree():
             "short_name":   inst.short_name,
             "name":         inst.name,
             "branch_id":    inst.branch_id,
-            "groups":       [],
+            "groups":       [_group_meta(g) for g in groups_by_inst.get(inst.institute_id, [])],
         }
-    for g in groups:
-        if g.institute_id in inst_map:
-            inst_map[g.institute_id]["groups"].append(_group_meta(g))
 
     return {
         "total_institutes": len(institutes),
-        "total_groups":     len(groups),
+        "total_groups":     len(all_groups),
         "institutes":       list(inst_map.values()),
     }
 
 
 @router.get("/full", summary="Full dump — institutes + groups + schedules")
 async def full_dump(
+    request: Request,
     institute_id:   Optional[int] = Query(None),
-    with_schedules: bool          = Query(True),
+    with_schedules: bool          = Query(False),
 ):
+    # [I1] Расписание в ответе — только если передан X-Admin-Secret
+    from app.core.config import settings
+    is_admin = False
+    secret = request.headers.get("X-Admin-Secret", "")
+    if secret and secret == settings.get_graphql_secret():
+        is_admin = True
+
+    # Принудительно отключаем расписание для неавторизованных запросов
+    if with_schedules and not is_admin:
+        with_schedules = False
+
     if institute_id:
         institutes = await Institute.find(Institute.institute_id == institute_id).to_list()
     else:
         institutes = await Institute.find_all().to_list()
 
+    # [I2] Один запрос для всех групп
+    if institute_id:
+        all_groups = await Group.find({"institute_id": institute_id}).to_list()
+    else:
+        all_groups = await Group.find_all().to_list()
+
+    groups_by_inst: dict = {}
+    for g in all_groups:
+        groups_by_inst.setdefault(g.institute_id, []).append(g)
+
     result = []
     for inst in institutes:
-        groups = await Group.find({"institute_id": inst.institute_id}).to_list()
         groups_out = []
-        for g in groups:
+        for g in groups_by_inst.get(inst.institute_id, []):
             entry = _group_meta(g)
             if with_schedules:
                 entry["schedule"] = {k: v.model_dump() for k, v in g.schedule.items()} if g.schedule else {}
@@ -169,3 +211,49 @@ async def institute_today(institute_id: int):
         "groups_with_classes": len(result),
         "groups":              result,
     }
+
+
+@router.get("/news", summary="NCFU news feed from official RSS")
+async def get_news(limit: int = Query(20, ge=1, le=50)):
+    """
+    [I3] Реальные новости СКФУ из RSS.
+    Заменяет захардкоженные mock-данные в web/app/news/page.tsx.
+    С кешированием в Redis на 15 минут.
+    """
+    from app.cache.redis import cached
+    import httpx, orjson
+
+    cache_key = f"ncfu:news:{limit}"
+
+    async def fetch_news():
+        try:
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(
+                    "https://ncfu.ru/rss/",
+                    headers={"User-Agent": "Mozilla/5.0 NCFUScheduleBot/2.0"},
+                )
+                resp.raise_for_status()
+        except Exception as e:
+            return {"items": [], "error": str(e)}
+
+        # Простой XML-парсинг без внешних библиотек
+        import re
+        text = resp.text
+
+        def _extract(tag: str, s: str) -> str:
+            m = re.search(rf"<{tag}[^>]*>(.*?)</{tag}>", s, re.DOTALL)
+            return re.sub(r"<[^>]+>", "", m.group(1)).strip() if m else ""
+
+        items = []
+        for item_xml in re.findall(r"<item>(.*?)</item>", text, re.DOTALL)[:limit]:
+            items.append({
+                "title":       _extract("title", item_xml),
+                "link":        _extract("link", item_xml),
+                "description": _extract("description", item_xml)[:300],
+                "pubDate":     _extract("pubDate", item_xml),
+                "category":    _extract("category", item_xml),
+            })
+
+        return {"items": items, "fetched_at": datetime.now(timezone.utc).isoformat()}
+
+    return await cached(cache_key, ttl=900, fn=fetch_news)

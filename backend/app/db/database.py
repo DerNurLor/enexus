@@ -1,4 +1,4 @@
-from motor.motor_asyncio import AsyncIOMotorClient
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
 from beanie import init_beanie
 from loguru import logger
 
@@ -23,3 +23,17 @@ async def connect_db() -> None:
         document_models=[LessonDoc, Institute, Group, Teacher, Room, ScrapeLog, ECampusSyncRecord],
     )
     logger.info("MongoDB ready.")
+
+
+async def close_db() -> None:
+    global _client
+    if _client is not None:
+        _client.close()
+        _client = None
+        logger.info("MongoDB connection closed.")
+
+
+def get_motor_db() -> AsyncIOMotorDatabase:
+    """Возвращает объект базы данных Motor для прямых запросов через коллекции."""
+    assert _client is not None, "Database not connected. Call connect_db() first."
+    return _client.get_database(settings.mongo_db)

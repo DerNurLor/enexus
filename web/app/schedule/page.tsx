@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, Suspense, useMemo } from 'rea
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { Search, CalendarRange, X, WifiOff, Clock } from 'lucide-react'
+import { Search, CalendarRange, X, WifiOff, Clock, MapPin, ChevronRight } from 'lucide-react'
 import { format, addDays, startOfWeek, getISOWeek } from 'date-fns'
 import { ru } from 'date-fns/locale'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -38,31 +38,59 @@ function mapLessonType(t: string | null): 'lab' | 'lecture' | 'seminar' | 'pract
   return 'practice'
 }
 
-// ── Cache helpers (week-granular) ─────────────────────────────────────────────
+// ── Cache helpers (week-granular) с LRU-эвикцией ─────────────────────────────
+
+const CACHE_PREFIX   = 'schedule_cache:'
+const MAX_CACHE_KEYS = 150  // УЛУЧШЕНИЕ: ограничение числа записей в localStorage
+
+function _pruneCache() {
+  try {
+    const keys = Object.keys(localStorage)
+      .filter(k => k.startsWith(CACHE_PREFIX))
+      .map(k => {
+        try {
+          const raw = localStorage.getItem(k)
+          const ts = raw ? (JSON.parse(raw) as { saved?: number }).saved ?? 0 : 0
+          return { key: k, ts }
+        } catch {
+          return { key: k, ts: 0 }
+        }
+      })
+      .sort((a, b) => a.ts - b.ts)  // старые первыми
+
+    while (keys.length > MAX_CACHE_KEYS) {
+      const oldest = keys.shift()
+      if (oldest) localStorage.removeItem(oldest.key)
+    }
+  } catch { /* localStorage может быть недоступен */ }
+}
 
 function weekCacheKey(mode: string, id: number | null, weekNum: number, year: number) {
-  return `schedule_cache:week:${mode}:${id}:${year}-W${weekNum}`
+  return `${CACHE_PREFIX}week:${mode}:${id}:${year}-W${weekNum}`
 }
 
 function dayCacheKey(mode: string, id: number | null, date: string) {
-  return `schedule_cache:day:${mode}:${id}:${date}`
+  return `${CACHE_PREFIX}day:${mode}:${id}:${date}`
 }
 
 function saveWeekToCache(mode: string, id: number | null, weekNum: number, year: number, dayMap: Record<string, Lesson[]>) {
   try {
     const key = weekCacheKey(mode, id, weekNum, year)
     localStorage.setItem(key, JSON.stringify({ saved: Date.now(), days: dayMap }))
-    // Also store individual day entries for fast lookup
     Object.entries(dayMap).forEach(([date, lessons]) => {
-      localStorage.setItem(dayCacheKey(mode, id, date), JSON.stringify(lessons))
+      localStorage.setItem(dayCacheKey(mode, id, date), JSON.stringify({ saved: Date.now(), lessons }))
     })
-  } catch {}
+    _pruneCache()  // УЛУЧШЕНИЕ: чистим после каждой записи
+  } catch { /* QuotaExceededError — игнорируем */ }
 }
 
 function loadDayFromCache(mode: string, id: number | null, date: string): Lesson[] | null {
   try {
     const raw = localStorage.getItem(dayCacheKey(mode, id, date))
-    return raw ? JSON.parse(raw) : null
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    // Поддержка обоих форматов: старый (массив) и новый (объект с saved)
+    return Array.isArray(parsed) ? parsed : (parsed.lessons ?? null)
   } catch { return null }
 }
 
@@ -82,9 +110,10 @@ function useLiveClock() {
 function SchedulePageInner() {
   const queryClient = useQueryClient()
   const searchParams = useSearchParams()
-  const { mode, groupId, groupName, teacherId, teacherName, roomId, roomName,
-          setMode, setGroup, setTeacher, setRoom, profile, profileComplete, authToken } =
-    useScheduleStore()
+  const {
+    mode, groupId, groupName, teacherId, teacherName, roomId, roomName,
+    setMode, setGroup, setTeacher, setRoom, profile, profileComplete, authToken,
+  } = useScheduleStore()
 
   // Загружаем оценки из eCampus если пользователь авторизован и смотрит свою группу
   const isOwnGroup = !!(profile?.groupId && groupId && profile.groupId === groupId)
@@ -103,7 +132,6 @@ function SchedulePageInner() {
     staleTime: 300_000,
   })
 
-  // Строим индекс оценок: название предмета -> массив занятий с оценками
   const gradesIndex = useMemo(() => {
     if (!ecampusData?.courses) return {}
     const index: Record<string, string> = {}
@@ -121,6 +149,7 @@ function SchedulePageInner() {
     }
     return index
   }, [ecampusData])
+
   const [query, setQuery]               = useState('')
   const [showDropdown, setShowDropdown] = useState(false)
   const [selectedDate, setSelectedDate] = useState(new Date())
@@ -128,9 +157,27 @@ function SchedulePageInner() {
   const inputRef = useRef<HTMLInputElement>(null)
   const now = useLiveClock()
 
-  // Применяем URL-параметры ?mode=&id=&name= при монтировании и при навигации.
-  // Это гарантирует что "Открыть моё расписание" всегда показывает нужный entity,
-  // даже если store содержит что-то другое (последний просмотренный).
+  // УЛУЧШЕНИЕ: применяем профиль сразу при монтировании если entityId пуст.
+  // Без этого пользователь видел «пустой экран» даже когда профиль настроен —
+  // store.persist восстанавливает profile, но mode/groupId — отдельные поля,
+  // которые при HMR или hard refresh могут быть не восстановлены.
+  const profileAppliedRef = useRef(false)
+  useEffect(() => {
+    if (profileAppliedRef.current) return
+    const currentEntityId = mode === 'group' ? groupId : mode === 'teacher' ? teacherId : roomId
+    if (!currentEntityId && profileComplete && profile) {
+      profileAppliedRef.current = true
+      if (profile.role === 'student' && profile.groupId && profile.groupName) {
+        setMode('group')
+        setGroup(profile.groupId, profile.groupName)
+      } else if (profile.role === 'teacher' && profile.teacherId && profile.teacherName) {
+        setMode('teacher')
+        setTeacher(profile.teacherId, profile.teacherName)
+      }
+    }
+  }, [profile, profileComplete, groupId, teacherId, roomId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Применяем URL-параметры ?mode=&id=&name= при навигации
   useEffect(() => {
     const urlMode = searchParams.get('mode') as 'group' | 'teacher' | 'room' | null
     const urlId   = searchParams.get('id')
@@ -143,13 +190,13 @@ function SchedulePageInner() {
     if (urlMode && urlId && urlName) {
       const id = parseInt(urlId, 10)
       if (!isNaN(id)) {
+        profileAppliedRef.current = true  // URL-параметры имеют приоритет
         setMode(urlMode)
         if (urlMode === 'group')   setGroup(id, decodeURIComponent(urlName))
         if (urlMode === 'teacher') setTeacher(id, decodeURIComponent(urlName))
         if (urlMode === 'room')    setRoom(id, decodeURIComponent(urlName))
       }
     }
-  // searchParams объект меняется при каждой навигации — реагируем на него
   }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const entityId   = mode === 'group' ? groupId   : mode === 'teacher' ? teacherId   : roomId
@@ -167,7 +214,7 @@ function SchedulePageInner() {
     return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
   }, [])
 
-  // ── Week prefetch: cache current + next week, once per entity ────────────
+  // Week prefetch
   const prefetchedRef = useRef<Set<string>>(new Set())
 
   const prefetchWeek = useCallback(async (weekOffset: number) => {
@@ -197,21 +244,18 @@ function SchedulePageInner() {
     }
   }, [entityId, mode])
 
-  // Запускаем prefetch только при смене entity — с большими задержками
   const lastPrefetchEntity = useRef<string | null>(null)
   useEffect(() => {
     if (!entityId) return
     const key = `${mode}:${entityId}`
     if (lastPrefetchEntity.current === key) return
     lastPrefetchEntity.current = key
-
-    // Текущая неделя — через 3с после загрузки дня, следующая — через 8с
     const t0 = setTimeout(() => prefetchWeek(0), 3000)
     const t1 = setTimeout(() => prefetchWeek(1), 8000)
     return () => { clearTimeout(t0); clearTimeout(t1) }
   }, [entityId, mode]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Day query ─────────────────────────────────────────────────────────────
+  // Day query
   const { data: dayData, isLoading, isFetching, isError } = useQuery({
     queryKey: ['schedule', 'day', mode, entityId, dateStr],
     queryFn:  async () => {
@@ -225,10 +269,9 @@ function SchedulePageInner() {
     staleTime: 1000 * 60 * 5,
   })
 
-  // Save day to cache
   useEffect(() => {
     if (dayData?.lessons?.length) {
-      try { localStorage.setItem(dKey, JSON.stringify(dayData.lessons)) } catch {}
+      try { localStorage.setItem(dKey, JSON.stringify({ saved: Date.now(), lessons: dayData.lessons })) } catch {}
     }
   }, [dayData, dKey])
 
@@ -251,10 +294,10 @@ function SchedulePageInner() {
   const showingCache = (isOffline || isError) && liveLessons.length === 0 && cachedLessons.length > 0
   const lessons      = showingCache ? cachedLessons : liveLessons
 
-  // Find currently running lesson
-  const nowStr = format(now, 'HH:mm')
-  const currentLesson = lessons.find(l => l.time_start <= nowStr && l.time_end >= nowStr)
-  const isToday = format(selectedDate, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')
+  const nowStr        = format(now, 'HH:mm')
+  const isToday       = format(selectedDate, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')
+  const currentLesson = isToday ? lessons.find(l => l.time_start <= nowStr && l.time_end >= nowStr) : null
+  const nextLesson    = isToday ? lessons.find(l => l.time_start > nowStr) : null
 
   function handleModeChange(m: SearchMode) {
     setMode(m)
@@ -269,21 +312,12 @@ function SchedulePageInner() {
           const isCurrent = isToday && lesson.time_start <= nowStr && lesson.time_end >= nowStr
           const isPast    = isToday && lesson.time_end < nowStr
 
-          // В режиме преподавателя — показываем группу вместо преподавателя
-          // В режиме аудитории — показываем преподавателя (группа идёт отдельным полем)
-          const teacherDisplay = mode === 'teacher'
-            ? null  // не показываем — это сам преподаватель
-            : (lesson.teacher_name || '—')
-
-          const roomDisplay = mode === 'room'
-            ? null  // не показываем аудиторию — мы уже в её расписании
-            : (lesson.classroom || lesson.room_name || '—')
-
-          // group показываем только когда смотрим преподавателя или аудиторию
-          const showGroup = mode === 'teacher' || mode === 'room'
+          const teacherDisplay = mode === 'teacher' ? null : (lesson.teacher_name || '—')
+          const roomDisplay    = mode === 'room'    ? null : (lesson.classroom || lesson.room_name || '—')
+          const showGroup      = mode === 'teacher' || mode === 'room'
 
           return (
-            <div key={i}
+            <div key={`${lesson.time_start}-${lesson.subject}-${i}`}
               style={{ opacity: isPast ? 0.5 : 1, transition: 'opacity 0.3s' }}
             >
               {isCurrent && (
@@ -293,7 +327,7 @@ function SchedulePageInner() {
                 </div>
               )}
               <LessonCard lesson={{
-                id:          String(i),
+                id:          `${dateStr}-${i}`,
                 subject:     lesson.subject,
                 type:        mapLessonType(lesson.lesson_type),
                 teacher:     teacherDisplay || '',
@@ -311,9 +345,8 @@ function SchedulePageInner() {
                 subgroup:    lesson.subgroup ?? undefined,
                 note:        lesson.note ?? undefined,
                 grade:       isOwnGroup ? (() => {
-                  const dateKey = dateStr
                   const subjectKey = lesson.subject?.toLowerCase().slice(0, 15) || ''
-                  return gradesIndex[`${subjectKey}_${dateKey}`] || null
+                  return gradesIndex[`${subjectKey}_${dateStr}`] || null
                 })() : null,
               }} />
             </div>
@@ -342,6 +375,47 @@ function SchedulePageInner() {
           style={{ background: 'rgba(255,180,0,0.08)', border: '1px solid rgba(255,180,0,0.2)', color: 'rgba(255,180,0,0.9)' }}>
           <WifiOff size={13} />
           <span>Нет подключения — показываем кешированные данные</span>
+        </div>
+      )}
+
+      {/* УЛУЧШЕНИЕ: Виджет «текущая пара» — сразу виден без скролла */}
+      {isToday && entityId && currentLesson && (
+        <div className="mb-4 px-4 py-3 rounded-xl"
+          style={{ background: 'rgba(74,222,128,0.06)', border: '1px solid rgba(74,222,128,0.2)' }}>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse flex-shrink-0" />
+            <span className="text-xs font-semibold" style={{ color: '#4ade80' }}>Сейчас идёт</span>
+            <span className="text-xs ml-auto" style={{ color: 'var(--t-muted)' }}>
+              до {currentLesson.time_end}
+            </span>
+          </div>
+          <p className="text-sm font-semibold truncate" style={{ color: 'var(--t-primary)' }}>
+            {currentLesson.subject}
+          </p>
+          {(currentLesson.classroom || currentLesson.room_name) && (
+            <div className="flex items-center gap-1 mt-0.5">
+              <MapPin size={10} style={{ color: 'var(--t-muted)' }} />
+              <span className="text-xs" style={{ color: 'var(--t-muted)' }}>
+                {currentLesson.classroom || currentLesson.room_name}
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* УЛУЧШЕНИЕ: Виджет «следующая пара» — только если нет текущей */}
+      {isToday && entityId && !currentLesson && nextLesson && (
+        <div className="mb-4 px-4 py-3 rounded-xl"
+          style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-xs" style={{ color: 'var(--t-muted)' }}>Следующая пара</span>
+            <span className="text-xs font-mono font-semibold" style={{ color: 'var(--cyan)' }}>
+              в {nextLesson.time_start}
+            </span>
+          </div>
+          <p className="text-sm font-semibold truncate" style={{ color: 'var(--t-primary)' }}>
+            {nextLesson.subject}
+          </p>
         </div>
       )}
 
@@ -380,13 +454,13 @@ function SchedulePageInner() {
           <span className="text-sm text-center" style={{ color: 'var(--t-muted)' }}>
             Введите название группы,<br />преподавателя или аудитории
           </span>
-          {!profileComplete && (
-            <Link href="/profile"
-              className="mt-2 text-xs px-4 py-2 rounded-xl transition-colors hover:bg-white/5"
-              style={{ color: 'var(--cyan)', border: '1px solid rgba(92,225,230,0.3)' }}>
-              Настроить профиль →
-            </Link>
-          )}
+          {/* УЛУЧШЕНИЕ: кнопка настройки профиля всегда видна на пустом экране */}
+          <Link href="/profile"
+            className="mt-2 flex items-center gap-1.5 text-xs px-4 py-2 rounded-xl transition-colors hover:bg-white/5"
+            style={{ color: 'var(--cyan)', border: '1px solid rgba(92,225,230,0.3)' }}>
+            {profileComplete ? 'Изменить профиль' : 'Настроить профиль'}
+            <ChevronRight size={12} />
+          </Link>
         </div>
       ) : (isLoading || isFetching) && !showingCache ? (
         <div className="flex flex-col gap-3">
@@ -419,7 +493,6 @@ function SchedulePageInner() {
   )
 }
 
-// Suspense boundary обязателен для useSearchParams в Next.js 14 App Router
 export default function SchedulePage() {
   return (
     <Suspense fallback={<div className="px-4 lg:px-0 animate-pulse"><div className="h-12 rounded-2xl" style={{ background: 'var(--card)' }} /></div>}>

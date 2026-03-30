@@ -91,6 +91,34 @@ echo "── OpenAI ────────────────────
 ask OPENAI_API_KEY "OpenAI API Key (sk-...)" true
 echo ""
 
+echo "── eCampus интеграция ────────────────────────────────"
+echo "  TWOCAPTCHA_API_KEY — ключ 2captcha.com для авто-решения капчи."
+echo "  Оставьте пустым если не используете авто-капчу (студенты вводят вручную)."
+ask TWOCAPTCHA_API_KEY "2captcha API Key (необязательно)" true
+
+echo ""
+echo "  ECAMPUS_ENCRYPTION_KEY — 64 hex-символа (32 байта) для шифрования"
+echo "  логинов и паролей eCampus в базе данных. ОБЯЗАТЕЛЬНО для безопасности."
+if [[ -z "${C[ECAMPUS_ENCRYPTION_KEY]:-}" ]]; then
+  C["ECAMPUS_ENCRYPTION_KEY"]="$(openssl rand -hex 32)"
+  printf "  ECAMPUS_ENCRYPTION_KEY ✅ сгенерирован автоматически\n"
+else
+  printf "  ECAMPUS_ENCRYPTION_KEY [уже задан]\n"
+fi
+echo ""
+
+echo "── Web-портал ────────────────────────────────────────"
+echo "  WEB_URL — публичный URL веб-портала (используется в NEXT_PUBLIC_API_URL)."
+echo "  Обычно совпадает с WEBHOOK_BASE_URL."
+if [[ -z "${C[WEB_URL]:-}" ]]; then
+  C["WEB_URL"]="${C[WEBHOOK_BASE_URL]:-}"
+  [[ -n "${C[WEB_URL]}" ]] && printf "  WEB_URL ✅ скопирован из WEBHOOK_BASE_URL: %s\n" "${C[WEB_URL]}" \
+                            || ask WEB_URL "Публичный URL веб-портала (https://...)" false
+else
+  printf "  WEB_URL [уже задан: %s]\n" "${C[WEB_URL]}"
+fi
+echo ""
+
 echo "── Авто-генерация ────────────────────────────────────"
 hexsecret JWT_SECRET       "JWT Secret"       32
 hexsecret DASHBOARD_SECRET "Dashboard Secret" 16
@@ -105,8 +133,11 @@ C["SCRAPER_CONCURRENCY"]="${C[SCRAPER_CONCURRENCY]:-5}"
 C["SCRAPE_INTERVAL_HOURS"]="${C[SCRAPE_INTERVAL_HOURS]:-1}"
 C["CORS_ALLOWED_ORIGINS"]="${C[CORS_ALLOWED_ORIGINS]:-${C[WEBHOOK_BASE_URL]:-}}"
 C["SUPPORT_BOT_TOKEN"]="${C[SUPPORT_BOT_TOKEN]:-}"
+C["ADMIN_BOT_TOKEN"]="${C[ADMIN_BOT_TOKEN]:-}"
 C["SUPPORT_ADMIN_CHAT_ID"]="${C[SUPPORT_ADMIN_CHAT_ID]:-0}"
 C["SENTRY_DSN"]="${C[SENTRY_DSN]:-}"
+C["TWOCAPTCHA_API_KEY"]="${C[TWOCAPTCHA_API_KEY]:-}"
+C["WEB_URL"]="${C[WEB_URL]:-${C[WEBHOOK_BASE_URL]:-}}"
 
 cat > "$SECRETS_FILE" << EOF
 # /etc/ncfu/secrets — ТОЛЬКО ROOT — НЕ КОПИРОВАТЬ В GIT
@@ -126,6 +157,7 @@ TELEGRAM_WEBHOOK_SECRET=${C[TELEGRAM_WEBHOOK_SECRET]}
 WEBHOOK_BASE_URL=${C[WEBHOOK_BASE_URL]}
 DOMAIN=${C[DOMAIN]}
 SUPPORT_BOT_TOKEN=${C[SUPPORT_BOT_TOKEN]}
+ADMIN_BOT_TOKEN=${C[ADMIN_BOT_TOKEN]}
 SUPPORT_ADMIN_CHAT_ID=${C[SUPPORT_ADMIN_CHAT_ID]}
 
 OPENAI_API_KEY=${C[OPENAI_API_KEY]}
@@ -140,6 +172,16 @@ CORS_ALLOWED_ORIGINS=${C[CORS_ALLOWED_ORIGINS]}
 BASE_URL=${C[BASE_URL]}
 SCRAPER_CONCURRENCY=${C[SCRAPER_CONCURRENCY]}
 SCRAPE_INTERVAL_HOURS=${C[SCRAPE_INTERVAL_HOURS]}
+
+# ── eCampus ──────────────────────────────────────────────
+# ECAMPUS_ENCRYPTION_KEY: 64 hex-символа для AES-256-GCM шифрования credentials
+ECAMPUS_ENCRYPTION_KEY=${C[ECAMPUS_ENCRYPTION_KEY]}
+# TWOCAPTCHA_API_KEY: ключ для авто-решения капчи (пусто = только ручной ввод)
+TWOCAPTCHA_API_KEY=${C[TWOCAPTCHA_API_KEY]}
+
+# ── Web-портал ───────────────────────────────────────────
+# WEB_URL: публичный URL для NEXT_PUBLIC_API_URL в Next.js
+WEB_URL=${C[WEB_URL]}
 
 SENTRY_DSN=${C[SENTRY_DSN]}
 EOF

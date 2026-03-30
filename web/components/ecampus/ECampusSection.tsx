@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   BookOpen, RefreshCw, Trash2, CheckCircle, AlertCircle,
-  Loader2, ChevronDown, ChevronUp, Eye, EyeOff, Sparkles
+  Loader2, ChevronDown, ChevronUp, Eye, EyeOff, Sparkles, Download
 } from 'lucide-react'
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '') + '/api/ecampus'
@@ -31,8 +31,23 @@ type ConnectStatus =
   | 'solving_captcha'
   | 'connecting'
   | 'success'
-  | 'captcha_failed'   // автокапча не справилась — просим вручную
+  | 'captcha_failed'
   | 'error'
+
+interface SyncStatus {
+  connected:          boolean
+  enabled:            boolean
+  sync_status:        string | null
+  error_msg:          string | null
+  last_sync:          string | null
+  courses_count:      number
+  files_count:        number
+  // Прогресс (добавлено в улучшении)
+  sync_progress:      number
+  sync_done_terms:    number
+  sync_total_terms:   number
+  sync_courses_found: number
+}
 
 interface Props { token: string | null }
 
@@ -50,11 +65,17 @@ export function ECampusSection({ token }: Props) {
   const [errorMsg,    setErrorMsg]    = useState<string | null>(null)
   const qc = useQueryClient()
 
-  const { data: status } = useQuery({
+  // УЛУЧШЕНИЕ: refetchInterval адаптируется к состоянию синхронизации.
+  // Во время синхронизации опрашиваем каждые 2 секунды для live-прогресса.
+  // В остальное время — раз в 30 секунд.
+  const { data: status } = useQuery<SyncStatus>({
     queryKey: ['ecampus-status'],
     queryFn:  () => authedFetch('/status'),
     enabled:  !!token,
-    refetchInterval: (q: any) => q.state.data?.sync_status === 'running' ? 3000 : 30000,
+    refetchInterval: (query) => {
+      const data = query.state.data as SyncStatus | undefined
+      return data?.sync_status === 'running' ? 2000 : 30000
+    },
   })
 
   const { data: syncData } = useQuery({
@@ -69,7 +90,7 @@ export function ECampusSection({ token }: Props) {
     try {
       const data = await authedFetch('/captcha')
       setCaptchaImg(data.image)
-    } catch (e: any) {
+    } catch {
       setErrorMsg('Не удалось загрузить капчу')
     } finally {
       setCaptchaLoad(false)
@@ -78,7 +99,7 @@ export function ECampusSection({ token }: Props) {
 
   useEffect(() => {
     if (showForm && !autoCaptcha && !captchaImg) loadCaptcha()
-  }, [showForm, autoCaptcha])
+  }, [showForm, autoCaptcha]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const syncMutation = useMutation({
     mutationFn: () => authedFetch('/sync', { method: 'POST' }),
@@ -99,7 +120,6 @@ export function ECampusSection({ token }: Props) {
 
     try {
       if (autoCaptcha) {
-        // Автоматически — сервер сам решает капчу
         setConnectStatus('solving_captcha')
         try {
           await authedFetch('/connect', {
@@ -110,14 +130,12 @@ export function ECampusSection({ token }: Props) {
           setShowForm(false); setLogin(''); setPassword('')
           qc.invalidateQueries({ queryKey: ['ecampus-status'] })
         } catch (e: any) {
-          // Капча не решена автоматически — переходим в ручной режим
           setConnectStatus('captcha_failed')
           setAutoCaptcha(false)
           await loadCaptcha()
           setErrorMsg('Не удалось решить капчу автоматически. Введите вручную.')
         }
       } else {
-        // Ручной режим
         if (!captcha) return
         setConnectStatus('connecting')
         await authedFetch('/connect', {
@@ -131,18 +149,16 @@ export function ECampusSection({ token }: Props) {
     } catch (e: any) {
       setConnectStatus('error')
       setErrorMsg(e.message)
-      // Обновляем капчу при ошибке
       if (!autoCaptcha) await loadCaptcha()
     }
   }, [login, password, captcha, autoCaptcha, loadCaptcha, qc])
 
   if (!token) return null
 
-  const isRunning = status?.sync_status === 'running'
-  const isPending = connectStatus === 'solving_captcha' || connectStatus === 'connecting'
-  const canSubmit = login && password && !isPending && (autoCaptcha || captcha)
+  const isRunning  = status?.sync_status === 'running'
+  const isPending  = connectStatus === 'solving_captcha' || connectStatus === 'connecting'
+  const canSubmit  = login && password && !isPending && (autoCaptcha || captcha)
 
-  // Status label
   const statusLabel = {
     idle:            '',
     solving_captcha: 'Решаю капчу...',
@@ -151,6 +167,12 @@ export function ECampusSection({ token }: Props) {
     captcha_failed:  'Введите капчу вручную',
     error:           '',
   }[connectStatus]
+
+  // УЛУЧШЕНИЕ: вычисляем процент прогресса с защитой от деления на ноль
+  const progress    = status?.sync_progress ?? 0
+  const doneTerm    = status?.sync_done_terms ?? 0
+  const totalTerms  = status?.sync_total_terms ?? 0
+  const coursesFound = status?.sync_courses_found ?? 0
 
   return (
     <div className="card px-5 py-4 mb-4">
@@ -170,6 +192,28 @@ export function ECampusSection({ token }: Props) {
           </div>
         )}
       </div>
+
+      {/* УЛУЧШЕНИЕ: Прогресс-бар синхронизации в реальном времени */}
+      {isRunning && (
+        <div className="mb-3">
+          <div className="h-1.5 rounded-full overflow-hidden mb-1.5" style={{ background: 'var(--border)' }}>
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{ width: `${Math.max(5, progress)}%`, background: 'var(--cyan)' }}
+            />
+          </div>
+          <div className="flex justify-between text-[10px]" style={{ color: 'var(--t-muted)' }}>
+            <span>
+              {totalTerms > 0
+                ? `Семестр ${doneTerm} из ${totalTerms}`
+                : 'Начало синхронизации...'}
+            </span>
+            {coursesFound > 0 && (
+              <span>{coursesFound} предметов найдено</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Not connected */}
       {!status?.connected && !showForm && (
@@ -204,7 +248,6 @@ export function ECampusSection({ token }: Props) {
             </button>
           </div>
 
-          {/* Auto captcha toggle */}
           {connectStatus !== 'captcha_failed' && (
             <div className="flex items-center justify-between px-3 py-2.5 rounded-xl"
               style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
@@ -228,7 +271,6 @@ export function ECampusSection({ token }: Props) {
             </div>
           )}
 
-          {/* Manual captcha (shown when auto disabled or failed) */}
           {(!autoCaptcha || connectStatus === 'captcha_failed') && (
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-2">
@@ -251,7 +293,6 @@ export function ECampusSection({ token }: Props) {
             </div>
           )}
 
-          {/* Status indicator */}
           {isPending && statusLabel && (
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg"
               style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
@@ -264,9 +305,7 @@ export function ECampusSection({ token }: Props) {
             <div className="flex items-center gap-2 px-3 py-2 rounded-lg"
               style={{ background: '#fbbf2410', border: '1px solid #fbbf2430' }}>
               <AlertCircle size={13} style={{ color: '#fbbf24' }} />
-              <span className="text-xs" style={{ color: '#fbbf24' }}>
-                Введите капчу вручную и повторите
-              </span>
+              <span className="text-xs" style={{ color: '#fbbf24' }}>Введите капчу вручную и повторите</span>
             </div>
           )}
 
@@ -336,7 +375,7 @@ export function ECampusSection({ token }: Props) {
                   {syncData.courses.map((c: any, i: number) => (
                     <div key={i} className="flex items-center px-3 py-2 rounded-lg"
                       style={{ background: 'var(--surface)' }}>
-                      <p className="text-xs truncate" style={{ color: 'var(--t-primary)' }}>
+                      <p className="text-xs truncate flex-1" style={{ color: 'var(--t-primary)' }}>
                         {c.name || c.Name || `Предмет ${i + 1}`}
                       </p>
                       {c.term_name && (
@@ -349,13 +388,34 @@ export function ECampusSection({ token }: Props) {
             </div>
           )}
 
-          <div className="flex gap-2 pt-1" style={{ borderTop: '1px solid var(--border)' }}>
+          <div className="flex gap-2 pt-1 flex-wrap" style={{ borderTop: '1px solid var(--border)' }}>
             <button onClick={() => syncMutation.mutate()} disabled={isRunning || syncMutation.isPending}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs disabled:opacity-50 hover:bg-white/5"
               style={{ color: 'var(--cyan)', border: '1px solid var(--cyan)33' }}>
               <RefreshCw size={11} className={isRunning ? 'animate-spin' : ''} />
               Обновить
             </button>
+            {/* УЛУЧШЕНИЕ: кнопка экспорта .ics */}
+            {status.sync_status === 'ok' && (
+              <a
+                href="#"
+                onClick={async (e) => {
+                  e.preventDefault()
+                  // Получаем group_id из профиля если есть
+                  const { useScheduleStore } = await import('@/lib/store')
+                  const store = useScheduleStore.getState()
+                  const gid = store.profile?.groupId
+                  if (!gid) return
+                  const base = process.env.NEXT_PUBLIC_API_URL || ''
+                  window.location.href = `${base}/api/schedules/group/${gid}/export.ics?weeks=8`
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs hover:bg-white/5"
+                style={{ color: 'var(--t-secondary)', border: '1px solid var(--border)' }}
+              >
+                <Download size={11} />
+                .ics
+              </a>
+            )}
             <button onClick={() => { if (confirm('Удалить данные eCampus?')) disconnectMutation.mutate() }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs hover:bg-white/5"
               style={{ color: '#ef4444', border: '1px solid #ef444430' }}>
