@@ -1,0 +1,10 @@
+# Авто-сгенерирован _ensure_infra — не редактировать вручную
+
+networks:
+  ncfu_net:
+    name: ncfu_network
+    external: true
+volumes:
+  mongo_data:
+    name: ncfu_mongo_data
+    external: true

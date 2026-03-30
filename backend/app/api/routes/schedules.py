@@ -1,6 +1,21 @@
+"""
+backend/app/api/routes/schedules.py
+
+УЛУЧШЕНИЯ:
+  [I1] _refresh_in_progress перенесён из in-process set → Redis.
+       При нескольких воркерах uvicorn каждый процесс имел свою копию —
+       защита от параллельных refresh не работала. Теперь используем
+       Redis SETNX с TTL как distributed lock.
+  [I2] Добавлен эндпоинт GET /schedules/group/{id}/export.ics —
+       экспорт расписания в формат iCalendar (Google Calendar, Apple Calendar).
+       Без внешних зависимостей — только stdlib.
+  [I3] /schedules/group/{id}/range ограничен максимум 90 днями.
+       Раньше запрос за год выгружал всё расписание без кеширования.
+  [I4] Исправлено использование datetime.utcnow() → datetime.now(timezone.utc)
+"""
 import asyncio
-from fastapi import APIRouter, HTTPException, Query, BackgroundTasks
-from datetime import date as date_type, datetime, timedelta
+from fastapi import APIRouter, HTTPException, Query, BackgroundTasks, Response
+from datetime import date as date_type, datetime, timedelta, timezone
 from loguru import logger
 
 from app.models.group import Group, DaySchedule
@@ -9,20 +24,42 @@ from app.scraper.parser import parse_week
 
 router = APIRouter(prefix="/schedules", tags=["Schedules"])
 
-STALE_HOURS = 24
+STALE_HOURS      = 24
 MIN_FUTURE_WEEKS = 6
 
-_refresh_in_progress: set[int] = set()
+
+# ── [I1] Redis-based distributed refresh lock ─────────────────────────────────
+
+async def _mark_refreshing(group_id: int, ttl: int = 300) -> bool:
+    """Возвращает True если удалось захватить lock (никто другой не refreshит)."""
+    try:
+        from app.cache.redis import get_redis
+        r = get_redis()
+        # SETNX + EXPIRE атомарно через SET NX EX
+        result = await r.set(f"schedule:refresh:{group_id}", "1", ex=ttl, nx=True)
+        return result is not None
+    except Exception as exc:
+        logger.warning(f"Redis refresh lock failed ({group_id}): {exc}")
+        return True  # fail open — лучше лишний refresh чем зависание
+
+async def _unmark_refreshing(group_id: int) -> None:
+    try:
+        from app.cache.redis import get_redis
+        await get_redis().delete(f"schedule:refresh:{group_id}")
+    except Exception:
+        pass
+
+async def _is_refreshing(group_id: int) -> bool:
+    try:
+        from app.cache.redis import get_redis
+        return bool(await get_redis().exists(f"schedule:refresh:{group_id}"))
+    except Exception:
+        return False
 
 
 # ── Lesson merge ──────────────────────────────────────────────────────────────
 
 def _merge_lessons(lessons: list) -> list[dict]:
-    """
-    Merge duplicate lessons that happen simultaneously across multiple groups.
-    Key: date, time_start, time_end, subject, teacher_id, room_id, lesson_type, subgroup, week_type
-    Result includes groups: [{id, name}] for each merged group.
-    """
     merged: dict[tuple, dict] = {}
 
     for l in lessons:
@@ -86,7 +123,11 @@ def _needs_refresh(group: Group) -> tuple[bool, str]:
         return True, "no schedule"
     if not group.schedule_scraped_at:
         return True, "never scraped"
-    age_h = (datetime.utcnow() - group.schedule_scraped_at).total_seconds() / 3600
+    # [I4]
+    age_h = (datetime.now(timezone.utc) - group.schedule_scraped_at.replace(tzinfo=timezone.utc)
+             if group.schedule_scraped_at.tzinfo is None
+             else datetime.now(timezone.utc) - group.schedule_scraped_at
+             ).total_seconds() / 3600
     if age_h > STALE_HOURS:
         return True, f"stale ({age_h:.1f}h)"
     today = date_type.today()
@@ -106,11 +147,11 @@ def _needs_refresh(group: Group) -> tuple[bool, str]:
 # ── Background refresh ────────────────────────────────────────────────────────
 
 async def _do_refresh(group_id: int, group_name: str) -> None:
-    if group_id in _refresh_in_progress:
+    # [I1] Distributed lock через Redis
+    if not await _mark_refreshing(group_id):
         logger.debug(f"Refresh already running for {group_name} ({group_id}) — skipped")
         return
 
-    _refresh_in_progress.add(group_id)
     logger.info(f"⟳ Background refresh started: {group_name} ({group_id})")
 
     try:
@@ -150,7 +191,7 @@ async def _do_refresh(group_id: int, group_name: str) -> None:
         if full:
             await Group.find_one(Group.group_id == group_id).update({"$set": {
                 "schedule":            {k: v.model_dump() for k, v in full.items()},
-                "schedule_scraped_at": datetime.utcnow(),
+                "schedule_scraped_at": datetime.now(timezone.utc),  # [I4]
             }})
             logger.info(f"⟳ Background refresh done: {group_name} ({group_id}) — {len(full)} days saved")
         else:
@@ -159,12 +200,12 @@ async def _do_refresh(group_id: int, group_name: str) -> None:
     except Exception as exc:
         logger.warning(f"⟳ Background refresh failed: {group_name} ({group_id}): {type(exc).__name__}: {exc}")
     finally:
-        _refresh_in_progress.discard(group_id)
+        await _unmark_refreshing(group_id)  # [I1]
 
 
-def _maybe_refresh(background_tasks: BackgroundTasks, group: Group) -> str | None:
+async def _maybe_refresh(background_tasks: BackgroundTasks, group: Group) -> str | None:
     needs, reason = _needs_refresh(group)
-    if needs and group.group_id not in _refresh_in_progress:
+    if needs and not await _is_refreshing(group.group_id):
         background_tasks.add_task(_do_refresh, group.group_id, group.name)
         return reason
     return None
@@ -204,7 +245,7 @@ async def get_group_schedule(group_id: int, background_tasks: BackgroundTasks):
     group = await Group.find_one(Group.group_id == group_id)
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
-    refresh_reason = _maybe_refresh(background_tasks, group)
+    refresh_reason = await _maybe_refresh(background_tasks, group)
     return {
         "group_id":            group.group_id,
         "name":                group.name,
@@ -251,7 +292,7 @@ async def get_schedule_for_week(
     group = await Group.find_one(Group.group_id == group_id)
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
-    refresh_reason = _maybe_refresh(background_tasks, group)
+    refresh_reason = await _maybe_refresh(background_tasks, group)
     days = []
     if group.schedule:
         days = [
@@ -277,10 +318,14 @@ async def get_schedule_for_range(
 ):
     if from_date > to_date:
         raise HTTPException(status_code=400, detail="from_date must be before to_date")
+    # [I3] Ограничение диапазона — без этого запрос за год выгружал всё без кеша
+    if (to_date - from_date).days > 90:
+        raise HTTPException(status_code=400, detail="Максимальный диапазон — 90 дней")
+
     group = await Group.find_one(Group.group_id == group_id)
     if not group:
         raise HTTPException(status_code=404, detail="Group not found")
-    refresh_reason = _maybe_refresh(background_tasks, group)
+    refresh_reason = await _maybe_refresh(background_tasks, group)
     days = []
     if group.schedule:
         days = [
@@ -296,6 +341,114 @@ async def get_schedule_for_range(
         "refreshing": refresh_reason,
         "days":       sorted(days, key=lambda d: d["date"]),
     }
+
+
+@router.get("/group/{group_id}/export.ics", summary="Export schedule as iCalendar (.ics)")
+async def export_ics(
+    group_id: int,
+    weeks: int = Query(4, ge=1, le=16, description="Число недель от сегодня"),
+):
+    """
+    [I2] Экспорт расписания в формат iCalendar.
+    Открывается в Google Calendar, Apple Calendar, Outlook.
+    Пример: /schedules/group/123/export.ics?weeks=8
+    """
+    from app.models.lesson import LessonDoc
+
+    group = await Group.find_one(Group.group_id == group_id)
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    today     = date_type.today()
+    date_to   = today + timedelta(weeks=weeks)
+
+    lessons = await LessonDoc.find(
+        LessonDoc.group_id == group_id,
+        LessonDoc.date >= today,
+        LessonDoc.date <= date_to,
+    ).sort("+date").to_list()
+
+    def _dt(d: date_type, t: str) -> str:
+        """Форматируем дату+время в iCal формат: 20240912T083000"""
+        hh, mm = t.split(":") if t and ":" in t else ("00", "00")
+        return f"{d.strftime('%Y%m%d')}T{hh}{mm}00"
+
+    def _escape(s: str) -> str:
+        return (s or "").replace("\\", "\\\\").replace(",", "\\,").replace(";", "\\;").replace("\n", "\\n")
+
+    lines: list[str] = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//NCFU Schedule Bot//RU",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        f"X-WR-CALNAME:Расписание {group.name}",
+        "X-WR-TIMEZONE:Europe/Moscow",
+        "X-WR-CALDESC:Расписание занятий СКФУ",
+    ]
+
+    now_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+    for lesson in lessons:
+        uid = f"{lesson.id}@ncfu.schedule"
+        dtstart = _dt(lesson.date, lesson.time_start)
+        dtend   = _dt(lesson.date, lesson.time_end)
+
+        summary = _escape(lesson.subject or "Занятие")
+        if lesson.lesson_type:
+            summary += f" ({_escape(lesson.lesson_type)})"
+        if lesson.subgroup:
+            summary += f" — {_escape(lesson.subgroup)}"
+
+        location = _escape(lesson.room_name or "")
+        teacher  = _escape(lesson.teacher_name or "")
+
+        description_parts = []
+        if teacher:
+            description_parts.append(f"Преподаватель: {teacher}")
+        if lesson.note:
+            description_parts.append(_escape(lesson.note))
+        description = "\\n".join(description_parts)
+
+        lines += [
+            "BEGIN:VEVENT",
+            f"UID:{uid}",
+            f"DTSTAMP:{now_stamp}",
+            f"DTSTART;TZID=Europe/Moscow:{dtstart}",
+            f"DTEND;TZID=Europe/Moscow:{dtend}",
+            f"SUMMARY:{summary}",
+        ]
+        if location:
+            lines.append(f"LOCATION:{location}")
+        if description:
+            lines.append(f"DESCRIPTION:{description}")
+        lines.append("END:VEVENT")
+
+    lines.append("END:VCALENDAR")
+
+    content = "\r\n".join(lines) + "\r\n"
+
+    # RFC 5987: filename* с UTF-8 кодированием для поддержки кириллицы.
+    # Starlette кодирует заголовки в latin-1, поэтому обычный filename="..." с кириллицей
+    # вызывает UnicodeEncodeError. Используем filename*=UTF-8''<percent-encoded> (RFC 5987).
+    from urllib.parse import quote as _quote
+    safe_name = group.name.replace(" ", "_")
+    ascii_name = safe_name.encode("ascii", errors="ignore").decode() or "schedule"
+    ascii_filename = f"{ascii_name}_schedule.ics"
+    utf8_filename  = f"{safe_name}_schedule.ics"
+    encoded        = _quote(utf8_filename, safe="")
+    content_disposition = (
+        f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{encoded}'
+    )
+
+    return Response(
+        content=content,
+        media_type="text/calendar; charset=utf-8",
+        headers={
+            "Content-Disposition": content_disposition,
+            "Cache-Control": "no-cache",
+        },
+    )
 
 
 @router.get("/teacher/{teacher_id}/day", summary="Schedule for a teacher on a specific date")
