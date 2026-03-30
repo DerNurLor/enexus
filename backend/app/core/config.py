@@ -81,6 +81,7 @@ class Settings(BaseSettings):
     auth_mongo_db:  str       = "ncfu_auth"
     # [V1] No insecure plaintext default. Generate with: openssl rand -hex 64
     jwt_secret:     SecretStr = SecretStr("")
+    twocaptcha_api_key: str = ""
     jwt_algorithm:  str       = "HS256"
 
     # Static

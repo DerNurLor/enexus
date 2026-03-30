@@ -71,6 +71,7 @@ class ECampusClient:
         self.login_str     = login
         self.password      = password
         self.captcha_key   = captcha_api_key
+        self._manual_captcha: str | None = None
         self._client: httpx.AsyncClient | None = None
         self._cookies      = session_cookies or {}
         self._csrf_token   = ""
@@ -124,7 +125,8 @@ class ECampusClient:
         form_data = {
             "Login":                       self.login_str,
             "Password":                    self.password,
-            "CaptchaCode":                 captcha_text,
+            "Code":                        captcha_text,
+            "RememberMe":                  "true",
             "__RequestVerificationToken":  self._csrf_token,
         }
 

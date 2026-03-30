@@ -23,15 +23,3 @@ async def connect_db() -> None:
         document_models=[LessonDoc, Institute, Group, Teacher, Room, ScrapeLog, ECampusSyncRecord],
     )
     logger.info("MongoDB ready.")
-
-
-async def close_db() -> None:
-    global _client
-    if _client:
-        _client.close()
-        logger.info("MongoDB closed.")
-
-
-def get_motor_db():
-    assert _client is not None
-    return _client.get_database(settings.mongo_db)
