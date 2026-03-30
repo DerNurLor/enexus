@@ -1,4 +1,18 @@
+"""
+backend/app/scheduler/scheduler.py
+
+ИСПРАВЛЕНИЯ:
+  [F1] asyncio.get_event_loop() deprecated в Python 3.10+ и выбрасывает DeprecationWarning,
+       а в Python 3.12 в не-async контексте выбрасывает RuntimeError.
+       Заменено на asyncio.get_running_loop() + loop.call_later().
+  [F2] datetime.utcnow() в _run_cleanup() заменён на datetime.now(timezone.utc) —
+       utcnow() deprecated и создаёт naive datetime, что ломает сравнение с Beanie-документами
+       у которых timezone-aware timestamps (после исправления models.py).
+  [F3] import asyncio внутри start_ecampus_worker() был избыточным (уже импортирован вверху).
+"""
 import asyncio
+from datetime import datetime, timezone, timedelta
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.triggers.cron import CronTrigger
@@ -20,7 +34,6 @@ def setup_scheduler() -> None:
         misfire_grace_time=600,
     )
 
-    # Cleanup old activity logs every day at settings.cleanup_hour_utc UTC
     _scheduler.add_job(
         _run_cleanup,
         CronTrigger(hour=settings.cleanup_hour_utc, minute=0, timezone="UTC"),
@@ -38,9 +51,16 @@ def setup_scheduler() -> None:
         replace_existing=True,
         misfire_grace_time=3600,
     )
+
     _scheduler.start()
-    logger.info(f"Scheduler started — scrape every {settings.scrape_interval_hours}h, cleanup at {settings.cleanup_hour_utc}:00 UTC")
-    loop = asyncio.get_event_loop()
+    logger.info(
+        f"Scheduler started — scrape every {settings.scrape_interval_hours}h, "
+        f"cleanup at {settings.cleanup_hour_utc}:00 UTC"
+    )
+
+    # [F1] Используем get_running_loop() — мы находимся внутри async lifespan,
+    #      поэтому event loop уже запущен и get_running_loop() безопасен.
+    loop = asyncio.get_running_loop()
     loop.call_later(5, lambda: asyncio.ensure_future(_run_scrape()))
     logger.info("First scrape in 5s.")
 
@@ -63,13 +83,13 @@ async def _run_scrape() -> None:
 
 
 async def _run_cleanup() -> None:
-    """Delete AuthActivityLog and AuthErrorLog documents older than settings.activity_log_ttl_days."""
+    """Delete AuthActivityLog and AuthErrorLog documents older than activity_log_ttl_days."""
     logger.info(f"Log cleanup job triggered (TTL={settings.activity_log_ttl_days}d)")
     try:
-        from datetime import datetime, timedelta
         from app.auth.models import AuthActivityLog, AuthErrorLog
 
-        cutoff = datetime.utcnow() - timedelta(days=settings.activity_log_ttl_days)
+        # [F2] timezone-aware datetime вместо deprecated naive utcnow()
+        cutoff = datetime.now(timezone.utc) - timedelta(days=settings.activity_log_ttl_days)
 
         result_a = await AuthActivityLog.find(
             AuthActivityLog.timestamp < cutoff
@@ -85,8 +105,11 @@ async def _run_cleanup() -> None:
         from app.core.activity import log_activity
         log_activity(
             "scheduler.log_cleanup",
-            details={"deleted_activity": deleted_a, "deleted_errors": deleted_e,
-                     "cutoff_days": settings.activity_log_ttl_days},
+            details={
+                "deleted_activity": deleted_a,
+                "deleted_errors": deleted_e,
+                "cutoff_days": settings.activity_log_ttl_days,
+            },
         )
     except Exception as exc:
         logger.error(f"Log cleanup job crashed: {exc}")
@@ -104,7 +127,7 @@ async def _run_ecampus_sync() -> None:
 
 async def start_ecampus_worker() -> None:
     """Запускает воркер очереди задач eCampus."""
-    import asyncio
+    # [F3] Убран лишний import asyncio внутри функции — уже импортирован вверху
     from app.ecampus.queue import get_queue
     from app.ecampus.sync_service import task_handler
     logger.info("Starting eCampus queue worker...")

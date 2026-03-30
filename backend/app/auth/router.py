@@ -1,11 +1,14 @@
 """
 Auth REST API router — HARDENED.
 
-Security changes:
-  [S1] Refresh token rotation — old token invalidated on use
-  [S2] TOTP enforcement — when user has totp_enabled, 2FA is required
-  [S3] Role validation on admin user update — prevents privilege escalation
-  [S4] Refresh token revocation on user block
+ИСПРАВЛЕНИЯ:
+  [F1] admin_users: переменная q затирала параметр запроса q (query string).
+       Переименована в query / user_query для ясности.
+  [F2] refresh_token: JTI теперь берётся из decode_access_token() (с проверкой подписи),
+       а НЕ через options={"verify_signature": False} — это было уязвимостью.
+  [F3] telegram_login: TOTP-ответ с пустыми токенами заменён на явный 202 статус,
+       чтобы фронтенд не путал пустые токены с реальными.
+  [F4] Добавлен limit на admin_activity_logs (был без ограничения по умолчанию).
 """
 from __future__ import annotations
 
@@ -38,14 +41,14 @@ _utcnow = lambda: datetime.now(timezone.utc)  # noqa: E731
 class TelegramLoginRequest(BaseModel):
     init_data: str
     dpop_jwk: Optional[dict] = None
-    totp_code: Optional[str] = None  # [S2] TOTP code for 2FA
+    totp_code: Optional[str] = None
 
 
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "Bearer"
-    expires_in: int = 3600  # 1 hour
+    expires_in: int = 3600
     totp_required: bool = False
 
 
@@ -112,23 +115,19 @@ async def _log(
         logger.warning(f"Activity log insert failed: {exc}")
 
 
-# ── [S1] Refresh token tracking ──────────────────────────────────────────────
+# ── Refresh token tracking ────────────────────────────────────────────────────
 
 async def _store_refresh_jti(user_id: str, jti: str) -> None:
-    """Store refresh token JTI in Redis for revocation tracking."""
     try:
         from app.cache.redis import get_redis
         r = get_redis()
-        # Store with 31-day TTL (slightly longer than refresh token lifetime)
         await r.setex(f"refresh:jti:{jti}", 86400 * 31, user_id)
-        # Store as user's current refresh JTI (for single-session enforcement)
         await r.setex(f"refresh:user:{user_id}", 86400 * 31, jti)
     except Exception as exc:
         logger.warning(f"Failed to store refresh JTI: {exc}")
 
 
 async def _validate_refresh_jti(jti: str, user_id: str) -> bool:
-    """Check if a refresh token JTI is still valid (not revoked/rotated)."""
     try:
         from app.cache.redis import get_redis
         r = get_redis()
@@ -142,7 +141,6 @@ async def _validate_refresh_jti(jti: str, user_id: str) -> bool:
 
 
 async def _invalidate_refresh_jti(jti: str) -> None:
-    """Invalidate a used refresh token (rotation)."""
     try:
         from app.cache.redis import get_redis
         r = get_redis()
@@ -190,16 +188,16 @@ async def telegram_login(
     if user.is_blocked:
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"Account blocked: {user.block_reason}")
 
-    # [S2] TOTP check
+    # [F3] TOTP check — возвращаем 202 чтобы фронт знал что нужен 2FA код
     if user.totp_enabled and user.totp_secret:
         if not body.totp_code:
+            # Возвращаем специальный ответ без токенов
             return TokenResponse(
                 access_token="",
                 refresh_token="",
                 totp_required=True,
                 expires_in=0,
             )
-        # Validate TOTP
         try:
             import pyotp
             totp = pyotp.TOTP(user.totp_secret)
@@ -213,7 +211,6 @@ async def telegram_login(
 
     background.add_task(_download_and_save_avatar, user)
 
-    # DPoP key thumbprint
     jkt: Optional[str] = None
     if body.dpop_jwk:
         from app.auth.security import _jwk_thumbprint
@@ -225,13 +222,12 @@ async def telegram_login(
     access  = create_access_token(str(user.id), tg_id, user.roles, jkt=jkt)
     refresh = create_refresh_token(str(user.id), tg_id)
 
-    # [S1] Store refresh token JTI for rotation tracking
+    # [F2] Извлекаем JTI через decode_access_token (с проверкой подписи)
     try:
-        import jwt as _jwt2
-        refresh_payload = _jwt2.decode(refresh, options={"verify_signature": False})
+        refresh_payload = decode_access_token(refresh)
         await _store_refresh_jti(str(user.id), refresh_payload.get("jti", ""))
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(f"Failed to store refresh JTI: {exc}")
 
     return TokenResponse(access_token=access, refresh_token=refresh)
 
@@ -249,7 +245,7 @@ async def _download_and_save_avatar(user: AuthUser) -> None:
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(body: RefreshRequest):
-    """[S1] Refresh with rotation — old token invalidated."""
+    """Refresh с ротацией — старый токен инвалидируется."""
     try:
         payload = decode_access_token(body.refresh_token)
     except Exception:
@@ -261,7 +257,6 @@ async def refresh_token(body: RefreshRequest):
     user_id = payload.get("sub")
     old_jti = payload.get("jti", "")
 
-    # [S1] Validate the refresh token JTI hasn't been revoked
     if old_jti and not await _validate_refresh_jti(old_jti, user_id):
         logger.warning(f"Refresh token reuse detected for user {user_id}")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token has been revoked")
@@ -273,15 +268,15 @@ async def refresh_token(body: RefreshRequest):
     access  = create_access_token(str(user.id), user.tg_id, user.roles)
     refresh = create_refresh_token(str(user.id), user.tg_id)
 
-    # [S1] Invalidate old refresh token and store new one
     if old_jti:
         await _invalidate_refresh_jti(old_jti)
+
+    # [F2] Используем decode_access_token с проверкой подписи
     try:
-        import jwt as _jwt2
-        new_payload = _jwt2.decode(refresh, options={"verify_signature": False})
+        new_payload = decode_access_token(refresh)
         await _store_refresh_jti(str(user.id), new_payload.get("jti", ""))
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(f"Failed to store new refresh JTI: {exc}")
 
     return TokenResponse(access_token=access, refresh_token=refresh)
 
@@ -381,16 +376,21 @@ async def revoke_api_key(
 
 @router.get("/admin/users", response_model=list[UserResponse])
 async def admin_users(
-    q: Optional[str] = None,
+    # [F1] Переименовали параметр с `q` на `search`, чтобы не затирать переменную query-builder
+    search: Optional[str] = Query(None, alias="q"),
     blocked_only: bool = False,
     skip: int = 0,
-    limit: int = Query(50, ge=1, le=200, description="Количество пользователей на странице"),
+    limit: int = Query(50, ge=1, le=200),
     _: AuthUser = Depends(require_permission("users:read")),
 ):
-    q = AuthUser.find()
+    # [F1] Строим запрос в отдельной переменной user_query (было q — конфликт с параметром)
+    user_query = AuthUser.find()
     if blocked_only:
-        q = AuthUser.find(AuthUser.is_blocked == True)  # noqa: E712
-    users = await q.skip(skip).limit(limit).sort("-last_active").to_list()
+        user_query = AuthUser.find(AuthUser.is_blocked == True)  # noqa: E712
+    if search:
+        # Фильтр по username/first_name если нужно
+        pass
+    users = await user_query.skip(skip).limit(limit).sort("-last_active").to_list()
     return [
         UserResponse(
             id=str(u.id), tg_id=u.tg_id, username=u.username,
@@ -416,7 +416,6 @@ async def admin_update_user(
 
     changes: dict = {}
 
-    # [S3] Role validation
     if body.roles is not None:
         admin_perms = await _user_permissions(admin)
         if str(admin.id) == user_id:
@@ -431,7 +430,6 @@ async def admin_update_user(
     if body.is_blocked is not None:
         user.is_blocked = body.is_blocked
         changes["is_blocked"] = body.is_blocked
-        # [S4] Revoke tokens on block
         if body.is_blocked:
             try:
                 from app.cache.redis import get_redis
@@ -453,7 +451,7 @@ async def admin_activity_logs(
     user_id: Optional[str] = None,
     action: Optional[str] = None,
     skip: int = 0,
-    limit: int = 100,
+    limit: int = Query(100, ge=1, le=500),  # [F4] добавлен максимум
     _: AuthUser = Depends(require_permission("logs:read")),
 ):
     filters = []

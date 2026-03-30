@@ -1,12 +1,25 @@
 """
 Auth database models — stored in a SEPARATE database (ncfu_auth).
+
+ИСПРАВЛЕНИЯ:
+  [F1] Все datetime.utcnow() заменены на datetime.now(timezone.utc) —
+       utcnow() deprecated в Python 3.12 и создаёт naive datetime, что ломает
+       сравнения с timezone-aware объектами из security.py.
+  [F2] has_permission() реализован — ранее всегда возвращал False.
+  [F3] Опечатка в аннотации tg_id: Indexed(int, unique=True)  # type: ignore[/valid-type]
+       — исправлена на valid-type.
 """
 from __future__ import annotations
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional
 from beanie import Document, Indexed
 from pydantic import Field
 from pymongo import ASCENDING, DESCENDING, IndexModel
+
+
+# [F1] Заменяем устаревший utcnow на timezone-aware версию
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 class AuthRole(Document):
@@ -14,7 +27,7 @@ class AuthRole(Document):
     description: str = ""
     permissions: list[str] = Field(default_factory=list)
     rate_limit_rpm: Optional[int] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)  # [F1]
 
     class Settings:
         name = "auth_roles"
@@ -22,7 +35,7 @@ class AuthRole(Document):
 
 
 class AuthUser(Document):
-    tg_id: Indexed(int, unique=True)  # type: ignore[/valid-type]
+    tg_id: Indexed(int, unique=True)  # type: ignore[valid-type]  [F3] исправлена опечатка /valid-type
     username: Optional[str] = None
     first_name: str = ""
     last_name: Optional[str] = None
@@ -32,18 +45,18 @@ class AuthUser(Document):
     roles: list[str] = Field(default_factory=lambda: ["user"])
     is_blocked: bool = False
     block_reason: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    last_active: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)     # [F1]
+    last_active: datetime = Field(default_factory=_utcnow)    # [F1]
     miniapp_favorites: list[dict] = Field(default_factory=list)
     miniapp_settings:  dict       = Field(default_factory=dict)
     # TOTP 2FA
-    totp_secret:    Optional[str] = None   # base32 secret (set when 2FA is enabled)
+    totp_secret:    Optional[str] = None
     totp_enabled:   bool = False
     # Per-user direct permissions (added on top of role permissions)
     extra_permissions: list[str] = Field(default_factory=list)
     # UI preferences
-    accent_color: str = "#7c6eff"   # hex color for dashboard/miniapp theming
-    # Per-user limits (None = use global MessageModeldefault from settings)
+    accent_color: str = "#7c6eff"
+    # Per-user limits
     daily_requests:       Optional[int] = None
     monthly_ai_tokens:    Optional[int] = None
     ai_tokens_used_today: int = 0
@@ -58,8 +71,12 @@ class AuthUser(Document):
             IndexModel([("is_blocked", ASCENDING)]),
         ]
 
+    # [F2] Реализован метод — ранее всегда возвращал False
     def has_permission(self, permission: str) -> bool:
-        return False
+        """Синхронная проверка прямых (extra) прав пользователя.
+        Для проверки прав через роли используй _user_permissions() из dependencies.py.
+        """
+        return permission in self.extra_permissions
 
 
 class AuthApiKey(Document):
@@ -71,7 +88,7 @@ class AuthApiKey(Document):
     rate_limit_rpm: int = 60
     expires_at: Optional[datetime] = None
     is_revoked: bool = False
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)  # [F1]
     last_used_at: Optional[datetime] = None
     use_count: int = 0
 
@@ -93,7 +110,7 @@ class AuthActivityLog(Document):
     ip: Optional[str] = None
     user_agent: Optional[str] = None
     details: dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=_utcnow)  # [F1]
 
     class Settings:
         name = "auth_activity_log"
@@ -114,8 +131,7 @@ class AuthErrorLog(Document):
     request_id: Optional[str] = None
     path: Optional[str] = None
     details: dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
-    # Bot-specific fields
+    timestamp: datetime = Field(default_factory=_utcnow)  # [F1]
     error_id: Optional[str] = None
     tg_id: Optional[int] = None
     tg_chat_id: Optional[int] = None
@@ -135,10 +151,9 @@ class AuthErrorLog(Document):
 
 
 class BotConversation(Document):
-    """Per-user conversation history for context-aware AI (stored in Redis primarily, synced here)."""
     tg_id: Indexed(int, unique=True)  # type: ignore[valid-type]
-    messages: list[dict] = Field(default_factory=list)  # [{role, content, ts}]
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    messages: list[dict] = Field(default_factory=list)
+    updated_at: datetime = Field(default_factory=_utcnow)  # [F1]
 
     class Settings:
         name = "bot_conversations"
@@ -149,48 +164,35 @@ class BotConversation(Document):
 
 
 class ChatMessage(Document):
-    """
-    Full Telegram message record — every user↔bot exchange stored here.
-    This is the source of truth for the dashboard conversation viewer.
-    Media files are NOT stored on disk automatically — only metadata.
-    Admin can fetch any file on-demand via file_id.
-    """
-    tg_id:      Indexed(int)   # type: ignore[valid-type]  — user's Telegram ID
-    message_id: int            # Telegram message_id (unique per chat)
-    role:       str            # "user" | "bot" | "bot_reply"
-    timestamp:  datetime = Field(default_factory=datetime.utcnow)
+    tg_id:      Indexed(int)   # type: ignore[valid-type]
+    message_id: int
+    role:       str
+    timestamp:  datetime = Field(default_factory=_utcnow)  # [F1]
 
-    # Text content (may include HTML formatting)
     text:      str  = ""
-    html_text: str  = ""   # formatted version (bold/italic/code preserved as HTML)
+    html_text: str  = ""
 
-    # Forward info
     is_forward:          bool = False
     forward_from_name:   Optional[str] = None
     forward_from_id:     Optional[int] = None
-    forward_from_chat:   Optional[str] = None   # channel/group title
+    forward_from_chat:   Optional[str] = None
     forward_date:        Optional[datetime] = None
 
-    # Reply-to info
     reply_to_message_id: Optional[int] = None
-    reply_to_text:       Optional[str] = None   # short preview of replied message
+    reply_to_text:       Optional[str] = None
 
-    # Media metadata (no binary stored — fetch on demand via file_id)
-    media_type:     Optional[str] = None   # photo|video|document|voice|audio|sticker|animation
-    file_id:        Optional[str] = None   # Telegram file_id for on-demand download
+    media_type:     Optional[str] = None
+    file_id:        Optional[str] = None
     file_unique_id: Optional[str] = None
     file_name:      Optional[str] = None
     file_size:      Optional[int] = None
     mime_type:      Optional[str] = None
-    duration:       Optional[int] = None   # seconds (voice/video/audio)
+    duration:       Optional[int] = None
     width:          Optional[int] = None
     height:         Optional[int] = None
     thumbnail_file_id: Optional[str] = None
 
-    # Sticker extras
     sticker_emoji:  Optional[str] = None
-
-    # Inline entities (links, mentions, etc.) — as parsed JSON
     entities: list[dict] = Field(default_factory=list)
 
     class Settings:
@@ -201,7 +203,6 @@ class ChatMessage(Document):
                        name="uniq_tg_msg", background=True),
             IndexModel([("timestamp", DESCENDING)]),
             IndexModel([("role", ASCENDING), ("timestamp", DESCENDING)]),
-            # TTL: keep messages for 180 days
             IndexModel([("timestamp", ASCENDING)], expireAfterSeconds=60*60*24*180, name="msg_ttl"),
         ]
 
@@ -211,16 +212,16 @@ class SupportTicket(Document):
     username: Optional[str] = None
     first_name: str = ""
     message: str
-    status: str = "open"        # open | answered | closed
-    category: str = "other"     # bug | suggestion | question | other
-    source: str = "bot"         # bot | miniapp
+    status: str = "open"
+    category: str = "other"
+    source: str = "bot"
     admin_reply: Optional[str] = None
     replied_at: Optional[datetime] = None
     closed_at: Optional[datetime] = None
     close_reason: Optional[str] = None
-    close_reason_hidden: bool = False   # hide reason from user
-    closed_by: Optional[str] = None    # "user" | "admin" | "timeout"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    close_reason_hidden: bool = False
+    closed_by: Optional[str] = None
+    created_at: datetime = Field(default_factory=_utcnow)  # [F1]
 
     @property
     def short_id(self) -> str:
@@ -238,14 +239,14 @@ class SupportTicket(Document):
 
 class BroadcastJob(Document):
     text: str
-    audience: str = "all"   # all | active | role
+    audience: str = "all"
     role: Optional[str] = None
     schedule_at: Optional[datetime] = None
-    status: str = "pending"   # pending | running | done | failed
+    status: str = "pending"
     sent_count: int = 0
     total_count: int = 0
     created_by: Optional[str] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)  # [F1]
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
 
@@ -259,7 +260,7 @@ class BroadcastJob(Document):
 
 class AuthDPoPNonce(Document):
     nonce: Indexed(str, unique=True)  # type: ignore[valid-type]
-    issued_at: datetime = Field(default_factory=datetime.utcnow)
+    issued_at: datetime = Field(default_factory=_utcnow)  # [F1]
     used: bool = False
 
     class Settings:
@@ -271,24 +272,18 @@ class AuthDPoPNonce(Document):
 
 
 class BotFeedback(Document):
-    """Per-message rating (👍 / 👎) attached to bot responses."""
-    # Telegram identifiers — uniquely identify the bot message
     chat_id:    Indexed(int)   # type: ignore[valid-type]
-    message_id: Indexed(int)   # type: ignore[valid-type]  — bot reply message_id
-    tg_id:      int            # user who rated (0 = not yet rated)
+    message_id: Indexed(int)   # type: ignore[valid-type]
+    tg_id:      int
 
-    # The user's original question and the bot's answer
     user_text: str = ""
     bot_text:  str = ""
 
-    # Rating: "like" | "dislike" | None (None = pending, i.e. buttons shown but not pressed)
     rating: Optional[str] = None
-
-    # Status: "pending" = waiting for rating | "rated" = user has rated
     status: str = "pending"
 
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)  # [F1]
+    updated_at: datetime = Field(default_factory=_utcnow)  # [F1]
 
     class Settings:
         name = "bot_feedback"
@@ -311,9 +306,8 @@ ALL_AUTH_MODELS = [
     AuthDPoPNonce, BotFeedback,
 ]
 
-# Conversation is imported lazily to avoid circular imports at module load time.
-# auth/database.py uses _get_all_models() instead of ALL_AUTH_MODELS directly.
+
 def _get_all_models():
-    from app.models.conversation import Message        
-    from app.models.chat_settings import ChatSettings 
+    from app.models.conversation import Message
+    from app.models.chat_settings import ChatSettings
     return ALL_AUTH_MODELS + [Message, ChatSettings]

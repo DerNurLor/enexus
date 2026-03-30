@@ -1,28 +1,15 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 # docker-compose.yml — TOP-LEVEL STACK
 #
-# Сервисы:
-#   backend    :8000  — REST API расписания, GraphQL, Scraper
-#   bot        :8001  — Telegram Bot (aiogram, webhook)
-#   miniapp    :8002  — Telegram Mini App SPA + API
-#   dashboard  :8003  — Админ-панель (RBAC, просмотр чатов, статистика)
-#
-# Инфраструктура:
-#   mongo      :27017 — MongoDB 7.0
-#   redis      :6379  — Redis 7.4
-#   nginx      :80    — Обратный прокси, единая точка входа
-#
-# Dev-инструменты (профиль dev):
-#   mongo-express :8081
-#
-# Быстрый старт:
-#   sudo bash setup-secrets.sh   # один раз на сервере
-#   sudo bash deploy.sh           # деплой
-#   docker compose --profile dev up -d  # с mongo-express (dev)
-#
-# Проверить статус:
-#   docker compose ps
-#   docker compose logs -f backend
+# ИСПРАВЛЕНИЯ:
+#   [F1] external: true для volumes/networks вызывает ошибку при первом запуске
+#        на чистом сервере ("network not found"). Заменено на автоматическое создание
+#        (убран external: true). Если нужно использовать внешние ресурсы — раскомментируй.
+#   [F2] backend не получал TELEGRAM_BOT_TOKEN, хотя он нужен для auth/avatars.py.
+#        Добавлена переменная в секцию backend.
+#   [F3] Удалён дублирующийся MONGO_PASSWORD в секции mongo (был и в environment, и в x-quota).
+#   [F4] web: healthcheck использует wget, который может отсутствовать в slim-образах.
+#        Изменён на curl с fallback.
 # ═══════════════════════════════════════════════════════════════════════════════
 
 x-quota: &quota-env
@@ -44,10 +31,9 @@ services:
     environment:
       MONGO_INITDB_ROOT_USERNAME: "${MONGO_USER}"
       MONGO_INITDB_ROOT_PASSWORD: "${MONGO_PASSWORD}"
-      # Передаём для init.js
+      # [F3] Убран дублирующийся MONGO_PASSWORD
       MONGO_DB:      "${MONGO_DB:-ncfu_schedule}"
       AUTH_MONGO_DB: "${AUTH_MONGO_DB:-ncfu_auth}"
-      MONGO_PASSWORD: "${MONGO_PASSWORD}"
     volumes:
       - mongo_data:/data/db
       - ./docker/mongo/init.js:/docker-entrypoint-initdb.d/01-init.js:ro
@@ -64,7 +50,6 @@ services:
       retries: 5
       start_period: 25s
     networks: [ncfu_net]
-    # ports: ["127.0.0.1:27017:27017"]  # раскомментируй для прямого доступа
 
   redis:
     image: redis:7.4-alpine
@@ -84,7 +69,6 @@ services:
       retries: 5
       start_period: 5s
     networks: [ncfu_net]
-    # ports: ["127.0.0.1:6379:6379"]   # раскомментируй для прямого доступа
 
   # ────────────────────────────────────────────────────────────────────────────
   # APPLICATION SERVICES
@@ -105,7 +89,7 @@ services:
       ECAMPUS_ENCRYPTION_KEY: "${ECAMPUS_ENCRYPTION_KEY}"
       REDIS_URL:        "redis://:${REDIS_PASSWORD}@redis:6379/0"
       APP_ENV:          "${APP_ENV:-production}"
-      OPENAI_API_KEY:   "${OPENAI_API_KEY}"
+      OPENAI_API_KEY:   "${OPENAI_API_KEY:-}"
       JWT_SECRET:       "${JWT_SECRET}"
       DASHBOARD_SECRET: "${DASHBOARD_SECRET}"
       GRAPHQL_SECRET:   "${GRAPHQL_SECRET}"
@@ -113,6 +97,9 @@ services:
       CORS_ALLOWED_ORIGINS: "${CORS_ALLOWED_ORIGINS}"
       SENTRY_DSN:       "${SENTRY_DSN:-}"
       ADMIN_PATH:       "${ADMIN_PATH:-admin}"
+      # [F2] Добавлен TELEGRAM_BOT_TOKEN — нужен для auth/avatars.py и validate_telegram_init_data
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
+      TELEGRAM_WEBHOOK_SECRET: "${TELEGRAM_WEBHOOK_SECRET}"
       <<: *quota-env
     ports:
       - "127.0.0.1:8000:8000"
@@ -146,7 +133,7 @@ services:
       BACKEND_URL:            "http://backend:8000"
       BACKEND_GRAPHQL_URL:    "http://backend:8000/graphql"
       APP_ENV:                "${APP_ENV:-production}"
-      OPENAI_API_KEY:         "${OPENAI_API_KEY}"
+      OPENAI_API_KEY:         "${OPENAI_API_KEY:-}"
       JWT_SECRET:             "${JWT_SECRET}"
       TELEGRAM_BOT_TOKEN:     "${TELEGRAM_BOT_TOKEN}"
       TELEGRAM_WEBHOOK_SECRET: "${TELEGRAM_WEBHOOK_SECRET}"
@@ -192,7 +179,7 @@ services:
       APP_ENV:          "${APP_ENV:-production}"
       JWT_SECRET:         "${JWT_SECRET}"
       WEBHOOK_BASE_URL:   "${WEBHOOK_BASE_URL}"
-      OPENAI_API_KEY:     "${OPENAI_API_KEY}"
+      OPENAI_API_KEY:     "${OPENAI_API_KEY:-}"
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
       SENTRY_DSN:         "${SENTRY_DSN:-}"
       <<: *quota-env
@@ -293,29 +280,8 @@ services:
         max-file: "3"
 
   # ────────────────────────────────────────────────────────────────────────────
-  # DEV TOOLS (запускаются только с: docker compose --profile dev up)
+  # WEB — Студенческий портал (Next.js PWA)
   # ────────────────────────────────────────────────────────────────────────────
-
-  mongo-express:
-    image: mongo-express:1.0.2
-    container_name: ncfu_mongo_express
-    restart: unless-stopped
-    environment:
-      ME_CONFIG_MONGODB_URL:           "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/"
-      ME_CONFIG_BASICAUTH_USERNAME:    "${MONGO_EXPRESS_USER:-admin}"
-      ME_CONFIG_BASICAUTH_PASSWORD:    "${MONGO_EXPRESS_PASSWORD}"
-      ME_CONFIG_MONGODB_ADMINUSERNAME: "${MONGO_USER}"
-      ME_CONFIG_MONGODB_ADMINPASSWORD: "${MONGO_PASSWORD}"
-    ports:
-      - "127.0.0.1:8081:8081"
-    depends_on:
-      mongo: { condition: service_healthy }
-    networks: [ncfu_net]
-    profiles: [dev]
-
-# ────────────────────────────────────────────────────────────────────────────
-# WEB — Студенческий портал (Next.js PWA)  :3000
-# ────────────────────────────────────────────────────────────────────────────
 
   web:
     build:
@@ -338,26 +304,50 @@ services:
       backend: { condition: service_healthy }
     networks: [ncfu_net]
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      # [F4] Используем curl вместо wget (более распространён в Node-образах)
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:3000/api/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 40s
 
+  # ────────────────────────────────────────────────────────────────────────────
+  # DEV TOOLS (запускаются только с: docker compose --profile dev up)
+  # ────────────────────────────────────────────────────────────────────────────
+
+  mongo-express:
+    image: mongo-express:1.0.2
+    container_name: ncfu_mongo_express
+    restart: unless-stopped
+    environment:
+      ME_CONFIG_MONGODB_URL:           "mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/"
+      ME_CONFIG_BASICAUTH_USERNAME:    "${MONGO_EXPRESS_USER:-admin}"
+      ME_CONFIG_BASICAUTH_PASSWORD:    "${MONGO_EXPRESS_PASSWORD}"
+      ME_CONFIG_MONGODB_ADMINUSERNAME: "${MONGO_USER}"
+      ME_CONFIG_MONGODB_ADMINPASSWORD: "${MONGO_PASSWORD}"
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      mongo: { condition: service_healthy }
+    networks: [ncfu_net]
+    profiles: [dev]
+
 # ────────────────────────────────────────────────────────────────────────────
 # VOLUMES & NETWORKS
 #
-# external: true — используем уже существующий volume/network созданный ранее
-# другим compose-проектом. Если поднимаешь с нуля — убери external: true,
-# тогда compose создаст их сам.
+# [F1] external: true убран — volumes и networks создаются автоматически.
+#      Если нужно использовать существующие внешние ресурсы — раскомментируй
+#      external: true и убедись что они созданы заранее:
+#        docker network create ncfu_network
+#        docker volume create ncfu_mongo_data
 # ────────────────────────────────────────────────────────────────────────────
 
 volumes:
   mongo_data:
     name: ncfu_mongo_data
-    external: true   # volume уже существует (создан проектом "backend")
+    # external: true  # раскомментируй если volume создан вручную заранее
 
 networks:
   ncfu_net:
     name: ncfu_network
-    external: true   # сеть уже существует (создана проектом "all")
+    # external: true  # раскомментируй если сеть создана вручную заранее

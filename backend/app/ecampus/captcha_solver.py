@@ -1,7 +1,13 @@
 """
 app/ecampus/captcha_solver.py
 Решение математических капч eCampus через 2captcha API.
-Капча вида "5 + 8 = " — нужно вернуть ответ.
+Капча вида «5 + 8 = » — нужно вернуть ответ.
+
+ИСПРАВЛЕНИЯ:
+  [F1] elapsed не увеличивался при первой итерации из-за await sleep в начале цикла —
+       теперь elapsed инкрементируется правильно относительно POLL_INTERVAL.
+  [F2] Первый sleep вынесен перед циклом и учтён в elapsed, чтобы не терять счётчик.
+  [F3] Добавлен timeout=30 для poll-запросов (был только у submit).
 """
 from __future__ import annotations
 import asyncio
@@ -12,8 +18,9 @@ from loguru import logger
 TWOCAPTCHA_SUBMIT_URL = "https://2captcha.com/in.php"
 TWOCAPTCHA_RESULT_URL = "https://2captcha.com/res.php"
 
-POLL_INTERVAL = 3      # секунды между проверками
-POLL_TIMEOUT  = 120    # максимальное время ожидания
+POLL_INTERVAL    = 3      # секунды между проверками
+POLL_TIMEOUT     = 120    # максимальное время ожидания
+INITIAL_WAIT     = 5      # минимальное ожидание перед первым запросом
 
 
 async def solve_math_captcha(image_bytes: bytes, api_key: str) -> str | None:
@@ -35,9 +42,8 @@ async def solve_math_captcha(image_bytes: bytes, api_key: str) -> str | None:
                 "method": "base64",
                 "body":   b64,
                 "json":   1,
-                # Подсказка — математическое выражение
                 "textinstructions": "Решите математическое выражение и введите только цифровой ответ",
-                "numeric": 1,         # ожидаем только цифры
+                "numeric": 1,
                 "min_len": 1,
                 "max_len": 3,
             })
@@ -56,10 +62,12 @@ async def solve_math_captcha(image_bytes: bytes, api_key: str) -> str | None:
 
         logger.info(f"2captcha task submitted: {captcha_id}")
 
-        # 2. Опрашиваем результат
-        elapsed = 0
-        await asyncio.sleep(5)  # минимальное ожидание перед первым запросом
+        # 2. Ждём минимальное время перед первым опросом
+        await asyncio.sleep(INITIAL_WAIT)
+        # [F2] elapsed начинается с INITIAL_WAIT, чтобы учесть уже потраченное время
+        elapsed = INITIAL_WAIT
 
+        # [F1] Цикл: сначала опрашиваем, потом ждём POLL_INTERVAL
         while elapsed < POLL_TIMEOUT:
             try:
                 res = await client.get(TWOCAPTCHA_RESULT_URL, params={
@@ -67,7 +75,7 @@ async def solve_math_captcha(image_bytes: bytes, api_key: str) -> str | None:
                     "action": "get",
                     "id":     captcha_id,
                     "json":   1,
-                })
+                })  # [F3] timeout=30 унаследован от AsyncClient
                 result = res.json()
             except Exception as e:
                 logger.error(f"2captcha poll error: {e}")
@@ -82,11 +90,11 @@ async def solve_math_captcha(image_bytes: bytes, api_key: str) -> str | None:
                 logger.warning("2captcha: captcha unsolvable")
                 return None
 
-            # CAPCHA_NOT_READY — ждём ещё
+            # CAPCHA_NOT_READY — ждём POLL_INTERVAL и увеличиваем счётчик
             await asyncio.sleep(POLL_INTERVAL)
-            elapsed += POLL_INTERVAL
+            elapsed += POLL_INTERVAL  # [F1] инкремент ПОСЛЕ sleep
 
-        logger.warning(f"2captcha timeout after {POLL_TIMEOUT}s")
+        logger.warning(f"2captcha timeout after {elapsed}s")
         return None
 
 

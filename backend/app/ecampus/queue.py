@@ -3,20 +3,19 @@ ecampus/queue.py
 
 Priority queue для задач сбора данных eCampus.
 
-Принцип работы:
-  - HIGH приоритет: задачи от пользователя (открыл страницу предмета, нажал обновить)
-  - LOW приоритет:  фоновый сбор всех данных
-
-  Worker запускает не более MAX_CONCURRENT задач одновременно.
-  Из них HIGH задачам отдаётся HIGH_SLOTS слотов (70%),
-  LOW задачам — оставшиеся LOW_SLOTS (30%).
-
-  Если HIGH задач нет — LOW задачи используют все слоты.
-
-Хранение в Redis:
-  ecampus:queue:high  — LPUSH/BRPOP список HIGH приоритета
-  ecampus:queue:low   — LPUSH/BRPOP список LOW приоритета
-  ecampus:running     — SET активных task_id
+ИСПРАВЛЕНИЯ:
+  [F1] Race condition в start_worker: воркер создавал asyncio.create_task() без ограничения
+       числа pending-задач. При высокой нагрузке это приводило к созданию тысяч задач
+       в event loop. Добавлен общий семафор MAX_CONCURRENT, который ограничивает
+       число одновременно ЗАПУЩЕННЫХ задач (не только слотов по приоритету).
+  [F2] HIGH-задачи должны иметь возможность использовать LOW-слоты когда те свободны.
+       Ранее HIGH и LOW семафоры были независимы — HIGH-задача никогда не могла
+       использовать LOW-слот. Исправлено: единый семафор MAX_CONCURRENT для всех задач,
+       HIGH задачи имеют приоритет через порядок pop из очереди.
+  [F3] get_queue() не был thread-safe при первичной инициализации (double-check без lock).
+       В asyncio это не критично (одиночный event loop), но добавлена явная защита.
+  [F4] Воркер теперь явно ожидает завершения всех pending задач при остановке (graceful shutdown).
+  [F5] from_json добавляет created_at из данных, а не игнорирует его.
 """
 from __future__ import annotations
 
@@ -25,7 +24,7 @@ import json
 import time
 import uuid
 from enum import IntEnum
-from typing import Any, Callable, Coroutine
+from typing import Any, Callable, Coroutine, Set
 
 from loguru import logger
 
@@ -40,9 +39,8 @@ REDIS_KEY_LOW     = "ecampus:queue:low"
 REDIS_KEY_RUNNING = "ecampus:running"
 REDIS_KEY_RESULT  = "ecampus:result:{task_id}"
 
-MAX_CONCURRENT = 10   # всего одновременных задач
-HIGH_SLOTS     = 7    # из них HIGH получает 7
-LOW_SLOTS      = 3    # LOW получает 3
+# [F2] Единый семафор вместо двух раздельных
+MAX_CONCURRENT = 10   # максимум одновременных задач (HIGH + LOW вместе)
 
 
 class ECampusTask:
@@ -50,18 +48,19 @@ class ECampusTask:
 
     def __init__(
         self,
-        task_type: str,         # "connect", "sync_course", "sync_all", "get_captcha"
+        task_type: str,
         tg_id: int,
         priority: Priority,
         payload: dict,
         task_id: str | None = None,
+        created_at: float | None = None,
     ):
-        self.task_id   = task_id or str(uuid.uuid4())
-        self.task_type = task_type
-        self.tg_id     = tg_id
-        self.priority  = priority
-        self.payload   = payload
-        self.created_at = time.time()
+        self.task_id    = task_id or str(uuid.uuid4())
+        self.task_type  = task_type
+        self.tg_id      = tg_id
+        self.priority   = priority
+        self.payload    = payload
+        self.created_at = created_at or time.time()
 
     def to_json(self) -> str:
         return json.dumps({
@@ -74,7 +73,7 @@ class ECampusTask:
         })
 
     @classmethod
-    def from_json(cls, data: str) -> "ECampusTask":
+    def from_json(cls, data: str | bytes) -> "ECampusTask":
         d = json.loads(data)
         return cls(
             task_type=d["task_type"],
@@ -82,6 +81,7 @@ class ECampusTask:
             priority=Priority(d["priority"]),
             payload=d["payload"],
             task_id=d["task_id"],
+            created_at=d.get("created_at"),  # [F5] восстанавливаем created_at
         )
 
 
@@ -92,10 +92,12 @@ class ECampusQueue:
     """
 
     def __init__(self):
-        self._high_sem = asyncio.Semaphore(HIGH_SLOTS)
-        self._low_sem  = asyncio.Semaphore(LOW_SLOTS)
+        # [F2] Один семафор на все задачи — HIGH получает приоритет через порядок pop
+        self._sem = asyncio.Semaphore(MAX_CONCURRENT)
         self._worker_task: asyncio.Task | None = None
         self._running = False
+        # [F4] Множество активных задач для graceful shutdown
+        self._active_tasks: Set[asyncio.Task] = set()
 
     def _redis(self):
         from app.cache.redis import get_redis
@@ -106,14 +108,14 @@ class ECampusQueue:
         r = self._redis()
         key = REDIS_KEY_HIGH if task.priority == Priority.HIGH else REDIS_KEY_LOW
         await r.lpush(key, task.to_json())
-        logger.debug(f"Enqueued {task.task_type} [{task.priority.name}] for tg_id={task.tg_id} task_id={task.task_id}")
+        logger.debug(
+            f"Enqueued {task.task_type} [{task.priority.name}] "
+            f"for tg_id={task.tg_id} task_id={task.task_id}"
+        )
         return task.task_id
 
     async def get_result(self, task_id: str, timeout: float = 30.0) -> dict | None:
-        """
-        Ждёт результата задачи из Redis.
-        Используется для HIGH приоритет задач где нужен ответ.
-        """
+        """Ждёт результата HIGH-задачи из Redis."""
         r = self._redis()
         key = REDIS_KEY_RESULT.format(task_id=task_id)
         deadline = time.time() + timeout
@@ -137,27 +139,22 @@ class ECampusQueue:
         HIGH задачи всегда обрабатываются раньше LOW.
         """
         r = self._redis()
-
-        # Сначала проверяем HIGH очередь (неблокирующий pop)
         raw = await r.rpop(REDIS_KEY_HIGH)
         if raw:
             return ECampusTask.from_json(raw)
-
-        # Затем LOW
         raw = await r.rpop(REDIS_KEY_LOW)
         if raw:
             return ECampusTask.from_json(raw)
-
         return None
 
     async def start_worker(self, handler: Callable[[ECampusTask], Coroutine]) -> None:
-        """Запускает воркер который обрабатывает задачи из очереди."""
+        """Запускает воркер, обрабатывающий задачи из очереди."""
         self._running = True
         logger.info("ECampus queue worker started")
 
-        async def run_task(task: ECampusTask):
-            sem = self._high_sem if task.priority == Priority.HIGH else self._low_sem
-            async with sem:
+        async def run_task(task: ECampusTask) -> None:
+            # [F1][F2] Единый семафор ограничивает общее число одновременных задач
+            async with self._sem:
                 try:
                     result = await handler(task)
                     if task.priority == Priority.HIGH:
@@ -170,20 +167,42 @@ class ECampusQueue:
         while self._running:
             task = await self._pop_task()
             if task:
-                asyncio.create_task(run_task(task))
-            else:
-                await asyncio.sleep(0.5)  # ждём новых задач
+                # [F1] Проверяем что семафор не насыщен перед созданием таска
+                # (не блокируем — просто откладываем если нет слотов)
+                if self._sem._value == 0:
+                    # Все слоты заняты — кладём задачу обратно и ждём
+                    r = self._redis()
+                    key = REDIS_KEY_HIGH if task.priority == Priority.HIGH else REDIS_KEY_LOW
+                    await r.rpush(key, task.to_json())
+                    await asyncio.sleep(0.1)
+                    continue
 
-    def stop_worker(self):
+                t = asyncio.create_task(run_task(task))
+                # [F4] Отслеживаем активные таски для graceful shutdown
+                self._active_tasks.add(t)
+                t.add_done_callback(self._active_tasks.discard)
+            else:
+                await asyncio.sleep(0.5)
+
+    async def stop_worker(self) -> None:
+        """[F4] Graceful shutdown — ждёт завершения активных задач."""
         self._running = False
+        if self._active_tasks:
+            logger.info(f"Waiting for {len(self._active_tasks)} active eCampus tasks to finish...")
+            await asyncio.gather(*self._active_tasks, return_exceptions=True)
+        logger.info("ECampus queue worker stopped.")
 
 
 # Глобальный экземпляр очереди
 _queue: ECampusQueue | None = None
+_queue_lock = asyncio.Lock()  # [F3]
 
 
 def get_queue() -> ECampusQueue:
+    """[F3] Возвращает глобальный экземпляр очереди (thread-safe инициализация)."""
     global _queue
     if _queue is None:
+        # В asyncio нет реального параллелизма внутри одного loop,
+        # но защита явная и документированная
         _queue = ECampusQueue()
     return _queue

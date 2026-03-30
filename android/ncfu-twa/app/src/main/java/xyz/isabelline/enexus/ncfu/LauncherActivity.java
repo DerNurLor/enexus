@@ -27,13 +27,22 @@ import android.widget.TextView;
 
 import java.io.ByteArrayInputStream;
 
+/**
+ * ИСПРАВЛЕНИЯ:
+ * [F1] onResume: mPageLoaded сбрасывался в false ВСЕГДА при возврате в приложение.
+ *      Это вызывало появление "slow hint" через 15 секунд даже если страница давно загружена
+ *      (пользователь свернул и развернул приложение).
+ *      Исправлено: slow hint запускается в onResume только если WebView действительно
+ *      загружает новую страницу (isLoading()), иначе не трогаем mPageLoaded.
+ * [F2] FLAG_FULLSCREEN deprecated в API 30+. Заменён на WindowInsetsController.
+ *      Оставлена обратная совместимость через Build.VERSION.SDK_INT.
+ */
 public class LauncherActivity extends Activity {
 
     private static final String LAUNCH_URL = "https://app.enexus.isabelline.xyz/schedule";
     private static final String HOST       = "app.enexus.isabelline.xyz";
     private static final String CHANNEL_ID = "ncfu_default";
 
-    // Через сколько секунд показывать сообщение о задержке
     private static final int SLOW_HINT_DELAY_MS = 15_000;
 
     private WebView  mWebView;
@@ -43,7 +52,6 @@ public class LauncherActivity extends Activity {
     private final Handler mHandler = new Handler(Looper.getMainLooper());
     private boolean mPageLoaded = false;
 
-    // Показываем подсказку если страница грузится дольше 15 сек
     private final Runnable mSlowHintRunnable = () -> {
         if (!mPageLoaded && mSplashHint != null) {
             mSplashHint.setVisibility(View.VISIBLE);
@@ -59,10 +67,18 @@ public class LauncherActivity extends Activity {
 
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
-        getWindow().setFlags(
-                WindowManager.LayoutParams.FLAG_FULLSCREEN,
-                WindowManager.LayoutParams.FLAG_FULLSCREEN
-        );
+
+        // [F2] FLAG_FULLSCREEN deprecated в API 30+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            getWindow().setDecorFitsSystemWindows(false);
+        } else {
+            //noinspection deprecation
+            getWindow().setFlags(
+                    WindowManager.LayoutParams.FLAG_FULLSCREEN,
+                    WindowManager.LayoutParams.FLAG_FULLSCREEN
+            );
+        }
+
         getWindow().setStatusBarColor(0xFF0a0a0a);
         getWindow().setNavigationBarColor(0xFF0a0a0a);
 
@@ -76,7 +92,6 @@ public class LauncherActivity extends Activity {
         requestBatteryExemption();
         setupWebView();
 
-        // Запускаем таймер — если через 15 сек страница не загружена, показываем подсказку
         mHandler.postDelayed(mSlowHintRunnable, SLOW_HINT_DELAY_MS);
 
         Uri incoming = getIntent() != null ? getIntent().getData() : null;
@@ -124,7 +139,6 @@ public class LauncherActivity extends Activity {
         s.setUseWideViewPort(true);
         s.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
         s.setCacheMode(WebSettings.LOAD_CACHE_ELSE_NETWORK);
-        s.setRenderPriority(WebSettings.RenderPriority.HIGH);
         s.setSaveFormData(false);
         s.setGeolocationEnabled(false);
         s.setAllowFileAccess(false);
@@ -158,6 +172,7 @@ public class LauncherActivity extends Activity {
 
             @Override
             public void onReceivedSslError(WebView view, SslErrorHandler h, SslError e) {
+                // Отклоняем SSL ошибки — не принимаем невалидные сертификаты
                 h.cancel();
             }
 
@@ -165,7 +180,6 @@ public class LauncherActivity extends Activity {
             public void onPageFinished(WebView view, String url) {
                 mPageLoaded = true;
 
-                // Отменяем таймер подсказки — страница загружена вовремя
                 mHandler.removeCallbacks(mSlowHintRunnable);
 
                 mWebView.setVisibility(View.VISIBLE);
@@ -174,7 +188,6 @@ public class LauncherActivity extends Activity {
                         .setDuration(200)
                         .withEndAction(() -> {
                             mSplash.setVisibility(View.GONE);
-                            // Сбрасываем hint на случай повторной загрузки
                             if (mSplashHint != null) {
                                 mSplashHint.setVisibility(View.GONE);
                                 mSplashHint.setAlpha(0f);
@@ -197,11 +210,19 @@ public class LauncherActivity extends Activity {
     protected void onResume() {
         super.onResume();
         mWebView.onResume();
-        // При возврате в приложение сбрасываем флаг и перезапускаем таймер
-        // только если WebView снова грузит страницу
-        mPageLoaded = false;
-        mHandler.removeCallbacks(mSlowHintRunnable);
-        mHandler.postDelayed(mSlowHintRunnable, SLOW_HINT_DELAY_MS);
+
+        // [F1] ИСПРАВЛЕНИЕ: Не сбрасываем mPageLoaded безусловно.
+        // Если WebView не загружает страницу прямо сейчас — страница уже показана,
+        // и slow hint не нужен.
+        // Сбрасываем флаг и запускаем таймер только если WebView реально загружает.
+        if (mWebView.getProgress() < 100) {
+            // Страница ещё не загружена (например, после принудительного reload)
+            mPageLoaded = false;
+            mHandler.removeCallbacks(mSlowHintRunnable);
+            mHandler.postDelayed(mSlowHintRunnable, SLOW_HINT_DELAY_MS);
+        }
+        // Если страница уже загружена (mPageLoaded == true) — ничего не делаем,
+        // hint не показываем.
     }
 
     @Override

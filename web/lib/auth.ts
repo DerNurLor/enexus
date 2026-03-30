@@ -17,6 +17,15 @@
  *  - access token  — только в памяти (не переживает reload)
  *  - refresh token — localStorage (переживает reload, используется для тихого входа)
  *  - Вся проверка подписи — на сервере
+ *
+ * ИСПРАВЛЕНИЯ:
+ *  [F1] Refresh token теперь удаляется при получении 401/403 от /auth/refresh.
+ *       Ранее токен не удалялся «на случай временной ошибки», что приводило к
+ *       бесконечным попыткам использовать отозванный или заблокированный токен.
+ *       Сетевые ошибки (fetch exception) по-прежнему не удаляют токен.
+ *  [F2] Убраны console.log с чувствительной информацией (наличие токена).
+ *  [F3] loginWithBotToken: при ошибке токен явно очищается только если это 401/403,
+ *       а не любая ошибка (например, 500 не должен сбрасывать токен).
  */
 
 const AUTH_BASE    = (process.env.NEXT_PUBLIC_API_URL || '') + '/auth'
@@ -111,7 +120,6 @@ export interface FavoriteItem {
 
 /**
  * Авторизация через Telegram Mini App initData.
- * Используется когда приложение открыто внутри Telegram.
  */
 export async function loginWithInitData(initData: string): Promise<{
   access_token: string
@@ -131,7 +139,6 @@ export async function loginWithInitData(initData: string): Promise<{
 
 /**
  * Авторизация через Telegram Login Widget (обычный браузер).
- * Данные приходят из callback виджета и отправляются на сервер для проверки.
  */
 export async function loginWithWidget(data: TelegramWidgetData): Promise<{
   access_token: string
@@ -153,9 +160,7 @@ export async function loginWithWidget(data: TelegramWidgetData): Promise<{
 let _refreshInProgress: Promise<string | null> | null = null
 
 async function _silentRefresh(): Promise<string | null> {
-  // Предотвращаем параллельные вызовы — возвращаем тот же промис
   if (_refreshInProgress) {
-    console.log('[auth] silentRefresh already in progress, waiting...')
     return _refreshInProgress
   }
   _refreshInProgress = _doSilentRefresh().finally(() => { _refreshInProgress = null })
@@ -165,9 +170,7 @@ async function _silentRefresh(): Promise<string | null> {
 async function _doSilentRefresh(): Promise<string | null> {
   if (typeof window === 'undefined') return null
   const refresh = localStorage.getItem(REFRESH_KEY)
-  console.log('[auth] silentRefresh called, token:', refresh ? 'EXISTS' : 'EMPTY')
   if (!refresh) return null
-  console.log('[auth] sending refresh request...')
 
   try {
     const res = await fetch(`${AUTH_BASE}/refresh`, {
@@ -175,18 +178,24 @@ async function _doSilentRefresh(): Promise<string | null> {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: refresh }),
     })
-    console.log('[auth] refresh response:', res.status)
+
     if (!res.ok) {
-      // Не удаляем токен при 401 — возможно временная ошибка сервера
-      // Токен удаляется только при явном logout()
+      // [F1] При 401/403 токен отозван или пользователь заблокирован — удаляем.
+      // При 5xx (ошибка сервера) токен НЕ удаляем — сервер может быть временно недоступен.
+      if (res.status === 401 || res.status === 403) {
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem(REFRESH_KEY)
+        }
+      }
       return null
     }
+
     const { access_token, refresh_token } = await res.json()
     _token = access_token
     if (refresh_token) localStorage.setItem(REFRESH_KEY, refresh_token)
     return access_token
   } catch {
-    // Сетевая ошибка — не удаляем токен
+    // Сетевая ошибка — не удаляем токен (сервер может быть временно недоступен)
     return null
   }
 }
@@ -258,8 +267,6 @@ export interface AuthResult {
 export async function initAuth(): Promise<AuthResult | null> {
   let token: string | null = null
 
-  // 1. Mini App — только если реально открыто ВНУТРИ Telegram
-  // tg.platform !== 'unknown' отличает реальный Mini App от просто загруженного SDK
   const tg = typeof window !== 'undefined' ? (window as any).Telegram?.WebApp : null
   const isRealMiniApp = !!(tg?.initData && tg.initData.length > 0 && tg?.platform && tg.platform !== 'unknown')
 
@@ -272,31 +279,27 @@ export async function initAuth(): Promise<AuthResult | null> {
         localStorage.setItem(REFRESH_KEY, refresh_token)
       }
     } catch (e) {
-      console.warn('initData auth failed:', e)
+      console.warn('[auth] initData auth failed:', e)
     }
   }
 
-  // 2. Браузер/PWA/десктоп — тихий рефреш через saved refresh_token
   if (!token) {
     token = await _silentRefresh()
   }
 
   if (!token) return null
 
-  // Параллельно загружаем данные пользователя
   const [user, settings, favorites] = await Promise.all([
     fetchMe(),
     fetchSettings(),
     fetchFavorites(),
   ])
 
-  console.log('[auth] initAuth result:', !!user, !!token)
   return { token, user, settings, favorites }
 }
 
 /**
  * Полная авторизация через Telegram Login Widget.
- * Вызывается после того как пользователь нажал кнопку и прошёл авторизацию.
  */
 export async function loginWithWidgetAndInit(
   data: TelegramWidgetData
@@ -336,8 +339,10 @@ export async function loginWithBotToken(botToken: string): Promise<AuthResult> {
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({}))
-    // Сбрасываем старый токен — он мог устареть
-    _token = null
+    // [F3] Сбрасываем токен только при явном отказе (401/403), не при 5xx
+    if (res.status === 401 || res.status === 403) {
+      _token = null
+    }
     throw new Error(err.detail || 'Токен входа истёк. Запросите новый через бота: /start login')
   }
   const { access_token, refresh_token } = await res.json()
