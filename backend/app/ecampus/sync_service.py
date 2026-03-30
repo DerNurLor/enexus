@@ -53,6 +53,10 @@ class ECampusSyncRecord(Document):
     student_id:          Optional[int] = None
     last_sync:           Optional[datetime] = None
     sync_status:         str = "pending"
+    sync_progress:       int = 0
+    sync_done_terms:     int = 0
+    sync_total_terms:    int = 0
+    sync_courses_found:  int = 0
     error_msg:           Optional[str] = None
     session_cookies_json: Optional[str] = None
 
@@ -145,7 +149,7 @@ async def _handle_sync_all(task) -> dict:
     if not record:
         raise ValueError(f"Record not found for tg_id={tg_id}")
 
-    await record.set({"sync_status": "running"})
+    await record.set({"sync_status": "running", "sync_progress": 0, "sync_done_terms": 0, "sync_courses_found": 0})
 
     try:
         from app.ecampus.client import ECampusClient
@@ -164,6 +168,7 @@ async def _handle_sync_all(task) -> dict:
         # Обновляем сессию и данные
         await record.set({
             "sync_status":           "ok",
+            "sync_progress":         100,
             "last_sync":             datetime.now(timezone.utc),
             "error_msg":             None,
             "session_cookies_json":  json.dumps(client.get_cookies()),
@@ -233,6 +238,10 @@ async def _collect_all_data(client, record: ECampusSyncRecord, viewmodel: dict) 
     if record.student_id != student_id:
         await record.set({"student_id": student_id})
 
+    total_terms = len(terms)
+    done_terms = 0
+    if total_terms > 0:
+        await record.set({"sync_total_terms": total_terms, "sync_progress": 5})
     for term in terms:  # все семестры
         term_id = term.get("id") or term.get("Id") or term.get("termId")
         if not term_id:
@@ -263,6 +272,10 @@ async def _collect_all_data(client, record: ECampusSyncRecord, viewmodel: dict) 
                 all_courses.append(course)
         except Exception as e:
             logger.warning(f"Term {term_id} failed: {e}")
+        finally:
+            done_terms += 1
+            pct = 5 + int(done_terms / max(total_terms, 1) * 90)
+            await record.set({"sync_done_terms": done_terms, "sync_progress": pct, "sync_courses_found": len(all_courses)})
 
     # Дедупликация файлов
     seen, unique_files = set(), []

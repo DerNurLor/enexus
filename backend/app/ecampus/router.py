@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 from loguru import logger
 
 from app.auth.dependencies import get_current_user
+from app.ecampus.captcha_solver import solve_math_captcha
 from app.auth.models import AuthUser
 
 router = APIRouter(prefix="/ecampus", tags=["ecampus"])
@@ -39,7 +40,8 @@ router = APIRouter(prefix="/ecampus", tags=["ecampus"])
 class ConnectRequest(BaseModel):
     login:        str = Field(..., min_length=3, max_length=100)
     password:     str = Field(..., min_length=1, max_length=100)
-    captcha_code: str = Field(..., min_length=1, max_length=20, description="Текст с картинки капчи")
+    captcha_code: str = Field("", min_length=0, max_length=20, description="Текст с картинки капчи")
+    auto_captcha: bool = False
 
 
 class SyncStatusResponse(BaseModel):
@@ -50,6 +52,10 @@ class SyncStatusResponse(BaseModel):
     last_sync:     Optional[str] = None
     courses_count: int = 0
     files_count:   int = 0
+    sync_progress:      int = 0
+    sync_done_terms:    int = 0
+    sync_total_terms:   int = 0
+    sync_courses_found: int = 0
 
 
 # ── Получить капчу ────────────────────────────────────────────────────────────
@@ -101,6 +107,52 @@ async def get_captcha(current_user: AuthUser = Depends(get_current_user)):
 
 # ── Подключить аккаунт eCampus ────────────────────────────────────────────────
 
+
+@router.get("/captcha/solve")
+async def solve_captcha_auto(current_user: AuthUser = Depends(get_current_user)):
+    """
+    Получает картинку капчи с eCampus и решает её через 2captcha.
+    Возвращает { answer, captcha_cookie } для использования при connect.
+    """
+    from app.core.config import settings
+    import httpx, base64
+
+    api_key = getattr(settings, "twocaptcha_api_key", "") or ""
+    if not api_key:
+        raise HTTPException(status_code=503, detail="2captcha API key не настроен.")
+
+    ecampus_base = "https://ecampus.ncfu.ru"
+
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        # Получаем страницу логина для csrf + captcha cookie
+        login_page = await client.get(f"{ecampus_base}/account/login")
+        csrf_token = ""
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(login_page.text, "html.parser")
+        csrf_el = soup.find("input", {"name": "__RequestVerificationToken"})
+        if csrf_el:
+            csrf_token = csrf_el.get("value", "")
+
+        # Получаем картинку капчи
+        captcha_resp = await client.get(f"{ecampus_base}/Captcha/Captcha")
+        if not captcha_resp.is_success:
+            raise HTTPException(status_code=502, detail="Не удалось получить капчу с eCampus.")
+
+        image_bytes = captcha_resp.content
+        # Сохраняем captcha cookie
+        captcha_cookie = dict(client.cookies).get("captcha", "")
+
+    # Решаем через 2captcha
+    answer = await solve_math_captcha(image_bytes, api_key)
+    if not answer:
+        raise HTTPException(status_code=502, detail="Не удалось решить капчу. Попробуйте вручную.")
+
+    return {
+        "answer":         answer,
+        "captcha_cookie": captcha_cookie,
+        "csrf_token":     csrf_token,
+    }
+
 @router.post("/connect")
 async def connect_ecampus(
     body: ConnectRequest,
@@ -119,37 +171,40 @@ async def connect_ecampus(
 
     r = get_redis()
 
-    # Восстанавливаем сохранённую сессию капчи
-    session_raw = await r.get(f"ecampus:captcha_session:{current_user.tg_id}")
-    if not session_raw:
-        raise HTTPException(
-            status_code=400,
-            detail="Сессия капчи истекла. Обновите страницу и получите новую капчу.",
-        )
-
-    session_data = json.loads(session_raw)
-    csrf_cookies    = session_data["csrf_cookies"]
-    captcha_cookies = session_data["captcha_cookies"]
+    from app.core.config import settings
+    _2captcha_key = getattr(settings, "twocaptcha_api_key", "") or ""
 
     # Авторизуемся на eCampus
     try:
-        merged_cookies = {**csrf_cookies, **captcha_cookies}
-
         async with httpx.AsyncClient(
             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
             follow_redirects=True,
-            timeout=30,
-            cookies=merged_cookies,
+            timeout=60,
         ) as client:
 
-            # Получаем CSRF токен
+            # Получаем CSRF токен и captcha cookie
             login_page = await client.get("https://ecampus.ncfu.ru/account/login")
             soup = BeautifulSoup(login_page.text, "html.parser")
             token_el = soup.find("input", {"name": "__RequestVerificationToken"})
             if not token_el:
                 raise HTTPException(status_code=503, detail="Не удалось получить CSRF токен")
-
             csrf_token = token_el.get("value", "")
+
+            # Получаем капчу
+            captcha_resp = await client.get("https://ecampus.ncfu.ru/Captcha/Captcha")
+
+            if body.auto_captcha and _2captcha_key:
+                # Решаем через 2captcha
+                from app.ecampus.captcha_solver import solve_math_captcha
+                captcha_code = await solve_math_captcha(captcha_resp.content, _2captcha_key)
+                if not captcha_code:
+                    raise HTTPException(status_code=502, detail="Не удалось решить капчу автоматически. Введите вручную.")
+            elif body.auto_captcha and not _2captcha_key:
+                raise HTTPException(status_code=503, detail="Автокапча не настроена на сервере.")
+            else:
+                captcha_code = body.captcha_code
+                if not captcha_code:
+                    raise HTTPException(status_code=400, detail="Введите код с картинки капчи.")
 
             # Отправляем форму входа
             resp = await client.post(
@@ -157,7 +212,7 @@ async def connect_ecampus(
                 data={
                     "Login":    body.login,
                     "Password": body.password,
-                    "Code": body.captcha_code,
+                    "Code":     captcha_code,
                     "RememberMe": "true",
                     "__RequestVerificationToken": csrf_token,
                 },
