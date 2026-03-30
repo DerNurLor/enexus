@@ -1,0 +1,15 @@
+venv
+.venv
+env
+node_modules
+__pycache__
+*.pyc
+*.log
+dist
+build
+.next
+.nuxt
+coverage
+.pytest_cache
+.mypy_cache
+android/ncfu-twa/app/build
