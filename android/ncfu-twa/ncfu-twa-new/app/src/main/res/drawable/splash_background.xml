@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<layer-list xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Фон: тёмный как в приложении -->
+    <item>
+        <shape android:shape="rectangle">
+            <solid android:color="#0a0a0a" />
+        </shape>
+    </item>
+
+    <!-- Логотип по центру -->
+    <item
+        android:width="120dp"
+        android:height="120dp"
+        android:gravity="center">
+        <shape android:shape="rectangle">
+            <solid android:color="#5ce1e620" />
+            <corners android:radius="24dp" />
+        </shape>
+    </item>
+
+</layer-list>
