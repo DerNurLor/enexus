@@ -13,6 +13,7 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 
 x-quota: &quota-env
+  TZ:                "Europe/Moscow"
   QUOTA_PRIVATE:     "${QUOTA_PRIVATE:-3}"
   QUOTA_GROUP_SMALL: "${QUOTA_GROUP_SMALL:-3}"
   QUOTA_GROUP_LARGE: "${QUOTA_GROUP_LARGE:-5}"
@@ -29,9 +30,9 @@ services:
     container_name: ncfu_mongo
     restart: unless-stopped
     environment:
+      TZ:                          "Europe/Moscow"
       MONGO_INITDB_ROOT_USERNAME: "${MONGO_USER}"
       MONGO_INITDB_ROOT_PASSWORD: "${MONGO_PASSWORD}"
-      # [F3] Убран дублирующийся MONGO_PASSWORD
       MONGO_DB:      "${MONGO_DB:-ncfu_schedule}"
       AUTH_MONGO_DB: "${AUTH_MONGO_DB:-ncfu_auth}"
     volumes:
@@ -55,6 +56,8 @@ services:
     image: redis:7.4-alpine
     container_name: ncfu_redis
     restart: unless-stopped
+    environment:
+      TZ: "Europe/Moscow"
     command: >
       redis-server
       --requirepass "${REDIS_PASSWORD}"
@@ -99,6 +102,7 @@ services:
       ADMIN_PATH:       "${ADMIN_PATH:-admin}"
       # [F2] Добавлен TELEGRAM_BOT_TOKEN — нужен для auth/avatars.py и validate_telegram_init_data
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN}"
+      BOT_API_SECRET:         "${BOT_API_SECRET}"
       TELEGRAM_WEBHOOK_SECRET: "${TELEGRAM_WEBHOOK_SECRET}"
       <<: *quota-env
     ports:
@@ -138,6 +142,8 @@ services:
       TELEGRAM_BOT_TOKEN:     "${TELEGRAM_BOT_TOKEN}"
       TELEGRAM_WEBHOOK_SECRET: "${TELEGRAM_WEBHOOK_SECRET}"
       WEBHOOK_BASE_URL:       "${WEBHOOK_BASE_URL}"
+      WEB_URL:                "${WEB_URL}"
+      BOT_API_SECRET:         "${BOT_API_SECRET}"
       SUPPORT_BOT_TOKEN:      "${SUPPORT_BOT_TOKEN:-}"
       ADMIN_BOT_TOKEN:        "${ADMIN_BOT_TOKEN:-}"
       SENTRY_DSN:             "${SENTRY_DSN:-}"
@@ -304,12 +310,13 @@ services:
       backend: { condition: service_healthy }
     networks: [ncfu_net]
     healthcheck:
-      # [F4] Используем curl вместо wget (более распространён в Node-образах)
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:3000/api/health || exit 1"]
+      # node:20-alpine не содержит curl и wget.
+      # Используем встроенный Node.js для HTTP-запроса к /api/health.
+      test: ["CMD-SHELL", "node -e \"require('http').get('http://127.0.0.1:3000/api/health', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))\""]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 40s
+      start_period: 60s
 
   # ────────────────────────────────────────────────────────────────────────────
   # DEV TOOLS (запускаются только с: docker compose --profile dev up)
@@ -335,19 +342,18 @@ services:
 # ────────────────────────────────────────────────────────────────────────────
 # VOLUMES & NETWORKS
 #
-# [F1] external: true убран — volumes и networks создаются автоматически.
-#      Если нужно использовать существующие внешние ресурсы — раскомментируй
-#      external: true и убедись что они созданы заранее:
-#        docker network create ncfu_network
-#        docker volume create ncfu_mongo_data
+# НЕ добавляй external: true вручную.
+# deploy.sh/_ensure_infra() автоматически определяет нужен ли external
+# и генерирует docker-compose.override.yml при необходимости.
+#
+# Если нужен ручной сброс:
+#   sudo bash deploy.sh fresh        — пересоздаёт всё с нуля
 # ────────────────────────────────────────────────────────────────────────────
 
 volumes:
   mongo_data:
     name: ncfu_mongo_data
-    # external: true  # раскомментируй если volume создан вручную заранее
 
 networks:
   ncfu_net:
     name: ncfu_network
-    # external: true  # раскомментируй если сеть создана вручную заранее

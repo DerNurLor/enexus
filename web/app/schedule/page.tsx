@@ -94,7 +94,27 @@ function loadDayFromCache(mode: string, id: number | null, date: string): Lesson
   } catch { return null }
 }
 
-// ── Live clock ────────────────────────────────────────────────────────────────
+// ── Live clock — всегда показываем московское время (UTC+3) ──────────────────
+// new Date() возвращает время браузера. Если браузер в UTC или другом поясе —
+// format(now, 'HH:mm') покажет неверное время.
+// Решение: форматируем через Intl.DateTimeFormat с явным timeZone.
+
+function getMoscowTime(date: Date) {
+  const fmt = new Intl.DateTimeFormat('ru-RU', {
+    timeZone: 'Europe/Moscow',
+    hour:     '2-digit',
+    minute:   '2-digit',
+    second:   '2-digit',
+    hour12:   false,
+  })
+  const parts = Object.fromEntries(fmt.formatToParts(date).map(p => [p.type, p.value]))
+  return {
+    hhmm:    `${parts.hour}:${parts.minute}`,
+    hhmmss:  `${parts.hour}:${parts.minute}:${parts.second}`,
+    // Для сравнения с временем занятий (они хранятся как "08:30")
+    timeStr: `${parts.hour}:${parts.minute}`,
+  }
+}
 
 function useLiveClock() {
   const [now, setNow] = useState(new Date())
@@ -294,7 +314,7 @@ function SchedulePageInner() {
   const showingCache = (isOffline || isError) && liveLessons.length === 0 && cachedLessons.length > 0
   const lessons      = showingCache ? cachedLessons : liveLessons
 
-  const nowStr        = format(now, 'HH:mm')
+  const nowStr        = getMoscowTime(now).timeStr
   const isToday       = format(selectedDate, 'yyyy-MM-dd') === format(new Date(), 'yyyy-MM-dd')
   const currentLesson = isToday ? lessons.find(l => l.time_start <= nowStr && l.time_end >= nowStr) : null
   const nextLesson    = isToday ? lessons.find(l => l.time_start > nowStr) : null
@@ -364,7 +384,7 @@ function SchedulePageInner() {
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-mono"
             style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--cyan)' }}>
             <Clock size={12} />
-            {format(now, 'HH:mm:ss')}
+            {getMoscowTime(now).hhmmss}
           </div>
         }
       />

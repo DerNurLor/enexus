@@ -40,6 +40,7 @@ quota_error_flag: ContextVar[bool] = ContextVar("quota_error_flag", default=Fals
 _EXEMPT_COMMANDS = frozenset({
     "/start", "/help", "/miniapp", "/mykey",
     "/roles", "/support", "/suggest", "/about", "/limit",
+    "/login", "/code",   # авторизация через код — не AI-запрос
 })
 
 def _make_limit_msg(chat_type: str, miniapp_url: str) -> tuple[str, object]:

@@ -49,7 +49,7 @@ const DEFAULT_SETTINGS: UiSettings = {
   time24h:        true,
   compact:        false,
   theme:          'auto',
-  accent_color:   '#5ce1e6',
+  accent_color:   '#A78BFA',
 }
 
 interface ScheduleStore {
