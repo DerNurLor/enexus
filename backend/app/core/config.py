@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     # Telegram
     telegram_bot_token:      SecretStr = SecretStr("")
     webhook_base_url:        str       = "https://yourdomain.com"
+    web_url:                 str       = ""
     support_bot_token:       SecretStr = SecretStr("")
     support_admin_chat_id:   int       = 0
     admin_bot_token:         SecretStr = SecretStr("")
@@ -78,6 +79,9 @@ class Settings(BaseSettings):
     auth_mongo_db:  str       = "ncfu_auth"
     jwt_secret:     SecretStr = SecretStr("")
     twocaptcha_api_key: str = ""
+    # Внутренний секрет для вызовов бот→API (код авторизации)
+    # Генерируется автоматически в setup-secrets.sh
+    bot_api_secret:     str = ""
     jwt_algorithm:  str       = "HS256"
 
     # Static

@@ -10,6 +10,7 @@ ecampus/sync_service.py
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 from datetime import datetime, timezone
@@ -239,43 +240,78 @@ async def _collect_all_data(client, record: ECampusSyncRecord, viewmodel: dict) 
         await record.set({"student_id": student_id})
 
     total_terms = len(terms)
-    done_terms = 0
+    done_terms  = 0
     if total_terms > 0:
         await record.set({"sync_total_terms": total_terms, "sync_progress": 5})
-    for term in terms:  # все семестры
+
+    for term in terms:
         term_id = term.get("id") or term.get("Id") or term.get("termId")
         if not term_id:
+            done_terms += 1
             continue
+
         try:
             courses = await client.get_courses(student_id, term_id)
-            for course in courses:
-                course["term_id"]   = term_id
-                course["term_name"] = f"{term.get("_year_name", "")} {term.get("Name", term.get("name", ""))}".strip()
-                course["lessons"] = {}
-                for lt in course.get("LessonTypes", []):
-                    lt_id = lt.get("Id")
-                    if lt_id:
-                        for attempt in range(3):
-                            try:
-                                lessons = await client.get_lessons(lt_id, student_id)
-                                if lessons:
-                                    course["lessons"][lt.get("Name", str(lt_id))] = lessons
-                                break
-                            except Exception as e:
-                                if "ReadTimeout" in str(type(e).__name__) and attempt < 2:
-                                    logger.warning(f"GetLessons timeout lt_id={lt_id}, retry {attempt+1}/3")
-                                    import asyncio as _asyncio
-                                    await _asyncio.sleep(5 * (attempt + 1))
-                                else:
-                                    logger.warning(f"GetLessons failed lt_id={lt_id}: {e.__class__.__name__}: {e}")
-                                    break
-                all_courses.append(course)
         except Exception as e:
-            logger.warning(f"Term {term_id} failed: {e}")
-        finally:
+            logger.warning(f"Term {term_id} get_courses failed: {e}")
             done_terms += 1
             pct = 5 + int(done_terms / max(total_terms, 1) * 90)
-            await record.set({"sync_done_terms": done_terms, "sync_progress": pct, "sync_courses_found": len(all_courses)})
+            await record.set({"sync_done_terms": done_terms, "sync_progress": pct})
+            continue
+
+        for course in courses:
+            course["term_id"]   = term_id
+            term_name = term.get("_year_name", "") + " " + term.get("Name", term.get("name", ""))
+            course["term_name"] = term_name.strip()
+            course["lessons"]   = {}
+
+        # Параллельная загрузка занятий для всех курсов семестра
+        lesson_tasks = []
+        for ci, course in enumerate(courses):
+            for lt in course.get("LessonTypes", []):
+                lt_id = lt.get("Id")
+                if lt_id:
+                    lesson_tasks.append((lt_id, lt.get("Name", str(lt_id)), ci))
+
+        if lesson_tasks:
+            LESSON_CONCURRENCY = 6
+            LESSON_TIMEOUT     = 25
+            sem = asyncio.Semaphore(LESSON_CONCURRENCY)
+
+            async def _fetch_one(lt_id, lt_name, ci):
+                async with sem:
+                    for attempt in range(2):
+                        try:
+                            lessons = await asyncio.wait_for(
+                                client.get_lessons(lt_id, student_id),
+                                timeout=LESSON_TIMEOUT,
+                            )
+                            if lessons:
+                                courses[ci]["lessons"][lt_name] = lessons
+                            return
+                        except asyncio.TimeoutError:
+                            if attempt == 0:
+                                logger.warning(f"GetLessons timeout lt_id={lt_id}, retry")
+                                await asyncio.sleep(2)
+                            else:
+                                logger.warning(f"GetLessons timeout lt_id={lt_id} — skipped")
+                                return
+                        except Exception as e:
+                            logger.warning(f"GetLessons failed lt_id={lt_id}: {e.__class__.__name__}: {e}")
+                            return
+
+            await asyncio.gather(*[_fetch_one(lt_id, lt_name, ci) for lt_id, lt_name, ci in lesson_tasks])
+
+        all_courses.extend(courses)
+
+        done_terms += 1
+        pct = 5 + int(done_terms / max(total_terms, 1) * 90)
+        await record.set({
+            "sync_done_terms":    done_terms,
+            "sync_progress":      pct,
+            "sync_courses_found": len(all_courses),
+            "courses":            all_courses,
+        })
 
     # Дедупликация файлов
     seen, unique_files = set(), []

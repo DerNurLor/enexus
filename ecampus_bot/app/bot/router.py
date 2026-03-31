@@ -22,6 +22,7 @@ from app.models.conversation import Message as MessageModel
 
 from app.bot.handlers.ai_handler import handle_message
 from app.bot.handlers.commands  import cmd_roles, cmd_miniapp, cmd_limit, cmd_support, cmd_suggest, cmd_about
+from app.bot.handlers.bot_login import handle_login_code, handle_login_callback, cmd_login, cmd_code, LoginConfirmCallback
 from app.bot.message_store import store_message, store_callback_choice, store_bot_reply, _entities_to_html
 from datetime import datetime, timezone
 import logging
@@ -220,6 +221,23 @@ async def handle_about(message: TelegramMessage) -> None:
     await cmd_about(message)
 
 
+@router.message(Command("login"))
+async def handle_login(message: TelegramMessage) -> None:
+    """Инструкция по входу на сайт — не считается AI-запросом (в _EXEMPT_COMMANDS)."""
+    asyncio.ensure_future(store_message(message, role="user"))
+    await cmd_login(message)
+
+
+@router.message(Command("code"))
+async def handle_code_command(message: TelegramMessage) -> None:
+    """
+    /code XXXXXX — ввод кода для входа на сайт.
+    Исключён из квоты через _EXEMPT_COMMANDS в anti_flood.py.
+    Перехватывается ДО any_text_message.
+    """
+    await cmd_code(message)
+
+
 @router.message(F.chat.type.in_({'group', 'supergroup'}))
 async def handle_group_message(message: TelegramMessage) -> None:
     """
@@ -296,6 +314,12 @@ async def _update_edited_message(msg: TelegramMessage) -> None:
 
 
 # ── Inline keyboard callback — page navigation ─────────────────────────────────
+
+@router.callback_query(LoginConfirmCallback.filter())
+async def cb_login_confirm(cb: CallbackQuery) -> None:
+    """Пользователь нажал «Подтвердить вход» или «Отмена» в диалоге авторизации."""
+    await handle_login_callback(cb)
+
 
 @router.callback_query(F.data.startswith("pg:"))
 async def cb_page_nav(cb: CallbackQuery) -> None:
@@ -784,6 +808,8 @@ async def handle_contact(message: TelegramMessage) -> None:
 BOT_COMMANDS = [
     BotCommand(command="start",   description="Начало работы"),
     BotCommand(command="help",    description="Справка"),
+    BotCommand(command="login",   description="Войти на сайт"),
+    BotCommand(command="code",    description="Ввести код для входа (/code XXXXXX)"),
     BotCommand(command="miniapp", description="Открыть расписание (Mini App)"),
     BotCommand(command="limit",   description="Мой лимит запросов"),
     BotCommand(command="roles",   description="Мои роли и права"),

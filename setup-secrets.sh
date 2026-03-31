@@ -123,6 +123,7 @@ echo "── Авто-генерация ─────────────
 hexsecret JWT_SECRET       "JWT Secret"       32
 hexsecret DASHBOARD_SECRET "Dashboard Secret" 16
 hexsecret GRAPHQL_SECRET   "GraphQL Secret"   16
+hexsecret BOT_API_SECRET   "Bot→API Secret"   16
 echo ""
 
 C["DOMAIN"]="${C[DOMAIN]:-${C[WEBHOOK_BASE_URL]:-localhost}}"
@@ -138,6 +139,7 @@ C["SUPPORT_ADMIN_CHAT_ID"]="${C[SUPPORT_ADMIN_CHAT_ID]:-0}"
 C["SENTRY_DSN"]="${C[SENTRY_DSN]:-}"
 C["TWOCAPTCHA_API_KEY"]="${C[TWOCAPTCHA_API_KEY]:-}"
 C["WEB_URL"]="${C[WEB_URL]:-${C[WEBHOOK_BASE_URL]:-}}"
+C["BOT_API_SECRET"]="${C[BOT_API_SECRET]:-}"
 
 cat > "$SECRETS_FILE" << EOF
 # /etc/ncfu/secrets — ТОЛЬКО ROOT — НЕ КОПИРОВАТЬ В GIT
@@ -165,6 +167,7 @@ OPENAI_API_KEY=${C[OPENAI_API_KEY]}
 JWT_SECRET=${C[JWT_SECRET]}
 DASHBOARD_SECRET=${C[DASHBOARD_SECRET]}
 GRAPHQL_SECRET=${C[GRAPHQL_SECRET]}
+BOT_API_SECRET=${C[BOT_API_SECRET]}
 
 ADMIN_PATH=${C[ADMIN_PATH]}
 CORS_ALLOWED_ORIGINS=${C[CORS_ALLOWED_ORIGINS]}

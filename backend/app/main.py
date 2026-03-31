@@ -117,6 +117,9 @@ def create_app() -> FastAPI:
     from app.auth.router import router as auth_router
     app.include_router(auth_router)
 
+    from app.auth.bot_code_router import router as bot_code_router
+    app.include_router(bot_code_router)
+
     from app.api.routes import groups, institutes, overview, rooms, schedules, scrape, search, teachers
     for route in [groups, institutes, overview, rooms, schedules, scrape, search, teachers]:
         app.include_router(route.router)

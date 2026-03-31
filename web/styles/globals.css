@@ -8,75 +8,88 @@
   --font-sans: 'Outfit', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', monospace;
 
-  --bg: #0a0a0a;
-  --surface: #161616;
-  --card: #1c1c1e;
-  --border: #2a2a2a;
-  --cyan: #5ce1e6;
-  --cyan-dim: rgba(92, 225, 230, 0.12);
+  --bg:      #0d0d0f;
+  --surface: #18181b;
+  --card:    #1f1f23;
+  --border:  #2e2e35;
 
-  --t-primary: #ffffff;
-  --t-secondary: #8e8e93;
-  --t-muted: #48484a;
+  --accent:     #A78BFA;
+  --accent-dim: rgba(167, 139, 250, 0.12);
+  --accent-fg:  #160d33;
 
-  --lab: #4ade80;
-  --lecture: #60a5fa;
-  --seminar: #fb923c;
+  --cyan:     var(--accent);
+  --cyan-dim: var(--accent-dim);
+
+  --t-primary:   #f4f4f5;
+  --t-secondary: #8e8e99;
+  --t-muted:     #4a4a55;
+
+  --lab:      #4ade80;
+  --lecture:  #60a5fa;
+  --seminar:  #fb923c;
   --practice: #a78bfa;
 
   --nav-height: 72px;
   --safe-bottom: env(safe-area-inset-bottom, 0px);
 }
 
-/* ── Светлая тема ─────────────────────────────────────────────────────────── */
 html.light {
-  --bg: #f2f2f7;
+  --bg:      #f4f4f5;
   --surface: #ffffff;
-  --card: #ffffff;
-  --border: #e0e0e5;
-  --cyan: #0a84a8;
-  --cyan-dim: rgba(10, 132, 168, 0.10);
+  --card:    #ffffff;
+  --border:  #e4e4e7;
 
-  --t-primary: #1c1c1e;
-  --t-secondary: #6b6b72;
-  --t-muted: #aeaeb2;
+  --accent:     #7c3aed;
+  --accent-dim: rgba(124, 58, 237, 0.10);
+  --accent-fg:  #ffffff;
 
-  --lab: #1a8f48;
-  --lecture: #1a6fb5;
-  --seminar: #c45c0a;
-  --practice: #6b44c4;
+  --cyan:     var(--accent);
+  --cyan-dim: var(--accent-dim);
+
+  --t-primary:   #18181b;
+  --t-secondary: #52525b;
+  --t-muted:     #a1a1aa;
+
+  --lab:      #16a34a;
+  --lecture:  #2563eb;
+  --seminar:  #ea580c;
+  --practice: #7c3aed;
 }
 
 html.light body::before {
   background:
-    radial-gradient(ellipse 60% 50% at 15% 20%, rgba(10,132,168,0.06) 0%, transparent 70%),
-    radial-gradient(ellipse 40% 35% at 85% 75%, rgba(26,111,181,0.04) 0%, transparent 70%);
+    radial-gradient(ellipse 60% 50% at 15% 20%, rgba(124,58,237,0.05) 0%, transparent 70%),
+    radial-gradient(ellipse 40% 35% at 85% 75%, rgba(124,58,237,0.03) 0%, transparent 70%);
 }
 
-/* ── Авто тема (системные настройки) ─────────────────────────────────────── */
 @media (prefers-color-scheme: light) {
-  html:not(.dark) {
-    --bg: #f2f2f7;
+  html:not(.dark):not(.light) {
+    --bg:      #f4f4f5;
     --surface: #ffffff;
-    --card: #ffffff;
-    --border: #e0e0e5;
-    --cyan: #0a84a8;
-    --cyan-dim: rgba(10, 132, 168, 0.10);
+    --card:    #ffffff;
+    --border:  #e4e4e7;
 
-    --t-primary: #1c1c1e;
-    --t-secondary: #6b6b72;
-    --t-muted: #aeaeb2;
+    --accent:     #7c3aed;
+    --accent-dim: rgba(124, 58, 237, 0.10);
+    --accent-fg:  #ffffff;
 
-    --lab: #1a8f48;
-    --lecture: #1a6fb5;
-    --seminar: #c45c0a;
-    --practice: #6b44c4;
+    --cyan:     var(--accent);
+    --cyan-dim: var(--accent-dim);
+
+    --t-primary:   #18181b;
+    --t-secondary: #52525b;
+    --t-muted:     #a1a1aa;
+
+    --lab:      #16a34a;
+    --lecture:  #2563eb;
+    --seminar:  #ea580c;
+    --practice: #7c3aed;
   }
 
-  html:not(.dark) body::before {
+  html:not(.dark):not(.light) body::before {
     background:
-      radial-gradient(ellipse 60% 50% at 15% 20%, rgba(10,132,168,0.06) 0%, transparent 70%),
-      radial-gradient(ellipse 40% 35% at 85% 75%, rgba(26,111,181,0.04) 0%, transparent 70%);
+      radial-gradient(ellipse 60% 50% at 15% 20%, rgba(124,58,237,0.05) 0%, transparent 70%),
+      radial-gradient(ellipse 40% 35% at 85% 75%, rgba(124,58,237,0.03) 0%, transparent 70%);
   }
 }
 
@@ -95,21 +108,17 @@ html, body {
   overflow-x: hidden;
 }
 
-/* Scrollbar */
 ::-webkit-scrollbar { width: 0; }
 
-/* Selection */
 ::selection {
-  background: var(--cyan-dim);
-  color: var(--cyan);
+  background: var(--accent-dim);
+  color: var(--accent);
 }
 
-/* Safe area for PWA */
 .pb-nav {
   padding-bottom: calc(var(--nav-height) + var(--safe-bottom));
 }
 
-/* Animated bg gradient */
 body::before {
   content: '';
   position: fixed;
@@ -117,8 +126,8 @@ body::before {
   pointer-events: none;
   z-index: 0;
   background:
-    radial-gradient(ellipse 60% 50% at 15% 20%, rgba(92,225,230,0.04) 0%, transparent 70%),
-    radial-gradient(ellipse 40% 35% at 85% 75%, rgba(96,165,250,0.035) 0%, transparent 70%);
+    radial-gradient(ellipse 60% 50% at 15% 20%, rgba(167,139,250,0.05) 0%, transparent 70%),
+    radial-gradient(ellipse 40% 35% at 85% 75%, rgba(139,92,246,0.04) 0%, transparent 70%);
   animation: bgShift 20s ease-in-out infinite alternate;
 }
 
@@ -130,7 +139,6 @@ body::before {
 
 body > * { position: relative; z-index: 1; }
 
-
 @layer components {
   .card {
     @apply bg-[var(--card)] rounded-2xl border border-[var(--border)];
@@ -141,11 +149,17 @@ body > * { position: relative; z-index: 1; }
   }
 
   .pill-active {
-    @apply bg-[var(--cyan)] text-black;
+    background: var(--accent);
+    color: var(--accent-fg);
   }
 
   .pill-inactive {
-    @apply bg-[var(--card)] text-[var(--t-secondary)] border border-[var(--border)] hover:border-[var(--cyan)] hover:text-[var(--t-primary)];
+    @apply bg-[var(--card)] text-[var(--t-secondary)] border border-[var(--border)];
+  }
+
+  .pill-inactive:hover {
+    border-color: var(--accent);
+    color: var(--t-primary);
   }
 
   .input-search {
@@ -153,12 +167,12 @@ body > * { position: relative; z-index: 1; }
   }
 
   .input-search:focus {
-    @apply border-[var(--cyan)] ring-1 ring-[var(--cyan)] ring-opacity-30;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-dim);
   }
 
   .nav-btn {
     @apply flex flex-col items-center gap-1 px-4 py-2 transition-all duration-200 cursor-pointer;
-    /* убираем браузерный highlight после нажатия */
     outline: none;
     -webkit-tap-highlight-color: transparent;
   }
@@ -169,58 +183,45 @@ body > * { position: relative; z-index: 1; }
   }
 }
 
-/* Reset focus-visible highlight on nav buttons and pill buttons */
 button:focus-visible,
 a:focus-visible {
-  outline: 2px solid var(--cyan);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
   border-radius: 12px;
 }
 
-/* Remove tap highlight on mobile */
 button, a {
   -webkit-tap-highlight-color: transparent;
 }
 
-/* Animations */
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(12px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-
 @keyframes fadeIn {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
-
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.4; }
 }
-
 @keyframes shimmer {
   0%   { background-position: -200% center; }
   100% { background-position:  200% center; }
 }
-
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
 
-.animate-fade-up {
-  animation: fadeUp 0.3s ease forwards;
-}
-
-.animate-fade-in {
-  animation: fadeIn 0.2s ease forwards;
-}
+.animate-fade-up { animation: fadeUp 0.3s ease forwards; }
+.animate-fade-in { animation: fadeIn 0.2s ease forwards; }
+.animate-spin    { animation: spin 0.8s linear infinite; }
 
 .animate-pulse {
-  animation: pulse 1.5s ease-in-out infinite;
-}
-
-.animate-spin {
-  animation: spin 0.8s linear infinite;
+  background: linear-gradient(90deg, var(--card) 25%, rgba(255,255,255,0.03) 50%, var(--card) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease infinite;
 }
 
 .stagger > * {
@@ -236,14 +237,6 @@ button, a {
 .stagger > *:nth-child(7) { animation-delay: 360ms; }
 .stagger > *:nth-child(8) { animation-delay: 420ms; }
 
-/* Skeleton shimmer */
-.animate-pulse {
-  background: linear-gradient(90deg, var(--card) 25%, rgba(255,255,255,0.03) 50%, var(--card) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.5s ease infinite;
-}
-
-/* Card hover lift — только для явных .lesson-card */
 .lesson-card-hover {
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }

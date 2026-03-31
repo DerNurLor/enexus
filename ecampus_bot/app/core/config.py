@@ -83,9 +83,13 @@ class Settings(BaseSettings):
 
     # Auth
     auth_mongo_db:  str       = "ncfu_auth"
-    # [V1] No insecure plaintext default. Generate with: openssl rand -hex 64
     jwt_secret:     SecretStr = SecretStr("")
     jwt_algorithm:  str       = "HS256"
+    # Внутренний секрет для вызовов бот→API (code-авторизация)
+    # Должен совпадать с backend config. Генерируется в setup-secrets.sh
+    bot_api_secret: str       = ""
+    # Публичный URL веб-портала (для инструкций пользователю)
+    web_url:        str       = ""
 
     # Static
     static_dir: str = "/app/static"

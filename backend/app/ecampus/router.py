@@ -3,24 +3,28 @@ ecampus/router.py
 
 API эндпоинты для eCampus интеграции.
 
-ИСПРАВЛЕНИЯ:
-  [F1] Удалён дублирующийся @router.get("/file/{file_type}") — второй перекрывал первый,
-       что приводило к непредсказуемому поведению (FastAPI использовал первый, но код дублировался).
-  [F2] Исправлена проверка редиректа на login: status_code 302 не означает редирект на login
-       при follow_redirects=True — нужно проверять итоговый URL.
-  [F3] file_type теперь проверяется через Path параметр с Literal-валидацией.
-  [F4] kodCh валидируется как gt=0 для предотвращения SSRF с некорректными значениями.
-  [F5] Добавлен X-Content-Type-Options header к прокси-ответам файлов.
-  [F6] sync_status guard в manual_sync теперь использует set() для атомарного обновления.
+Поток авторизации:
+  1. GET  /api/ecampus/captcha          → возвращает base64 картинку капчи
+  2. POST /api/ecampus/connect          → логин + пароль + captcha_code → авторизация
+  3. GET  /api/ecampus/status           → статус синхронизации
+  4. GET  /api/ecampus/data             → все данные
+  5. GET  /api/ecampus/course/{id}      → данные конкретного курса (HIGH приоритет)
+  6. POST /api/ecampus/sync             → запустить синхронизацию вручную
+  7. DELETE /api/ecampus/disconnect     → удалить учётные данные
+
+Приоритеты:
+  - /course/{id}  → HIGH (пользователь открыл прямо сейчас)
+  - /sync manual  → HIGH
+  - фоновый сбор  → LOW
 """
 from __future__ import annotations
 
 import base64
 import json
-from typing import Optional, Literal
+from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response, status
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Response, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from loguru import logger
 
@@ -29,18 +33,6 @@ from app.ecampus.captcha_solver import solve_math_captcha
 from app.auth.models import AuthUser
 
 router = APIRouter(prefix="/ecampus", tags=["ecampus"])
-
-# Допустимые типы файлов — явный whitelist
-FileType = Literal["lecture", "umk", "instruction", "program"]
-
-FILE_PATHS: dict[str, str] = {
-    "lecture":     "/program/FileLectureDownload",
-    "umk":         "/program/FileUMKDownload",
-    "instruction": "/program/FileInstructionDownload",
-    "program":     "/program/DownloadForStudent",
-}
-
-ECAMPUS_BASE = "https://ecampus.ncfu.ru"
 
 
 # ── Схемы ─────────────────────────────────────────────────────────────────────
@@ -71,25 +63,29 @@ class SyncStatusResponse(BaseModel):
 @router.get("/captcha")
 async def get_captcha(current_user: AuthUser = Depends(get_current_user)):
     """
-    Получает картинку капчи с eCampus и возвращает base64 изображение.
-    Сессионные cookies сохраняются в Redis (TTL 10 минут).
+    Получает картинку капчи с eCampus и возвращает:
+    - base64 изображение для отображения на сайте
+    - captcha_cookie для последующей отправки формы (хранится в Redis)
     """
     import httpx
     from app.cache.redis import get_redis
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": f"{ECAMPUS_BASE}/account/login",
+        "Referer": "https://ecampus.ncfu.ru/account/login",
     }
 
     try:
         async with httpx.AsyncClient(headers=headers, timeout=15, follow_redirects=True) as client:
-            await client.get(f"{ECAMPUS_BASE}/account/login")
+            # Сначала получаем страницу входа — нужен CSRF токен
+            login_resp = await client.get("https://ecampus.ncfu.ru/account/login")
             csrf_cookies = dict(client.cookies)
-            captcha_resp = await client.get(f"{ECAMPUS_BASE}/Captcha/Captcha")
-            captcha_resp.raise_for_status()
+
+            # Получаем капчу
+            captcha_resp = await client.get("https://ecampus.ncfu.ru/Captcha/Captcha")
             captcha_cookies = dict(client.cookies)
 
+        # Сохраняем cookies в Redis привязанные к пользователю (TTL 10 минут)
         r = get_redis()
         session_data = json.dumps({
             "csrf_cookies":    csrf_cookies,
@@ -97,6 +93,7 @@ async def get_captcha(current_user: AuthUser = Depends(get_current_user)):
         })
         await r.setex(f"ecampus:captcha_session:{current_user.tg_id}", 600, session_data)
 
+        # Возвращаем base64 картинку
         img_b64 = base64.b64encode(captcha_resp.content).decode()
         return {
             "image": f"data:image/png;base64,{img_b64}",
@@ -108,36 +105,44 @@ async def get_captcha(current_user: AuthUser = Depends(get_current_user)):
         raise HTTPException(status_code=503, detail=f"Не удалось получить капчу: {e}")
 
 
-# ── Авто-решение капчи ────────────────────────────────────────────────────────
+# ── Подключить аккаунт eCampus ────────────────────────────────────────────────
+
 
 @router.get("/captcha/solve")
 async def solve_captcha_auto(current_user: AuthUser = Depends(get_current_user)):
     """
     Получает картинку капчи с eCampus и решает её через 2captcha.
+    Возвращает { answer, captcha_cookie } для использования при connect.
     """
     from app.core.config import settings
-    import httpx
-    from bs4 import BeautifulSoup
+    import httpx, base64
 
     api_key = getattr(settings, "twocaptcha_api_key", "") or ""
     if not api_key:
         raise HTTPException(status_code=503, detail="2captcha API key не настроен.")
 
+    ecampus_base = "https://ecampus.ncfu.ru"
+
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        login_page = await client.get(f"{ECAMPUS_BASE}/account/login")
+        # Получаем страницу логина для csrf + captcha cookie
+        login_page = await client.get(f"{ecampus_base}/account/login")
         csrf_token = ""
+        from bs4 import BeautifulSoup
         soup = BeautifulSoup(login_page.text, "html.parser")
         csrf_el = soup.find("input", {"name": "__RequestVerificationToken"})
         if csrf_el:
             csrf_token = csrf_el.get("value", "")
 
-        captcha_resp = await client.get(f"{ECAMPUS_BASE}/Captcha/Captcha")
+        # Получаем картинку капчи
+        captcha_resp = await client.get(f"{ecampus_base}/Captcha/Captcha")
         if not captcha_resp.is_success:
             raise HTTPException(status_code=502, detail="Не удалось получить капчу с eCampus.")
 
         image_bytes = captcha_resp.content
+        # Сохраняем captcha cookie
         captcha_cookie = dict(client.cookies).get("captcha", "")
 
+    # Решаем через 2captcha
     answer = await solve_math_captcha(image_bytes, api_key)
     if not answer:
         raise HTTPException(status_code=502, detail="Не удалось решить капчу. Попробуйте вручную.")
@@ -147,9 +152,6 @@ async def solve_captcha_auto(current_user: AuthUser = Depends(get_current_user))
         "captcha_cookie": captcha_cookie,
         "csrf_token":     csrf_token,
     }
-
-
-# ── Подключить аккаунт eCampus ────────────────────────────────────────────────
 
 @router.post("/connect")
 async def connect_ecampus(
@@ -162,7 +164,8 @@ async def connect_ecampus(
     После успешной авторизации запускает фоновый сбор данных.
     """
     from app.cache.redis import get_redis
-    from app.ecampus.sync_service import save_credentials
+    from app.ecampus.sync_service import save_credentials, ECampusSyncRecord
+    from app.ecampus.client import ECampusClient, ECampusAuthError
     import httpx
     from bs4 import BeautifulSoup
 
@@ -171,6 +174,7 @@ async def connect_ecampus(
     from app.core.config import settings
     _2captcha_key = getattr(settings, "twocaptcha_api_key", "") or ""
 
+    # Авторизуемся на eCampus
     try:
         async with httpx.AsyncClient(
             headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
@@ -178,16 +182,19 @@ async def connect_ecampus(
             timeout=60,
         ) as client:
 
-            login_page = await client.get(f"{ECAMPUS_BASE}/account/login")
+            # Получаем CSRF токен и captcha cookie
+            login_page = await client.get("https://ecampus.ncfu.ru/account/login")
             soup = BeautifulSoup(login_page.text, "html.parser")
             token_el = soup.find("input", {"name": "__RequestVerificationToken"})
             if not token_el:
                 raise HTTPException(status_code=503, detail="Не удалось получить CSRF токен")
             csrf_token = token_el.get("value", "")
 
-            captcha_resp = await client.get(f"{ECAMPUS_BASE}/Captcha/Captcha")
+            # Получаем капчу
+            captcha_resp = await client.get("https://ecampus.ncfu.ru/Captcha/Captcha")
 
             if body.auto_captcha and _2captcha_key:
+                # Решаем через 2captcha
                 from app.ecampus.captcha_solver import solve_math_captcha
                 captcha_code = await solve_math_captcha(captcha_resp.content, _2captcha_key)
                 if not captcha_code:
@@ -199,8 +206,9 @@ async def connect_ecampus(
                 if not captcha_code:
                     raise HTTPException(status_code=400, detail="Введите код с картинки капчи.")
 
+            # Отправляем форму входа
             resp = await client.post(
-                f"{ECAMPUS_BASE}/account/login?returnUrl=%2Faccount",
+                "https://ecampus.ncfu.ru/account/login?returnUrl=%2Faccount",
                 data={
                     "Login":    body.login,
                     "Password": body.password,
@@ -210,36 +218,39 @@ async def connect_ecampus(
                 },
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded",
-                    "Referer": f"{ECAMPUS_BASE}/account/login",
-                    "Origin": ECAMPUS_BASE,
+                    "Referer": "https://ecampus.ncfu.ru/account/login",
+                    "Origin": "https://ecampus.ncfu.ru",
                 },
             )
 
-            # [F2] follow_redirects=True — проверяем финальный URL, а не status_code
-            final_url = str(resp.url)
-            if "/account/login" in final_url or "validation-summary-errors" in resp.text:
+            # Проверяем успешность
+            if "account/login" in str(resp.url) or "validation-summary-errors" in resp.text:
                 soup2 = BeautifulSoup(resp.text, "html.parser")
                 err_el = soup2.select_one(".validation-summary-errors ul li")
                 err_msg = err_el.text.strip() if err_el else "Неверный логин, пароль или капча"
                 raise HTTPException(status_code=401, detail=err_msg)
 
+            # Сохраняем сессию
             session_cookies = dict(client.cookies)
 
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-        logger.error(f"eCampus auth failed for tg_id={current_user.tg_id}: {e}\n{traceback.format_exc()}")
+        import traceback; logger.error(f"eCampus auth failed for tg_id={current_user.tg_id}: {e}\n{traceback.format_exc()}")
         raise HTTPException(status_code=503, detail=f"Ошибка авторизации: {e}")
 
-    await save_credentials(
+    # Сохраняем зашифрованные учётные данные и сессию
+    record = await save_credentials(
         tg_id=current_user.tg_id,
         login=body.login,
         password=body.password,
         session_cookies=session_cookies,
     )
 
+    # Удаляем временную сессию капчи
     await r.delete(f"ecampus:captcha_session:{current_user.tg_id}")
+
+    # Запускаем фоновый сбор данных (LOW приоритет)
     background_tasks.add_task(_background_sync, current_user.tg_id)
 
     return {
@@ -295,13 +306,17 @@ async def get_sync_data(current_user: AuthUser = Depends(get_current_user)):
     }
 
 
-# ── Получить данные конкретного курса ─────────────────────────────────────────
+# ── Получить данные конкретного курса (HIGH приоритет) ────────────────────────
 
 @router.get("/course/{course_id}")
 async def get_course_data(
     course_id: str,
     current_user: AuthUser = Depends(get_current_user),
 ):
+    """
+    Возвращает данные конкретного курса.
+    Если данные устарели — запускает HIGH приоритет задачу обновления и ждёт.
+    """
     from app.ecampus.sync_service import ECampusSyncRecord
     from app.ecampus.queue import get_queue, ECampusTask, Priority
 
@@ -309,6 +324,7 @@ async def get_course_data(
     if not record:
         raise HTTPException(status_code=404, detail="Подключите eCampus в настройках.")
 
+    # Ищем курс в кэшированных данных
     course = next((c for c in record.courses if str(c.get("id", "")) == course_id), None)
     if not course:
         raise HTTPException(status_code=404, detail="Курс не найден.")
@@ -317,6 +333,7 @@ async def get_course_data(
     if not course_url:
         return {"course": course, "grades": [], "files": [], "links": []}
 
+    # Запускаем HIGH приоритет задачу для свежих данных
     queue = get_queue()
     task = ECampusTask(
         task_type="fetch_course",
@@ -326,10 +343,12 @@ async def get_course_data(
     )
     task_id = await queue.enqueue(task)
 
+    # Ждём результата (до 15 секунд)
     result = await queue.get_result(task_id, timeout=15.0)
     if result and result.get("ok"):
         return {"course": course, **result["data"]}
 
+    # Если не дождались — возвращаем кэшированные данные
     cached_grades = record.grades.get(course.get("name", ""), [])
     return {
         "course": course,
@@ -340,215 +359,25 @@ async def get_course_data(
     }
 
 
-# ── Занятия курса ─────────────────────────────────────────────────────────────
-
-@router.get("/course/{course_id}/lessons")
-async def get_course_lessons(
-    course_id: int,
-    term_id: int,
-    group_id: int | None = None,
-    current_user: AuthUser = Depends(get_current_user),
-):
-    from app.ecampus.sync_service import ECampusSyncRecord
-
-    record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == current_user.tg_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Данные не найдены.")
-
-    course = next(
-        (c for c in record.courses if c.get("Id") == course_id and c.get("term_id") == term_id),
-        None
-    )
-    if not course:
-        raise HTTPException(status_code=404, detail="Курс не найден.")
-
-    lessons = course.get("lessons", {})
-
-    if group_id:
-        from app.models.lesson import LessonDoc
-        import re
-        course_name = course.get("Name", "")
-        course_name_short = course_name[:15]
-        schedule_lessons = await LessonDoc.find(
-            LessonDoc.group_id == group_id,
-        ).to_list()
-        schedule_lessons = [
-            sl for sl in schedule_lessons
-            if sl.subject and re.search(re.escape(course_name_short), sl.subject, re.IGNORECASE)
-        ]
-        room_by_date: dict[str, str] = {}
-        for sl in schedule_lessons:
-            date_key = sl.date.strftime("%Y-%m-%d") if sl.date else ""
-            room = sl.room_name or ""
-            if room and room != "None":
-                room_by_date[date_key] = room
-
-        for lt_lessons in lessons.values():
-            for lesson in lt_lessons:
-                if not lesson.get("Room"):
-                    date_key = str(lesson.get("Date", ""))[:10]
-                    if date_key in room_by_date:
-                        lesson["Room"] = room_by_date[date_key]
-
-    return {
-        "course_id":      course_id,
-        "course_name":    course.get("Name"),
-        "lessons":        lessons,
-        "max_rating":     course.get("MaxRating", 0),
-        "current_rating": course.get("CurrentRating", 0),
-    }
-
-
-# ── Прокси файлов eCampus ─────────────────────────────────────────────────────
-# [F1] Был ДУБЛИРУЮЩИЙСЯ роут — удалён второй (идентичный) блок.
-# [F3] file_type теперь строго типизирован через Literal.
-# [F4] kodCh валидируется как gt=0.
-
-@router.get("/file/{file_type}")
-async def proxy_ecampus_file(
-    file_type: FileType,           # [F3] Literal — FastAPI вернёт 422 если не из whitelist
-    kodCh: int = Query(..., gt=0), # [F4] kodCh > 0
-    current_user: AuthUser = Depends(get_current_user),
-):
-    """Проксирует скачивание файла с eCampus через сессию пользователя."""
-    from app.ecampus.sync_service import ECampusSyncRecord
-    import httpx
-
-    path = FILE_PATHS.get(file_type)
-    if not path:
-        raise HTTPException(status_code=400, detail="Неизвестный тип файла.")
-
-    record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == current_user.tg_id)
-    if not record or not record.session_cookies_json:
-        raise HTTPException(status_code=401, detail="Нет сессии eCampus. Переподключитесь.")
-
-    cookies = json.loads(record.session_cookies_json)
-    url = f"{ECAMPUS_BASE}{path}?kodCh={kodCh}"
-
-    try:
-        async with httpx.AsyncClient(cookies=cookies, follow_redirects=True, timeout=30) as client:
-            resp = await client.get(url)
-            # [F2] Правильная проверка редиректа на страницу логина
-            if "/account/login" in str(resp.url):
-                raise HTTPException(status_code=401, detail="Сессия eCampus истекла. Переподключитесь.")
-            if not resp.is_success:
-                raise HTTPException(status_code=404, detail="Файл не найден.")
-
-            content_type = resp.headers.get("content-type", "application/octet-stream")
-            content_disp = resp.headers.get(
-                "content-disposition",
-                f'attachment; filename="{file_type}_{kodCh}.pdf"'
-            )
-
-            return StreamingResponse(
-                iter([resp.content]),
-                media_type=content_type,
-                headers={
-                    "Content-Disposition": content_disp,
-                    "X-Content-Type-Options": "nosniff",  # [F5]
-                },
-            )
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Ошибка загрузки файла: {e}")
-
-
-# ── Материалы курса ───────────────────────────────────────────────────────────
-
-@router.get("/course/{course_id}/materials")
-async def get_course_materials(
-    course_id: int,
-    term_id: int,
-    current_user: AuthUser = Depends(get_current_user),
-):
-    from app.ecampus.sync_service import ECampusSyncRecord
-
-    record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == current_user.tg_id)
-    if not record:
-        raise HTTPException(status_code=404, detail="Данные не найдены.")
-
-    course = next(
-        (c for c in record.courses if c.get("Id") == course_id and c.get("term_id") == term_id),
-        None
-    )
-    if not course:
-        raise HTTPException(status_code=404, detail="Курс не найден.")
-
-    materials = []
-    BASE = "/api/ecampus"
-
-    materials.append({
-        "label": "УМК дисциплины",
-        "url": "https://dspace.ncfu.ru/",
-        "icon": "📚",
-        "external": True,
-        "color": "#10b981",
-    })
-
-    if course.get("HasLectures"):
-        materials.append({
-            "label": "Курс лекций",
-            "url": f"{BASE}/file/lecture?kodCh={course_id}",
-            "icon": "📖",
-            "external": False,
-            "color": "#3b82f6",
-        })
-
-    if course.get("HasUMK"):
-        materials.append({
-            "label": "Метод. указания",
-            "url": f"{BASE}/file/umk?kodCh={course_id}",
-            "icon": "📋",
-            "external": False,
-            "color": "#8b5cf6",
-        })
-
-    if course.get("HasInstruction"):
-        materials.append({
-            "label": "Инструкция",
-            "url": f"{BASE}/file/instruction?kodCh={course_id}",
-            "icon": "📄",
-            "external": False,
-            "color": "#f59e0b",
-        })
-
-    if course.get("locked"):
-        materials.append({
-            "label": "Рабочая программа",
-            "url": f"{BASE}/file/program?kodCh={course_id}",
-            "icon": "📑",
-            "external": False,
-            "color": "#ef4444",
-        })
-
-    materials.append({
-        "label": "СЭО",
-        "url": "https://el.ncfu.ru/",
-        "icon": "🖥",
-        "external": True,
-        "color": "#6b7280",
-    })
-
-    materials.append({
-        "label": "eCampus",
-        "url": "https://ecampus.ncfu.ru/studies",
-        "icon": "🔗",
-        "external": True,
-        "color": "#6b7280",
-    })
-
-    return {"materials": materials}
-
-
-# ── Ручная синхронизация ──────────────────────────────────────────────────────
+# ── Ручная синхронизация (умная) ─────────────────────────────────────────────
 
 @router.post("/sync")
 async def manual_sync(
     background_tasks: BackgroundTasks,
     current_user: AuthUser = Depends(get_current_user),
 ):
-    from app.ecampus.sync_service import ECampusSyncRecord
+    """
+    Умная синхронизация:
+      1. Проверяем что сессия ещё валидна (GET /studies → если JSON содержит
+         'Доступ запрещен' — сессия протухла)
+      2. Если сессия OK → запускаем фоновый сбор данных как раньше
+      3. Если сессия протухла → пробуем тихо переавторизоваться через
+         сохранённые логин/пароль + авто-капча (2captcha)
+      4. Если авто-капча не настроена или не справилась →
+         возвращаем session_expired=True, фронт покажет форму с капчей
+    """
+    from app.ecampus.sync_service import ECampusSyncRecord, decrypt_credential
+    from app.core.config import settings
 
     record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == current_user.tg_id)
     if not record:
@@ -557,8 +386,138 @@ async def manual_sync(
     if record.sync_status == "running":
         raise HTTPException(status_code=409, detail="Синхронизация уже выполняется.")
 
+    # ── Шаг 1: проверяем сессию ──────────────────────────────────────────────
+    session_ok = await _check_session(record)
+
+    if session_ok:
+        background_tasks.add_task(_background_sync, current_user.tg_id)
+        return {"ok": True, "message": "Синхронизация запущена."}
+
+    # ── Шаг 2: сессия протухла — пробуем тихо переавторизоваться ─────────────
+    _2captcha_key = getattr(settings, "twocaptcha_api_key", "") or ""
+    if _2captcha_key:
+        reauth_ok = await _silent_reauth(record, _2captcha_key)
+        if reauth_ok:
+            background_tasks.add_task(_background_sync, current_user.tg_id)
+            return {"ok": True, "message": "Сессия обновлена, синхронизация запущена."}
+
+    # ── Шаг 3: нужна капча от пользователя ───────────────────────────────────
+    # Получаем свежую капчу и возвращаем её фронту
+    try:
+        captcha_data = await _fetch_fresh_captcha(current_user.tg_id)
+        return {
+            "ok": False,
+            "session_expired": True,
+            "captcha_image":   captcha_data["image"],
+            "message":         "Сессия истекла. Введите капчу для повторного входа.",
+        }
+    except Exception as exc:
+        logger.warning(f"Could not fetch captcha for reauth tg_id={current_user.tg_id}: {exc}")
+        return {
+            "ok": False,
+            "session_expired": True,
+            "message": "Сессия истекла. Пересоздайте подключение вручную.",
+        }
+
+
+@router.post("/reauth")
+async def reauth_with_captcha(
+    body: ConnectRequest,
+    background_tasks: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """
+    Повторная авторизация с капчей от пользователя.
+    Вызывается когда /sync вернул session_expired=True.
+    Использует уже сохранённые логин/пароль — пользователь вводит только капчу.
+    """
+    from app.ecampus.sync_service import ECampusSyncRecord, decrypt_credential, save_credentials
+    from app.core.config import settings
+    import httpx
+    from bs4 import BeautifulSoup
+
+    record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == current_user.tg_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Подключите eCampus в настройках.")
+
+    _2captcha_key = getattr(settings, "twocaptcha_api_key", "") or ""
+
+    try:
+        login    = decrypt_credential(record.login_enc)
+        password = decrypt_credential(record.password_enc)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Ошибка расшифровки учётных данных.")
+
+    try:
+        async with httpx.AsyncClient(
+            headers={"User-Agent": "Mozilla/5.0"},
+            follow_redirects=True,
+            timeout=60,
+        ) as client:
+            login_page = await client.get("https://ecampus.ncfu.ru/account/login")
+            soup = BeautifulSoup(login_page.text, "html.parser")
+            token_el = soup.find("input", {"name": "__RequestVerificationToken"})
+            if not token_el:
+                raise HTTPException(status_code=503, detail="Не удалось получить CSRF токен.")
+            csrf_token = token_el.get("value", "")
+
+            captcha_resp = await client.get("https://ecampus.ncfu.ru/Captcha/Captcha")
+
+            if body.auto_captcha and _2captcha_key:
+                captcha_code = await solve_math_captcha(captcha_resp.content, _2captcha_key)
+                if not captcha_code:
+                    # Не справились — отдаём капчу пользователю
+                    img_b64 = base64.b64encode(captcha_resp.content).decode()
+                    return {
+                        "ok": False,
+                        "session_expired": True,
+                        "captcha_image": img_b64,
+                        "message": "Не удалось решить капчу автоматически. Введите вручную.",
+                    }
+            else:
+                captcha_code = body.captcha_code
+                if not captcha_code:
+                    raise HTTPException(status_code=400, detail="Введите код с картинки капчи.")
+
+            resp = await client.post(
+                "https://ecampus.ncfu.ru/account/login?returnUrl=%2Faccount",
+                data={
+                    "Login":    login,
+                    "Password": password,
+                    "Code":     captcha_code,
+                    "RememberMe": "true",
+                    "__RequestVerificationToken": csrf_token,
+                },
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Referer": "https://ecampus.ncfu.ru/account/login",
+                    "Origin":  "https://ecampus.ncfu.ru",
+                },
+            )
+
+            if "account/login" in str(resp.url) or "validation-summary-errors" in resp.text:
+                # Неверная капча или пароль сменился — возвращаем новую капчу
+                captcha_resp2 = await client.get("https://ecampus.ncfu.ru/Captcha/Captcha")
+                img_b64 = base64.b64encode(captcha_resp2.content).decode()
+                return {
+                    "ok": False,
+                    "session_expired": True,
+                    "captcha_image": img_b64,
+                    "message": "Неверная капча. Попробуйте снова.",
+                }
+
+            session_cookies = dict(client.cookies)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Ошибка авторизации: {e}")
+
+    # Обновляем сессию
+    await record.set({"session_cookies_json": json.dumps(session_cookies), "error_msg": None})
+
     background_tasks.add_task(_background_sync, current_user.tg_id)
-    return {"ok": True, "message": "Синхронизация запущена."}
+    return {"ok": True, "message": "Сессия обновлена, синхронизация запущена."}
 
 
 # ── Отключить eCampus ─────────────────────────────────────────────────────────
@@ -575,10 +534,126 @@ async def disconnect_ecampus(current_user: AuthUser = Depends(get_current_user))
 
 # ── Фоновые задачи ────────────────────────────────────────────────────────────
 
-async def _background_sync(tg_id: int) -> None:
-    from app.ecampus.queue import get_queue, ECampusTask, Priority
 
-    queue = get_queue()
+async def _check_session(record) -> bool:
+    """
+    Проверяет валидность сохранённой сессии.
+    eCampus возвращает {"message":"Доступ запрещен"} или редирект на /login
+    когда сессия истекла.
+    """
+    import httpx
+    cookies = record.get_session_cookies()
+    if not cookies:
+        return False
+    try:
+        async with httpx.AsyncClient(
+            cookies=cookies,
+            headers={"User-Agent": "Mozilla/5.0", "X-Requested-With": "XMLHttpRequest"},
+            follow_redirects=False,
+            timeout=15,
+        ) as client:
+            resp = await client.get("https://ecampus.ncfu.ru/studies")
+            # Редирект на логин = сессия протухла
+            if resp.status_code in (301, 302, 303):
+                return False
+            # JSON с запретом
+            if resp.status_code == 403:
+                return False
+            try:
+                data = resp.json()
+                if "Доступ запрещен" in str(data.get("message", "")):
+                    return False
+            except Exception:
+                pass
+            # Если страница содержит форму логина — тоже протухло
+            if "account/login" in str(resp.url) or "Войти в систему" in resp.text:
+                return False
+            return resp.status_code == 200
+    except Exception as exc:
+        logger.warning(f"Session check failed: {exc}")
+        return False
+
+
+async def _silent_reauth(record, captcha_api_key: str) -> bool:
+    """
+    Тихая переавторизация через сохранённые логин/пароль + авто-капча.
+    Возвращает True если успешно, обновляет session_cookies в записи.
+    """
+    from app.ecampus.sync_service import decrypt_credential
+    import httpx
+    from bs4 import BeautifulSoup
+
+    try:
+        login    = decrypt_credential(record.login_enc)
+        password = decrypt_credential(record.password_enc)
+    except Exception:
+        return False
+
+    try:
+        async with httpx.AsyncClient(
+            headers={"User-Agent": "Mozilla/5.0"},
+            follow_redirects=True,
+            timeout=60,
+        ) as client:
+            login_page = await client.get("https://ecampus.ncfu.ru/account/login")
+            soup = BeautifulSoup(login_page.text, "html.parser")
+            token_el = soup.find("input", {"name": "__RequestVerificationToken"})
+            if not token_el:
+                return False
+            csrf_token = token_el.get("value", "")
+
+            captcha_resp = await client.get("https://ecampus.ncfu.ru/Captcha/Captcha")
+            captcha_code = await solve_math_captcha(captcha_resp.content, captcha_api_key)
+            if not captcha_code:
+                return False
+
+            resp = await client.post(
+                "https://ecampus.ncfu.ru/account/login?returnUrl=%2Faccount",
+                data={
+                    "Login":    login,
+                    "Password": password,
+                    "Code":     captcha_code,
+                    "RememberMe": "true",
+                    "__RequestVerificationToken": csrf_token,
+                },
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Referer": "https://ecampus.ncfu.ru/account/login",
+                    "Origin":  "https://ecampus.ncfu.ru",
+                },
+            )
+
+            if "account/login" in str(resp.url) or "validation-summary-errors" in resp.text:
+                return False
+
+            await record.set({"session_cookies_json": json.dumps(dict(client.cookies)), "error_msg": None})
+            logger.info(f"Silent reauth OK for tg_id={record.tg_id}")
+            return True
+
+    except Exception as exc:
+        logger.warning(f"Silent reauth failed for tg_id={record.tg_id}: {exc}")
+        return False
+
+
+async def _fetch_fresh_captcha(tg_id: int) -> dict:
+    """Получает свежую капчу и сохраняет captcha session в Redis."""
+    import httpx
+
+    async with httpx.AsyncClient(
+        headers={"User-Agent": "Mozilla/5.0"},
+        follow_redirects=True,
+        timeout=20,
+    ) as client:
+        captcha_resp = await client.get("https://ecampus.ncfu.ru/Captcha/Captcha")
+        captcha_cookies = dict(client.cookies)
+
+    from app.cache.redis import get_redis
+    r = get_redis()
+    session_data = json.dumps({"captcha_cookies": captcha_cookies, "captcha_image": None})
+    await r.setex(f"ecampus:captcha_session:{tg_id}", 600, session_data)
+
+    img_b64 = base64.b64encode(captcha_resp.content).decode()
+    return {"image": img_b64}
     task = ECampusTask(
         task_type="sync_all",
         tg_id=tg_id,
@@ -587,3 +662,276 @@ async def _background_sync(tg_id: int) -> None:
     )
     await queue.enqueue(task)
     logger.info(f"Background sync enqueued for tg_id={tg_id}")
+
+
+@router.get("/course/{course_id}/lessons")
+async def get_course_lessons(
+    course_id: int,
+    term_id: int,
+    group_id: int | None = None,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """Возвращает занятия курса, обогащённые аудиторией из расписания."""
+    from app.ecampus.sync_service import ECampusSyncRecord
+    from app.db.database import get_motor_db
+
+    record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == current_user.tg_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Данные не найдены.")
+
+    course = next(
+        (c for c in record.courses if c.get("Id") == course_id and c.get("term_id") == term_id),
+        None
+    )
+    if not course:
+        raise HTTPException(status_code=404, detail="Курс не найден.")
+
+    lessons = course.get("lessons", {})
+
+    # Обогащаем аудиторией из расписания если она пустая
+    if group_id:
+        from app.models.lesson import LessonDoc
+        import re
+        course_name = course.get("Name", "")
+        course_name_short = course_name[:15]
+        # Загружаем расписание группы через Beanie
+        schedule_lessons = await LessonDoc.find(
+            LessonDoc.group_id == group_id,
+        ).to_list()
+        # Фильтруем по предмету
+        schedule_lessons = [
+            sl for sl in schedule_lessons
+            if sl.subject and re.search(re.escape(course_name_short), sl.subject, re.IGNORECASE)
+        ]
+        # Строим индекс дата -> аудитория
+        room_by_date: dict[str, str] = {}
+        for sl in schedule_lessons:
+            date_key = sl.date.strftime("%Y-%m-%d") if sl.date else ""
+            room = sl.room_name or ""
+            if room and room != "None":
+                room_by_date[date_key] = room
+
+        # Обогащаем занятия
+        for lt_lessons in lessons.values():
+            for lesson in lt_lessons:
+                if not lesson.get("Room"):
+                    date_key = str(lesson.get("Date", ""))[:10]
+                    if date_key in room_by_date:
+                        lesson["Room"] = room_by_date[date_key]
+
+    return {
+        "course_id":      course_id,
+        "course_name":    course.get("Name"),
+        "lessons":        lessons,
+        "max_rating":     course.get("MaxRating", 0),
+        "current_rating": course.get("CurrentRating", 0),
+    }
+
+
+@router.get("/file/{file_type}")
+async def proxy_ecampus_file(
+    file_type: str,
+    kodCh: int,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """Проксирует скачивание файла с eCampus через сессию пользователя."""
+    from app.ecampus.sync_service import ECampusSyncRecord
+    from app.ecampus.client import ECampusClient, ECAMPUS_BASE
+    from app.ecampus.sync_service import decrypt_credential
+    from fastapi.responses import StreamingResponse
+    import httpx
+
+    FILE_PATHS = {
+        "lecture":     f"/program/FileLectureDownload?kodCh={kodCh}",
+        "umk":         f"/program/FileUMKDownload?kodCh={kodCh}",
+        "instruction": f"/program/FileInstructionDownload?kodCh={kodCh}",
+        "program":     f"/program/DownloadForStudent?kodCh={kodCh}",
+    }
+
+    if file_type not in FILE_PATHS:
+        raise HTTPException(status_code=400, detail="Неизвестный тип файла.")
+
+    record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == current_user.tg_id)
+    if not record or not record.session_cookies_json:
+        raise HTTPException(status_code=401, detail="Нет сессии eCampus. Переподключитесь.")
+
+    import json
+    cookies = json.loads(record.session_cookies_json)
+    url = f"{ECAMPUS_BASE}{FILE_PATHS[file_type]}"
+
+    try:
+        async with httpx.AsyncClient(cookies=cookies, follow_redirects=True, timeout=30) as client:
+            resp = await client.get(url)
+            if resp.status_code == 302 or "account/login" in str(resp.url):
+                raise HTTPException(status_code=401, detail="Сессия eCampus истекла. Переподключитесь.")
+            if not resp.is_success:
+                raise HTTPException(status_code=404, detail="Файл не найден.")
+
+            content_type = resp.headers.get("content-type", "application/octet-stream")
+            content_disp = resp.headers.get("content-disposition", f'attachment; filename="{file_type}_{kodCh}.pdf"')
+
+            return StreamingResponse(
+                iter([resp.content]),
+                media_type=content_type,
+                headers={"Content-Disposition": content_disp},
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка загрузки файла: {e}")
+
+
+@router.get("/file/{file_type}")
+async def proxy_ecampus_file(
+    file_type: str,
+    kodCh: int,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """Проксирует скачивание файла с eCampus через сессию пользователя."""
+    from app.ecampus.sync_service import ECampusSyncRecord
+    from app.ecampus.client import ECampusClient, ECAMPUS_BASE
+    from app.ecampus.sync_service import decrypt_credential
+    from fastapi.responses import StreamingResponse
+    import httpx
+
+    FILE_PATHS = {
+        "lecture":     f"/program/FileLectureDownload?kodCh={kodCh}",
+        "umk":         f"/program/FileUMKDownload?kodCh={kodCh}",
+        "instruction": f"/program/FileInstructionDownload?kodCh={kodCh}",
+        "program":     f"/program/DownloadForStudent?kodCh={kodCh}",
+    }
+
+    if file_type not in FILE_PATHS:
+        raise HTTPException(status_code=400, detail="Неизвестный тип файла.")
+
+    record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == current_user.tg_id)
+    if not record or not record.session_cookies_json:
+        raise HTTPException(status_code=401, detail="Нет сессии eCampus. Переподключитесь.")
+
+    import json
+    cookies = json.loads(record.session_cookies_json)
+    url = f"{ECAMPUS_BASE}{FILE_PATHS[file_type]}"
+
+    try:
+        async with httpx.AsyncClient(cookies=cookies, follow_redirects=True, timeout=30) as client:
+            resp = await client.get(url)
+            if resp.status_code == 302 or "account/login" in str(resp.url):
+                raise HTTPException(status_code=401, detail="Сессия eCampus истекла. Переподключитесь.")
+            if not resp.is_success:
+                raise HTTPException(status_code=404, detail="Файл не найден.")
+
+            content_type = resp.headers.get("content-type", "application/octet-stream")
+            content_disp = resp.headers.get("content-disposition", f'attachment; filename="{file_type}_{kodCh}.pdf"')
+
+            return StreamingResponse(
+                iter([resp.content]),
+                media_type=content_type,
+                headers={"Content-Disposition": content_disp},
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Ошибка загрузки файла: {e}")
+
+
+@router.get("/course/{course_id}/materials")
+async def get_course_materials(
+    course_id: int,
+    term_id: int,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """Возвращает список доступных материалов для курса."""
+    from app.ecampus.sync_service import ECampusSyncRecord
+
+    record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == current_user.tg_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Данные не найдены.")
+
+    course = next(
+        (c for c in record.courses if c.get("Id") == course_id and c.get("term_id") == term_id),
+        None
+    )
+    if not course:
+        raise HTTPException(status_code=404, detail="Курс не найден.")
+
+    materials = []
+    BASE = "/api/ecampus"
+
+    # УМК дисциплины — всегда доступен
+    materials.append({
+        "label": "УМК дисциплины",
+        "url": "https://dspace.ncfu.ru/",
+        "icon": "📚",
+        "external": True,
+        "color": "#10b981",
+    })
+
+    # Курс лекций
+    if course.get("HasLectures"):
+        materials.append({
+            "label": "Курс лекций",
+            "url": f"{BASE}/file/lecture?kodCh={course_id}",
+            "icon": "📖",
+            "external": False,
+            "color": "#3b82f6",
+        })
+
+    # Методические указания
+    if course.get("HasUMK"):
+        materials.append({
+            "label": "Метод. указания",
+            "url": f"{BASE}/file/umk?kodCh={course_id}",
+            "icon": "📋",
+            "external": False,
+            "color": "#8b5cf6",
+        })
+
+    # Инструкция
+    if course.get("HasInstruction"):
+        materials.append({
+            "label": "Инструкция",
+            "url": f"{BASE}/file/instruction?kodCh={course_id}",
+            "icon": "📄",
+            "external": False,
+            "color": "#f59e0b",
+        })
+
+    # Рабочая программа (если locked=True — значит файл доступен)
+    if course.get("locked"):
+        materials.append({
+            "label": "Рабочая программа",
+            "url": f"{BASE}/file/program?kodCh={course_id}",
+            "icon": "📑",
+            "external": False,
+            "color": "#ef4444",
+        })
+
+    # СЭО — всегда
+    materials.append({
+        "label": "СЭО",
+        "url": "https://el.ncfu.ru/",
+        "icon": "🖥",
+        "external": True,
+        "color": "#6b7280",
+    })
+
+    # eCampus — прямая ссылка
+    materials.append({
+        "label": "eCampus",
+        "url": "https://ecampus.ncfu.ru/studies",
+        "icon": "🔗",
+        "external": True,
+        "color": "#6b7280",
+    })
+
+    return {"materials": materials}
+
+
+# ── Фоновые задачи ────────────────────────────────────────────────────────────
+
+async def _background_sync(tg_id: int) -> None:
+    """Запускает LOW приоритет синхронизацию всех данных."""
+    from app.ecampus.queue import get_queue, ECampusTask, Priority
+    queue = get_queue()
+    task = ECampusTask(task_type="sync_all", tg_id=tg_id, priority=Priority.LOW, payload={})
+    await queue.enqueue(task)
