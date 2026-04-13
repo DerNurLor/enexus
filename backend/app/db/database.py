@@ -9,6 +9,7 @@ from app.models.teacher import Teacher
 from app.models.room import Room
 from app.models.institute import Institute
 from app.models.scrape_log import ScrapeLog
+from app.models.campus import Campus
 from app.ecampus.sync_service import ECampusSyncRecord
 
 _client: AsyncIOMotorClient | None = None
@@ -20,7 +21,7 @@ async def connect_db() -> None:
     _client = AsyncIOMotorClient(settings.mongo_uri)
     await init_beanie(
         database=_client.get_database(settings.mongo_db),
-        document_models=[LessonDoc, Institute, Group, Teacher, Room, ScrapeLog, ECampusSyncRecord],
+        document_models=[LessonDoc, Institute, Group, Teacher, Room, ScrapeLog, ECampusSyncRecord, Campus],
     )
     logger.info("MongoDB ready.")
 

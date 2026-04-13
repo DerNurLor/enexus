@@ -97,8 +97,22 @@ interface ScheduleStore {
   // ── Actions: settings ────────────────────────────────────────────────────
   updateSettings: (patch: Partial<UiSettings>) => void
 
+  // ── eCampus grade badge ───────────────────────────────────────────────────
+  // Число новых оценок с последнего визита на страницу предметов.
+  // Хранится в localStorage через partialize. Сбрасывается при открытии страницы.
+  newGradesCount: number
+
   // ── Actions: favorites ───────────────────────────────────────────────────
   setFavorites: (favs: FavoriteItem[]) => void
+
+  // ── Actions: grade badge ─────────────────────────────────────────────────
+  /**
+   * Вызывается при получении свежих данных eCampus (после sync/poll).
+   * Сравнивает оценки с снапшотом в localStorage и обновляет newGradesCount.
+   */
+  updateGradeSnapshot: (courses: any[]) => void
+  /** Вызывается при открытии страницы предметов — сбрасывает счётчик. */
+  clearNewGrades: () => void
 
   /**
    * applyServerSettings — вызывается после успешной TG-авторизации.
@@ -133,6 +147,9 @@ export const useScheduleStore = create<ScheduleStore>()(
       // ── Favorites / Settings ─────────────────────────────────────────────
       favorites: [],
       settings:  DEFAULT_SETTINGS,
+
+      // ── Grade badge ───────────────────────────────────────────────────────
+      newGradesCount: 0,
 
       // ── Search actions ───────────────────────────────────────────────────
       setMode:    (mode)              => set({ mode }),
@@ -177,6 +194,42 @@ export const useScheduleStore = create<ScheduleStore>()(
 
       // ── Favorites actions ─────────────────────────────────────────────────
       setFavorites: (favorites) => set({ favorites }),
+
+      // ── Grade badge actions ───────────────────────────────────────────────
+      updateGradeSnapshot: (courses) => {
+        if (typeof window === 'undefined') return
+        const SNAP_KEY = 'ncfu_grade_snapshot'
+        // Строим плоский словарь: { "lessonTypeId_lessonId": gradeText }
+        const buildSnapshot = (cs: any[]): Record<string, string> => {
+          const snap: Record<string, string> = {}
+          for (const course of cs) {
+            for (const [typeName, lessons] of Object.entries(course.lessons || {})) {
+              for (const lesson of lessons as any[]) {
+                if (lesson.GradeText?.trim()) {
+                  snap[`${course.Id}_${lesson.Id}`] = lesson.GradeText.trim()
+                }
+              }
+            }
+          }
+          return snap
+        }
+        const newSnap = buildSnapshot(courses)
+        let prevSnap: Record<string, string> = {}
+        try {
+          prevSnap = JSON.parse(localStorage.getItem(SNAP_KEY) || '{}')
+        } catch { /* */ }
+
+        // Считаем новые оценки — те чьего ключа не было в старом снапшоте
+        let newCount = 0
+        for (const key of Object.keys(newSnap)) {
+          if (!prevSnap[key]) newCount++
+        }
+
+        localStorage.setItem(SNAP_KEY, JSON.stringify(newSnap))
+        if (newCount > 0) set({ newGradesCount: newCount })
+      },
+
+      clearNewGrades: () => set({ newGradesCount: 0 }),
 
       // ── Apply server settings ─────────────────────────────────────────────
       applyServerSettings: (s) => {

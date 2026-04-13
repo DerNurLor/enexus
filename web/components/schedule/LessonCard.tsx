@@ -3,7 +3,7 @@
 import { MapPin, User, Users } from 'lucide-react'
 import { useScheduleStore } from '@/lib/store'
 
-export type LessonType = 'lab' | 'lecture' | 'seminar' | 'practice'
+export type LessonType = 'lab' | 'lecture' | 'seminar' | 'practice' | 'exam' | 'credit' | 'consultation'
 
 export interface LessonCardData {
   id:           string
@@ -30,7 +30,10 @@ const TYPE_CONFIG: Record<LessonType, { label: string; color: string; bg: string
   lab:      { label: 'Лаб',      color: '#4ade80', bg: 'rgba(74,222,128,0.12)' },
   lecture:  { label: 'Лекция',   color: '#60a5fa', bg: 'rgba(96,165,250,0.12)' },
   seminar:  { label: 'Семинар',  color: '#fb923c', bg: 'rgba(251,146,60,0.12)' },
-  practice: { label: 'Практика', color: '#a78bfa', bg: 'rgba(167,139,250,0.12)' },
+  practice:     { label: 'Практика',      color: '#a78bfa', bg: 'rgba(167,139,250,0.12)' },
+  exam:         { label: 'Экзамен',       color: '#f87171', bg: 'rgba(248,113,113,0.12)' },
+  credit:       { label: 'Зачёт',         color: '#fbbf24', bg: 'rgba(251,191,36,0.12)'  },
+  consultation: { label: 'Консультация',  color: '#34d399', bg: 'rgba(52,211,153,0.12)'  },
 }
 
 export function LessonCard({ lesson }: { lesson: LessonCardData }) {

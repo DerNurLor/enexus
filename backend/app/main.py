@@ -32,6 +32,13 @@ async def lifespan(app: FastAPI):
     setup_scheduler()
     from app.scheduler.scheduler import start_ecampus_worker
     await start_ecampus_worker()
+
+    # Загружаем данные кампусов при старте если коллекция пуста
+    try:
+        from app.scraper.campus_scraper import ensure_campuses_loaded
+        await ensure_campuses_loaded()
+    except Exception as exc:
+        logger.warning(f"Campus initial load failed (non-fatal): {exc}")
     os.makedirs(f"{settings.static_dir}/avatars", exist_ok=True)
     yield
     shutdown_scheduler()
@@ -123,6 +130,19 @@ def create_app() -> FastAPI:
     from app.api.routes import groups, institutes, overview, rooms, schedules, scrape, search, teachers
     for route in [groups, institutes, overview, rooms, schedules, scrape, search, teachers]:
         app.include_router(route.router)
+
+    # ── Campuses API ────────────────────────────────────────────────────────
+    from app.api.routes.campuses import router as campuses_router
+    app.include_router(campuses_router)
+
+    # ── /api/v1/ — версионированный алиас (обратно совместим, не ломает старые клиенты)
+    # Nginx rewrite снимает /api/ prefix → backend получает /schedules/*, /overview/* и т.д.
+    # Новые клиенты могут явно указывать /api/v1/ — маршруты те же самые.
+    from fastapi import APIRouter as _ARv1
+    _v1 = _ARv1(prefix="/api/v1", tags=["v1"])
+    for route in [groups, institutes, overview, rooms, schedules, scrape, search, teachers]:
+        _v1.include_router(route.router)
+    app.include_router(_v1)
 
     from app.dashboard.router import router as dashboard_router
     from app.ecampus.router import router as ecampus_router

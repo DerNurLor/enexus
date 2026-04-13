@@ -1115,3 +1115,6 @@ hr {
   transition: opacity var(--transition), transform var(--transition);
   color: var(--text-secondary);
 }
+
+.type-cons { border-left-color: #34d399; }
+.badge-cons { background: rgba(52,211,153,0.15); color: #34d399; }

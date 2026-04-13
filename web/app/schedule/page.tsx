@@ -30,11 +30,14 @@ const PLACEHOLDER: Record<SearchMode, string> = {
   room:    'напр. А-308',
 }
 
-function mapLessonType(t: string | null): 'lab' | 'lecture' | 'seminar' | 'practice' {
+function mapLessonType(t: string | null): 'lab' | 'lecture' | 'seminar' | 'practice' | 'exam' | 'credit' | 'consultation' {
   const s = (t || '').toLowerCase()
-  if (s.includes('лаб'))   return 'lab'
-  if (s.includes('лекц'))  return 'lecture'
-  if (s.includes('семин')) return 'seminar'
+  if (s.includes('лаб'))              return 'lab'
+  if (s.includes('лекц'))             return 'lecture'
+  if (s.includes('семин'))            return 'seminar'
+  if (s.includes('экзамен'))          return 'exam'
+  if (s.includes('зачёт') || s.includes('зачет') || s.includes('диф')) return 'credit'
+  if (s.includes('консульт'))         return 'consultation'
   return 'practice'
 }
 
