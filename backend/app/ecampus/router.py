@@ -522,6 +522,28 @@ async def reauth_with_captcha(
 
 # ── Отключить eCampus ─────────────────────────────────────────────────────────
 
+@router.get("/profile")
+async def get_profile(current_user: AuthUser = Depends(get_current_user)):
+    """
+    Возвращает данные профиля студента (курс, специальность, форма обучения и т.д.).
+    Данные берутся из кэша; обновляются раз в 3 дня фоновым планировщиком.
+    """
+    from app.ecampus.sync_service import ECampusSyncRecord
+    from datetime import timezone as _tz
+
+    record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == current_user.tg_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="Подключите eCampus в настройках.")
+
+    synced_at = record.profile_synced_at
+    if synced_at and synced_at.tzinfo is None:
+        synced_at = synced_at.replace(tzinfo=_tz.utc)
+
+    return {
+        "profile_details": record.profile_details or [],
+        "profile_synced_at": synced_at.isoformat() if synced_at else None,
+    }
+
 @router.delete("/disconnect")
 async def disconnect_ecampus(current_user: AuthUser = Depends(get_current_user)):
     from app.ecampus.sync_service import delete_credentials

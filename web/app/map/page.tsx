@@ -106,6 +106,7 @@ export default function MapPage() {
   const userMarkerRef   = useRef<any>(null)
   const selectedRef     = useRef<string | null>(null)
   const tileLayerRef    = useRef<any>(null)
+  const routingRef      = useRef<any>(null)
 
   const TILES = {
     dark:  {
@@ -126,14 +127,19 @@ export default function MapPage() {
   const [cityFilter,  setCityFilter]  = useState<string>('838')
   const [mapReady,    setMapReady]    = useState(false)
   const [locating,    setLocating]    = useState(false)
+  const [routing,     setRouting]     = useState(false)  // маршрут строится/активен
+  const [routeInfo,   setRouteInfo]   = useState<{distance: number; time: number; steps: string[]} | null>(null)
   const [sideOpen,    setSideOpen]    = useState(true)   // desktop side panel
   const [mobileTab,   setMobileTab]   = useState<'map' | 'list'>('map')
   const [at,          setAt]          = useState(isoNow)
+  const [atLocked,    setAtLocked]    = useState(false)   // true = пользователь выбрал время вручную
 
+  // Автообновление времени — только если не зафиксировано вручную
   useEffect(() => {
+    if (atLocked) return
     const id = setInterval(() => setAt(isoNow()), 60_000)
     return () => clearInterval(id)
-  }, [])
+  }, [atLocked])
 
   // ── Data ──────────────────────────────────────────────────────────────────
 
@@ -174,6 +180,9 @@ export default function MapPage() {
   function openRoom(roomId: number, roomName: string) {
     setMode('room'); setRoom(roomId, roomName); router.push('/schedule')
   }
+
+  // Сбрасываем маршрут при выборе другого объекта
+  useEffect(() => { clearRoute() }, [selected?.source_id])
 
   // ── Leaflet init ──────────────────────────────────────────────────────────
 
@@ -453,6 +462,134 @@ export default function MapPage() {
     )
   }, [])
 
+  // ── Маршрут ──────────────────────────────────────────────────────────────
+
+  const clearRoute = useCallback(() => {
+    const map = mapObjRef.current
+    if (routingRef.current && map) {
+      try { map.removeControl(routingRef.current) } catch {}
+      routingRef.current = null
+    }
+    setRouting(false)
+    setRouteInfo(null)
+  }, [])
+
+  const buildRoute = useCallback((destLat: number, destLon: number) => {
+    const L   = leafletRef.current
+    const map = mapObjRef.current
+    if (!L || !map) return
+
+    // Если маршрут уже активен — убираем
+    if (routingRef.current) { clearRoute(); return }
+
+    const doRoute = (fromLat: number, fromLon: number) => {
+      // Загружаем Leaflet Routing Machine если ещё не загружен
+      const loadLRM = async () => {
+        if (!(window as any).L?.Routing) {
+          await new Promise<void>(r => {
+            const s = document.createElement('script')
+            s.src = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet-routing-machine/3.2.12/leaflet-routing-machine.min.js'
+            s.onload = () => r()
+            document.head.appendChild(s)
+          })
+          const lrmCss = document.createElement('link')
+          lrmCss.rel = 'stylesheet'
+          lrmCss.href = 'https://cdnjs.cloudflare.com/ajax/libs/leaflet-routing-machine/3.2.12/leaflet-routing-machine.min.css'
+          document.head.appendChild(lrmCss)
+        }
+
+        const routingControl = L.Routing.control({
+          waypoints: [
+            L.latLng(fromLat, fromLon),
+            L.latLng(destLat, destLon),
+          ],
+          router: L.Routing.osrmv1({
+            serviceUrl: 'https://router.project-osrm.org/route/v1',
+            language: 'ru',
+          }),
+          lineOptions: {
+            styles: [{ color: '#6366f1', weight: 5, opacity: 0.85 }],
+            extendToWaypoints: true,
+            missingRouteTolerance: 0,
+          },
+          show: false,
+          collapsible: true,
+          addWaypoints: false,
+          routeWhileDragging: false,
+          fitSelectedRoutes: true,
+          showAlternatives: false,
+          createMarker: (i: number, wp: any) => {
+            const color = i === 0 ? '#6366f1' : '#10b981'
+            const label = i === 0 ? 'А' : 'Б'
+            return L.marker(wp.latLng, {
+              icon: L.divIcon({
+                html: `<div style="width:28px;height:28px;border-radius:50%;background:${color};color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;border:2.5px solid #fff;box-shadow:0 2px 8px rgba(0,0,0,.4)">${label}</div>`,
+                className: '',
+                iconSize: [28, 28],
+                iconAnchor: [14, 14],
+              }),
+            })
+          },
+        }).addTo(map)
+
+        // Скрываем стандартный контейнер LRM через CSS
+        const hideStyle = document.getElementById('lrm-hide-style')
+        if (!hideStyle) {
+          const st = document.createElement('style')
+          st.id = 'lrm-hide-style'
+          st.textContent = '.leaflet-routing-container { display: none !important; }'
+          document.head.appendChild(st)
+        }
+
+        // Перехватываем данные маршрута
+        routingControl.on('routesfound', (e: any) => {
+          const route = e.routes[0]
+          const dist  = route.summary.totalDistance   // метры
+          const time  = route.summary.totalTime       // секунды
+          const steps = (route.instructions || [])
+            .filter((s: any) => s.text && s.type !== 'WaypointReached' && s.type !== 'DestinationReached')
+            .slice(0, 8)
+            .map((s: any) => {
+              const d = s.distance > 1000
+                ? `${(s.distance / 1000).toFixed(1)} км`
+                : s.distance > 0 ? `${Math.round(s.distance)} м` : ''
+              return d ? `${s.text} — ${d}` : s.text
+            })
+          setRouteInfo({ distance: dist, time, steps })
+        })
+
+        routingControl.on('routingerror', () => {
+          setRouteInfo({ distance: 0, time: 0, steps: ['Не удалось построить маршрут'] })
+        })
+
+        routingRef.current = routingControl
+        setRouting(true)
+      }
+      loadLRM()
+    }
+
+    // Пытаемся геолоцировать пользователя
+    if (navigator.geolocation) {
+      setLocating(true)
+      navigator.geolocation.getCurrentPosition(
+        ({ coords: { latitude, longitude } }) => {
+          setLocating(false)
+          doRoute(latitude, longitude)
+        },
+        () => {
+          setLocating(false)
+          // Геолокация недоступна — используем центр города как точку А
+          const c = CITY_CENTERS[cityFilter] || CITY_CENTERS['838']
+          doRoute(c[0], c[1])
+        },
+        { timeout: 6000, enableHighAccuracy: true }
+      )
+    } else {
+      const c = CITY_CENTERS[cityFilter] || CITY_CENTERS['838']
+      doRoute(c[0], c[1])
+    }
+  }, [clearRoute, cityFilter])
+
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   const typeCounts = Object.keys(TYPE_META).reduce((acc, id) => {
@@ -550,8 +687,38 @@ export default function MapPage() {
             </p>
           </div>
 
-          {/* Поиск */}
+          {/* Время для свободных аудиторий */}
           <div className="px-3 pt-3 pb-2 shrink-0">
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-[11px] font-semibold" style={{ color: 'var(--t-muted)' }}>
+                Свободные аудитории на:
+              </span>
+              {atLocked && (
+                <button
+                  onClick={() => { setAtLocked(false); setAt(isoNow()) }}
+                  className="text-[10px] px-1.5 py-0.5 rounded"
+                  style={{ background: 'var(--accent)', color: 'var(--accent-fg)' }}>
+                  сейчас
+                </button>
+              )}
+            </div>
+            <input
+              type="datetime-local"
+              value={at}
+              onChange={e => { if (e.target.value) { setAt(e.target.value); setAtLocked(true) } }}
+              className="w-full px-2 py-1.5 rounded-lg text-xs"
+              style={{
+                background: 'color-mix(in srgb, var(--border, #333) 40%, transparent)',
+                border: '1px solid var(--border)',
+                color: 'var(--t-primary)',
+                colorScheme: 'dark',
+                outline: 'none',
+              }}
+            />
+          </div>
+
+          {/* Поиск */}
+          <div className="px-3 pt-1 pb-2 shrink-0">
             <div className="relative">
               <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
                 style={{ color: 'var(--t-muted)' }} />
@@ -784,14 +951,59 @@ export default function MapPage() {
                 )
               })()}
 
+              {/* Инфо маршрута */}
+              {routeInfo && (
+                <div className="rounded-xl p-3 flex flex-col gap-2"
+                  style={{ background: 'color-mix(in srgb, var(--accent) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 25%, transparent)' }}>
+                  <div className="flex items-center gap-3">
+                    <div className="flex flex-col items-center">
+                      <span className="text-xs font-bold" style={{ color: 'var(--accent)' }}>
+                        {routeInfo.distance > 1000 ? `${(routeInfo.distance/1000).toFixed(1)} км` : `${Math.round(routeInfo.distance)} м`}
+                      </span>
+                      <span className="text-[9px]" style={{ color: 'var(--t-muted)' }}>расстояние</span>
+                    </div>
+                    <div className="w-px h-6 shrink-0" style={{ background: 'var(--border)' }} />
+                    <div className="flex flex-col items-center">
+                      <span className="text-xs font-bold" style={{ color: 'var(--accent)' }}>
+                        {routeInfo.time > 3600
+                          ? `${Math.floor(routeInfo.time/3600)}ч ${Math.round((routeInfo.time%3600)/60)}м`
+                          : `${Math.round(routeInfo.time/60)} мин`}
+                      </span>
+                      <span className="text-[9px]" style={{ color: 'var(--t-muted)' }}>пешком</span>
+                    </div>
+                    {routeInfo.steps.length > 0 && (
+                      <>
+                        <div className="w-px h-6 shrink-0" style={{ background: 'var(--border)' }} />
+                        <div className="flex flex-col items-center">
+                          <span className="text-xs font-bold" style={{ color: 'var(--accent)' }}>{routeInfo.steps.length}</span>
+                          <span className="text-[9px]" style={{ color: 'var(--t-muted)' }}>шагов</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {routeInfo.steps.length > 0 && (
+                    <div className="flex flex-col gap-1 max-h-24 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+                      {routeInfo.steps.map((step, i) => (
+                        <p key={i} className="text-[10px] leading-snug" style={{ color: 'var(--t-secondary)' }}>
+                          <span className="font-semibold" style={{ color: 'var(--accent)' }}>{i+1}.</span> {step}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Кнопки */}
               <div className="flex gap-2">
-                <a href={`https://www.openstreetmap.org/directions?to=${selected.lat},${selected.lon}`}
-                  target="_blank" rel="noopener noreferrer"
+                <button
+                  onClick={() => selected.lat && selected.lon && buildRoute(Number(selected.lat), Number(selected.lon))}
                   className="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs font-semibold"
-                  style={{ background: 'var(--accent)', color: 'var(--accent-fg)' }}>
-                  <Navigation size={12} />Маршрут
-                </a>
+                  style={{ background: routing ? '#ef4444' : 'var(--accent)', color: 'var(--accent-fg)' }}>
+                  {locating
+                    ? <Loader2 size={12} className="animate-spin" />
+                    : <Navigation size={12} />}
+                  {routing ? 'Убрать маршрут' : 'Маршрут'}
+                </button>
                 <a href={`https://www.openstreetmap.org/?mlat=${selected.lat}&mlon=${selected.lon}&zoom=18`}
                   target="_blank" rel="noopener noreferrer"
                   className="flex items-center justify-center w-9 rounded-xl"
@@ -841,13 +1053,53 @@ export default function MapPage() {
                   <X size={16} />
                 </button>
               </div>
+              {routeInfo && (
+                <div className="rounded-xl p-3 mb-3 flex flex-col gap-2"
+                  style={{ background: 'color-mix(in srgb, var(--accent) 8%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 25%, transparent)' }}>
+                  <div className="flex items-center gap-4">
+                    <div className="flex flex-col">
+                      <span className="text-sm font-bold" style={{ color: 'var(--accent)' }}>
+                        {routeInfo.distance > 1000 ? `${(routeInfo.distance/1000).toFixed(1)} км` : `${Math.round(routeInfo.distance)} м`}
+                      </span>
+                      <span className="text-[10px]" style={{ color: 'var(--t-muted)' }}>расстояние</span>
+                    </div>
+                    <div className="w-px h-8 shrink-0" style={{ background: 'var(--border)' }} />
+                    <div className="flex flex-col">
+                      <span className="text-sm font-bold" style={{ color: 'var(--accent)' }}>
+                        {routeInfo.time > 3600
+                          ? `${Math.floor(routeInfo.time/3600)}ч ${Math.round((routeInfo.time%3600)/60)}м`
+                          : `${Math.round(routeInfo.time/60)} мин`}
+                      </span>
+                      <span className="text-[10px]" style={{ color: 'var(--t-muted)' }}>пешком</span>
+                    </div>
+                  </div>
+                  {routeInfo.steps.length > 0 && (
+                    <div className="flex flex-col gap-1">
+                      {routeInfo.steps.slice(0, 4).map((step, i) => (
+                        <p key={i} className="text-[11px] leading-snug" style={{ color: 'var(--t-secondary)' }}>
+                          <span className="font-semibold" style={{ color: 'var(--accent)' }}>{i+1}.</span> {step}
+                        </p>
+                      ))}
+                      {routeInfo.steps.length > 4 && (
+                        <p className="text-[10px]" style={{ color: 'var(--t-muted)' }}>
+                          + ещё {routeInfo.steps.length - 4} шага
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="flex gap-2">
-                <a href={`https://www.openstreetmap.org/directions?to=${selected.lat},${selected.lon}`}
-                  target="_blank" rel="noopener noreferrer"
+                <button
+                  onClick={() => { selected.lat && selected.lon && buildRoute(Number(selected.lat), Number(selected.lon)); setMobileTab('map') }}
                   className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-semibold"
-                  style={{ background: 'var(--accent)', color: 'var(--accent-fg)' }}>
-                  <Navigation size={14} />Маршрут
-                </a>
+                  style={{ background: routing ? '#ef4444' : 'var(--accent)', color: 'var(--accent-fg)' }}>
+                  {locating
+                    ? <Loader2 size={14} className="animate-spin" />
+                    : <Navigation size={14} />}
+                  {routing ? 'Убрать маршрут' : 'Маршрут'}
+                </button>
                 <a href={`https://www.openstreetmap.org/?mlat=${selected.lat}&mlon=${selected.lon}&zoom=18`}
                   target="_blank" rel="noopener noreferrer"
                   className="flex items-center justify-center px-4 py-3 rounded-xl"
@@ -889,6 +1141,30 @@ export default function MapPage() {
           {/* Поиск + фильтры */}
           <div className="sticky top-0 z-10 px-4 pt-4 pb-3 flex flex-col gap-2"
             style={{ background: 'var(--card)', borderBottom: '1px solid var(--border)' }}>
+            {/* Время */}
+            <div className="flex items-center gap-2">
+              <input
+                type="datetime-local"
+                value={at}
+                onChange={e => { if (e.target.value) { setAt(e.target.value); setAtLocked(true) } }}
+                className="flex-1 px-2 py-1.5 rounded-lg text-xs"
+                style={{
+                  background: 'var(--card)',
+                  border: '1px solid var(--border)',
+                  color: 'var(--t-primary)',
+                  colorScheme: 'dark',
+                  outline: 'none',
+                }}
+              />
+              {atLocked && (
+                <button
+                  onClick={() => { setAtLocked(false); setAt(isoNow()) }}
+                  className="shrink-0 px-2.5 py-1.5 rounded-lg text-xs font-semibold"
+                  style={{ background: 'var(--accent)', color: 'var(--accent-fg)' }}>
+                  Сейчас
+                </button>
+              )}
+            </div>
             <div className="relative">
               <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
                 style={{ color: 'var(--t-muted)' }} />
@@ -910,6 +1186,31 @@ export default function MapPage() {
                   {c.title}
                 </button>
               ))}
+            </div>
+            <div className="flex gap-1.5 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+              <button onClick={() => setTypeFilter('all')}
+                className="shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold"
+                style={{
+                  background: typeFilter === 'all' ? 'var(--accent)' : 'transparent',
+                  color:      typeFilter === 'all' ? 'var(--accent-fg)' : 'var(--t-muted)',
+                  border:     `1px solid ${typeFilter === 'all' ? 'var(--accent)' : 'var(--border)'}`,
+                }}>
+                Все
+              </button>
+              {Object.entries(TYPE_META).map(([id, meta]) => {
+                return (
+                  <button key={id}
+                    onClick={() => setTypeFilter(typeFilter === id ? 'all' : id)}
+                    className="shrink-0 px-2.5 py-1 rounded-full text-[11px] font-semibold"
+                    style={{
+                      background: typeFilter === id ? meta.markerColor + '25' : 'transparent',
+                      color:      typeFilter === id ? meta.markerColor : 'var(--t-muted)',
+                      border:     `1px solid ${typeFilter === id ? meta.markerColor + '80' : 'var(--border)'}`,
+                    }}>
+                    {meta.label} <span className="opacity-60">{typeCounts[id]}</span>
+                  </button>
+                )
+              })}
             </div>
           </div>
 

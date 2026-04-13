@@ -11,6 +11,7 @@ ecampus/sync_service.py
 from __future__ import annotations
 
 import asyncio
+import httpx
 import json
 import os
 from datetime import datetime, timezone
@@ -62,6 +63,8 @@ class ECampusSyncRecord(Document):
     retry_count:         int = 0          # сколько раз авто-retry после ошибки
     session_cookies_json: Optional[str] = None
 
+    profile_details: list[dict] = Field(default_factory=list)
+    profile_synced_at: Optional[datetime] = None
     courses:  list[dict] = Field(default_factory=list)
     grades:   dict[str, Any] = Field(default_factory=dict)
     files:    list[dict] = Field(default_factory=list)
@@ -136,6 +139,8 @@ async def task_handler(task) -> dict:
     """
     if task.task_type == "sync_all":
         return await _handle_sync_all(task)
+    elif task.task_type == "sync_profile":
+        return await _handle_sync_profile(task)
     elif task.task_type == "fetch_course":
         return await _handle_fetch_course(task)
     else:
@@ -161,8 +166,20 @@ async def _handle_sync_all(task) -> dict:
         cookies  = record.get_session_cookies()
 
         async with ECampusClient(login, password, captcha_api_key="", session_cookies=cookies) as client:
-            # Проверяем сессию
-            vm = await client.get_studies_viewmodel()
+            # Проверяем сессию — retry при ReadTimeout
+            vm = None
+            for _attempt in range(3):
+                try:
+                    vm = await client.get_studies_viewmodel()
+                    break
+                except httpx.ReadTimeout:
+                    if _attempt < 2:
+                        logger.warning(f"get_studies_viewmodel ReadTimeout tg_id={tg_id}, retry {_attempt+1}/3")
+                        await asyncio.sleep(10)
+                    else:
+                        raise
+            if vm is None:
+                raise RuntimeError("get_studies_viewmodel failed after 3 attempts")
 
             # Собираем данные
             result = await _collect_all_data(client, record, vm)
@@ -190,6 +207,29 @@ async def _handle_sync_all(task) -> dict:
         raise
 
 
+async def _handle_sync_profile(task) -> dict:
+    """Обновляет только профиль пользователя (быстро, без загрузки курсов)."""
+    tg_id = task.tg_id
+    record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == tg_id)
+    if not record:
+        raise ValueError(f"Record not found for tg_id={tg_id}")
+
+    from app.ecampus.client import ECampusClient
+    login    = decrypt_credential(record.login_enc)
+    password = decrypt_credential(record.password_enc)
+    cookies  = record.get_session_cookies()
+
+    async with ECampusClient(login, password, captcha_api_key="", session_cookies=cookies) as client:
+        details = await client.get_details()
+        await record.set({
+            "profile_details":    details,
+            "profile_synced_at":  datetime.now(timezone.utc),
+            "session_cookies_json": json.dumps(client.get_cookies()),
+        })
+
+    logger.info(f"Profile sync OK for tg_id={tg_id}: {len(details)} entries")
+    return {"profile_details": details}
+
 async def _handle_fetch_course(task) -> dict:
     """Получает данные одного курса (HIGH приоритет)."""
     tg_id      = task.tg_id
@@ -215,6 +255,18 @@ async def _collect_all_data(client, record: ECampusSyncRecord, viewmodel: dict) 
     """Собирает все доступные данные студента."""
     all_courses, all_grades, all_files, all_links = [], {}, [], []
 
+    # Получаем профиль студента
+    try:
+        details = await client.get_details()
+        if details:
+            await record.set({
+                "profile_details": details,
+                "profile_synced_at": datetime.now(timezone.utc),
+            })
+            logger.info(f"Profile synced for tg_id={record.tg_id}: {len(details)} entries")
+    except Exception as _e:
+        logger.warning(f"Profile fetch failed for tg_id={record.tg_id}: {_e}")
+
     # Извлекаем данные из viewModel
     specialities = viewmodel.get("specialities", [])
     
@@ -228,11 +280,32 @@ async def _collect_all_data(client, record: ECampusSyncRecord, viewmodel: dict) 
     # Термины из specialities[0].AcademicYears[N].Terms — все учебные годы
     terms = viewmodel.get("terms", viewmodel.get("Terms", []))
     if not terms and specialities:
-        for ay in specialities[0].get("AcademicYears", []):
+        academic_years = specialities[0].get("AcademicYears", [])
+        # Определяем текущий год обучения из profile_details (поле Course)
+        current_course = None
+        if record.profile_details:
+            try:
+                current_course = int(record.profile_details[0].get("course", 0))
+            except (ValueError, TypeError):
+                pass
+        # Собираем термы с индексом года (0 = первый год, N-1 = последний)
+        indexed_terms = []
+        for year_idx, ay in enumerate(academic_years):
             for term in ay.get("Terms", []):
-                # Добавляем название курса в термин
                 term["_year_name"] = ay.get("Name", "")
-                terms.append(term)
+                term["_year_idx"] = year_idx
+                indexed_terms.append(term)
+        # Сортируем: текущий год вперёд, внутри года — по убыванию (последний семестр первый)
+        # Если current_course известен — это индекс года (1-based → 0-based = current_course-1)
+        current_year_idx = (current_course - 1) if current_course else (len(academic_years) - 1)
+        current_year_idx = max(0, min(current_year_idx, len(academic_years) - 1))
+        terms = sorted(
+            indexed_terms,
+            key=lambda t: (
+                0 if t["_year_idx"] == current_year_idx else 1,  # текущий год первым
+                -t["_year_idx"],                                   # остальные — от новых к старым
+            )
+        )
 
     if not student_id:
         logger.warning("student_id not found in viewModel")
@@ -252,10 +325,22 @@ async def _collect_all_data(client, record: ECampusSyncRecord, viewmodel: dict) 
             done_terms += 1
             continue
 
-        try:
-            courses = await client.get_courses(student_id, term_id)
-        except Exception as e:
-            logger.warning(f"Term {term_id} get_courses failed: {e}")
+        for _attempt in range(3):
+            try:
+                courses = await client.get_courses(student_id, term_id)
+                break
+            except httpx.ReadTimeout:
+                if _attempt < 2:
+                    logger.warning(f"Term {term_id} get_courses ReadTimeout, retry {_attempt+1}/3")
+                    await asyncio.sleep(5 * (_attempt + 1))
+                else:
+                    logger.warning(f"Term {term_id} get_courses ReadTimeout — skipped after 3 attempts")
+                    courses = []
+            except Exception as e:
+                logger.warning(f"Term {term_id} get_courses failed: {e}")
+                courses = []
+                break
+        if not courses and courses == []:
             done_terms += 1
             pct = 5 + int(done_terms / max(total_terms, 1) * 90)
             await record.set({"sync_done_terms": done_terms, "sync_progress": pct})
@@ -324,6 +409,40 @@ async def _collect_all_data(client, record: ECampusSyncRecord, viewmodel: dict) 
 
     return {"courses": all_courses, "grades": all_grades, "files": unique_files, "links": all_links}
 
+
+async def sync_profiles_due() -> dict:
+    """
+    Синхронизирует профили пользователей, у которых profile_synced_at
+    отсутствует или старше 3 дней. Запускается планировщиком.
+    """
+    from app.ecampus.queue import get_queue, ECampusTask, Priority
+
+    threshold = datetime.now(timezone.utc) - timedelta(days=3)
+
+    records = await ECampusSyncRecord.find(
+        ECampusSyncRecord.enabled == True,  # noqa
+        ECampusSyncRecord.sync_status == "ok",
+    ).to_list()
+
+    queue = get_queue()
+    count = 0
+    for record in records:
+        synced_at = getattr(record, "profile_synced_at", None)
+        if synced_at and synced_at.tzinfo is None:
+            synced_at = synced_at.replace(tzinfo=timezone.utc)
+        if synced_at is not None and synced_at > threshold:
+            continue
+        task = ECampusTask(
+            task_type="sync_profile",
+            tg_id=record.tg_id,
+            priority=Priority.LOW,
+            payload={},
+        )
+        await queue.enqueue(task)
+        count += 1
+
+    logger.info(f"sync_profiles_due: enqueued {count} profile syncs")
+    return {"enqueued": count}
 
 async def sync_all_users() -> dict:
     """Ежедневный запуск синхронизации для всех пользователей через очередь."""

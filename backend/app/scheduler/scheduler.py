@@ -70,6 +70,15 @@ def setup_scheduler() -> None:
         misfire_grace_time=3600,
     )
 
+    _scheduler.add_job(
+        _run_profile_sync,
+        IntervalTrigger(days=3),
+        id="profile_sync_3d",
+        name="Profile sync every 3 days",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
     _scheduler.start()
     logger.info(
         f"Scheduler started — scrape every {settings.scrape_interval_hours}h, "
@@ -171,3 +180,13 @@ async def _run_campus_sync() -> None:
         logger.info(f"Campus daily sync done: {result}")
     except Exception as exc:
         logger.error(f"Campus daily sync error: {exc}")
+
+
+async def _run_profile_sync() -> None:
+    """Раз в 3 дня обновляет профили студентов (курс, специальность и т.д.)."""
+    try:
+        from app.ecampus.sync_service import sync_profiles_due
+        result = await sync_profiles_due()
+        logger.info(f"Profile sync job enqueued: {result}")
+    except Exception as exc:
+        logger.error(f"Profile sync job crashed: {exc}")

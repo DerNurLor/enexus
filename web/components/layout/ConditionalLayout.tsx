@@ -25,10 +25,9 @@ export function ConditionalLayout({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
-        {/* Mobile: карта fullscreen + MobileNav поверх */}
+        {/* Mobile: карта fullscreen без MobileNav — карта имеет собственный таббар */}
         <div className="lg:hidden relative" style={{ height: '100dvh' }}>
           {children}
-          <MobileNav />
         </div>
       </>
     )

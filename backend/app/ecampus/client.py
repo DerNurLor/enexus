@@ -80,7 +80,7 @@ class ECampusClient:
         self._client = httpx.AsyncClient(
             headers={"User-Agent": USER_AGENT},
             follow_redirects=True,
-            timeout=60,
+            timeout=httpx.Timeout(connect=15, read=45, write=15, pool=10),
         )
         # Восстанавливаем сохранённые cookies
         for k, v in self._cookies.items():
@@ -292,6 +292,85 @@ class ECampusClient:
             "files":  files,
             "links":  links,
         }
+
+    async def get_details(self) -> list[dict]:
+        """
+        Получает данные профиля студента со страницы /details.
+        Парсит все 'pill' блоки: специальность, курс, форму обучения, институт и т.д.
+        """
+        assert self._client is not None
+        resp = await self._client.get(f"{ECAMPUS_BASE}/details")
+        resp.raise_for_status()
+
+        soup = BeautifulSoup(resp.text, "html.parser")
+        results = []
+
+        # Каждый .education-details содержит данные одной специальности
+        for block in soup.select(".education-details"):
+            entry: dict = {}
+
+            def _text(selector: str) -> str:
+                el = block.select_one(selector)
+                return el.get_text(strip=True) if el else ""
+
+            # ФИО
+            for row in block.select(".row.field"):
+                label_el = row.select_one(".field-label")
+                if not label_el:
+                    continue
+                label = label_el.get_text(strip=True).lower()
+                value_el = row.select_one(".value")
+                if not value_el:
+                    continue
+                value = value_el.get_text(" ", strip=True)
+                if "фамилия" in label:
+                    entry["full_name"] = value
+                elif "направление" in label:
+                    entry["specialty"] = value
+                elif "год поступления" in label:
+                    entry["entrance_year"] = value
+                elif "год обучения" in label:
+                    entry["course"] = value
+                elif "срок обучения" in label:
+                    entry["study_period"] = value
+                elif "форма обучения" in label:
+                    entry["study_form"] = value
+                elif "уровень образования" in label:
+                    entry["education_level"] = value
+                elif "институт" in label:
+                    entry["institute"] = value
+                elif "кафедра" in label:
+                    entry["department"] = value
+                elif "научный руководитель" in label:
+                    entry["adviser"] = value
+                elif "тема выпускной" in label:
+                    entry["graduate_work"] = value
+
+            # Данные из pill (специальность + год + уровень)
+            # Ищем соответствующий pill в родительском контексте
+            if entry:
+                results.append(entry)
+
+        # Если education-details не найдены — пробуем парсить pill напрямую
+        if not results:
+            for pill in soup.select(".common-pill"):
+                entry = {}
+                specialty_el = pill.select_one(".pill-label small")
+                name_el = pill.select_one(".pill-label:not(:has(small))")
+                year_el = pill.select_one(".bottom-left")
+                level_el = pill.select_one(".bottom-right")
+                if specialty_el:
+                    entry["specialty_code"] = specialty_el.get_text(strip=True)
+                if name_el:
+                    entry["specialty_name"] = name_el.get_text(strip=True)
+                if year_el:
+                    entry["entrance_year"] = year_el.get_text(strip=True)
+                if level_el:
+                    entry["education_level"] = level_el.get_text(strip=True)
+                if entry:
+                    results.append(entry)
+
+        return results
 
     def get_cookies(self) -> dict:
         """Возвращает текущие cookies для сохранения в Redis/БД."""
