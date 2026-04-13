@@ -257,3 +257,167 @@ async def get_news(limit: int = Query(20, ge=1, le=50)):
         return {"items": items, "fetched_at": datetime.now(timezone.utc).isoformat()}
 
     return await cached(cache_key, ttl=900, fn=fetch_news)
+
+
+@router.get(
+    "/ecampus-widget",
+    summary="Виджет 'Ближайшее занятие с непроставленными оценками'",
+    description="""
+Возвращает список ближайших занятий (сегодня и завтра) из расписания группы,
+у которых в eCampus нет оценок за текущий месяц.
+
+Требует:
+  - авторизация (JWT Bearer)
+  - подключённый eCampus (sync_status='ok' или 'running')
+  - установленный profile.groupId (студент)
+
+Используется на главной странице расписания как мотивирующий виджет.
+""",
+)
+async def ecampus_widget(
+    days_ahead: int = Query(2, ge=1, le=7, description="Сколько дней вперёд смотреть"),
+    request: Request = None,
+):
+    """
+    Алгоритм:
+    1. Авторизуем пользователя через JWT.
+    2. Берём его eCampus-данные (курсы + занятия из ECampusSyncRecord).
+    3. Берём расписание группы на days_ahead дней вперёд из Group.schedule.
+    4. Ищем совпадения: занятие в расписании → предмет в eCampus без оценок.
+    5. Возвращаем список таких занятий, чтобы фронт мог показать напоминание.
+    """
+    from datetime import date, timedelta
+    from app.auth.dependencies import get_optional_current_user
+
+    # Мягкая авторизация
+    current_user = None
+    try:
+        from app.auth.dependencies import get_current_user
+        auth_header = request.headers.get("Authorization", "")
+        if auth_header.startswith("Bearer "):
+            from app.auth.security import decode_access_token
+            payload = decode_access_token(auth_header[7:])
+            from app.auth.models import AuthUser
+            current_user = await AuthUser.find_one(AuthUser.tg_id == payload.get("tg_id"))
+    except Exception:
+        pass
+
+    if not current_user:
+        return {"items": [], "reason": "not_authenticated"}
+
+    # Берём eCampus данные
+    try:
+        from app.ecampus.sync_service import ECampusSyncRecord
+        record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == current_user.tg_id)
+    except Exception:
+        return {"items": [], "reason": "no_ecampus"}
+
+    if not record or record.sync_status not in ("ok", "running"):
+        return {"items": [], "reason": "ecampus_not_synced"}
+
+    courses: list[dict] = record.courses or []
+    if not courses:
+        return {"items": [], "reason": "no_courses"}
+
+    # Определяем groupId из server settings
+    settings_dict: dict = current_user.miniapp_settings or {}
+    group_id = settings_dict.get("profile_group_id")
+    group_name = settings_dict.get("profile_group_name")
+
+    if not group_id:
+        return {"items": [], "reason": "no_group"}
+
+    # Берём расписание из MongoDB
+    group_doc = await Group.find_one(Group.group_id == group_id)
+    if not group_doc or not group_doc.schedule:
+        return {"items": [], "reason": "no_schedule"}
+
+    # Диапазон дат
+    today = date.today()
+    target_dates = {(today + timedelta(days=i)).isoformat() for i in range(days_ahead)}
+
+    # Собираем занятия из расписания, которые попадают в диапазон
+    schedule_lessons: list[dict] = []
+    for day in group_doc.schedule:
+        day_date = day.get("date") or day.get("day") or ""
+        if not day_date or day_date[:10] not in target_dates:
+            continue
+        for lesson in day.get("lessons", []):
+            schedule_lessons.append({
+                "date":       day_date[:10],
+                "timeStart":  lesson.get("timeStart", ""),
+                "timeEnd":    lesson.get("timeEnd", ""),
+                "subject":    lesson.get("subject", lesson.get("name", "")),
+                "teacher":    lesson.get("teacher", ""),
+                "room":       lesson.get("room", ""),
+                "lessonType": lesson.get("lessonType", ""),
+            })
+
+    if not schedule_lessons:
+        return {"items": [], "reason": "no_upcoming_lessons"}
+
+    # Строим набор предметов eCampus с оценками в текущем месяце
+    from datetime import date as _date
+    current_month = today.strftime("%Y-%m")
+
+    def _has_grade_this_month(course: dict) -> bool:
+        for type_lessons in (course.get("lessons") or {}).values():
+            for lesson in type_lessons:
+                grade = (lesson.get("GradeText") or "").strip()
+                lesson_date = (lesson.get("Date") or "")[:7]  # YYYY-MM
+                if grade and lesson_date == current_month:
+                    return True
+        return False
+
+    # Для fuzzy-матчинга: нормализуем названия предметов eCampus
+    def _norm(s: str) -> str:
+        import re
+        return re.sub(r"\s+", " ", s.lower().strip())
+
+    ecampus_without_grades: set[str] = set()
+    ecampus_with_grades: set[str] = set()
+
+    for course in courses:
+        name = _norm(course.get("Name", ""))
+        if not name:
+            continue
+        if _has_grade_this_month(course):
+            ecampus_with_grades.add(name)
+        else:
+            ecampus_without_grades.add(name)
+
+    # Сопоставляем расписание с eCampus
+    result_items: list[dict] = []
+    for lesson in schedule_lessons:
+        subj_norm = _norm(lesson["subject"])
+        if not subj_norm:
+            continue
+
+        # Ищем совпадение по substring (предмет в расписании может быть сокращён)
+        matched_without = any(
+            subj_norm in ec or ec in subj_norm
+            for ec in ecampus_without_grades
+        )
+        matched_with = any(
+            subj_norm in ec or ec in subj_norm
+            for ec in ecampus_with_grades
+        )
+
+        # Показываем только те, что есть в eCampus и без оценок
+        if matched_without and not matched_with:
+            result_items.append({
+                **lesson,
+                "group_id":   group_id,
+                "group_name": group_name,
+                "hint":       "Оценки за этот месяц не проставлены",
+            })
+
+    # Сортируем по дате + времени
+    result_items.sort(key=lambda x: (x["date"], x["timeStart"]))
+
+    return {
+        "items":      result_items[:10],
+        "group_id":   group_id,
+        "group_name": group_name,
+        "checked_at": datetime.now(timezone.utc).isoformat(),
+    }

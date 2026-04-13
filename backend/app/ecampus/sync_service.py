@@ -59,6 +59,7 @@ class ECampusSyncRecord(Document):
     sync_total_terms:    int = 0
     sync_courses_found:  int = 0
     error_msg:           Optional[str] = None
+    retry_count:         int = 0          # сколько раз авто-retry после ошибки
     session_cookies_json: Optional[str] = None
 
     courses:  list[dict] = Field(default_factory=list)
@@ -172,6 +173,7 @@ async def _handle_sync_all(task) -> dict:
             "sync_progress":         100,
             "last_sync":             datetime.now(timezone.utc),
             "error_msg":             None,
+            "retry_count":           0,   # сброс после успешной синхронизации
             "session_cookies_json":  json.dumps(client.get_cookies()),
             "courses":               result["courses"],
             "grades":                result["grades"],
@@ -345,3 +347,79 @@ async def sync_all_users() -> dict:
 
     logger.info(f"Enqueued {count} daily sync tasks")
     return {"enqueued": count}
+
+
+# ── Retry упавших синхронизаций ───────────────────────────────────────────────
+
+#: Максимальное число автоматических повторов после ошибки синхронизации.
+MAX_SYNC_RETRIES = 3
+#: Базовая задержка для экспоненциального backoff (минуты).
+RETRY_BACKOFF_BASE_MIN = 15
+
+
+async def retry_failed_syncs() -> dict:
+    """
+    Перезапускает синхронизации в статусе 'error' с учётом retry_count и
+    времени последней попытки (экспоненциальный backoff).
+
+    Логика:
+      - Берём записи с sync_status='error' и retry_count < MAX_SYNC_RETRIES.
+      - Проверяем что прошло достаточно времени: delay = RETRY_BACKOFF_BASE_MIN * 2^retry_count.
+      - Ставим задачу в очередь (LOW priority) и инкрементируем retry_count.
+
+    Вызывается планировщиком каждые 2 часа.
+    """
+    from app.ecampus.queue import get_queue, ECampusTask, Priority
+
+    now = datetime.now(timezone.utc)
+    records = await ECampusSyncRecord.find(
+        ECampusSyncRecord.sync_status == "error",
+        ECampusSyncRecord.enabled == True,  # noqa
+    ).to_list()
+
+    queue   = get_queue()
+    count   = 0
+    skipped = 0
+
+    for record in records:
+        retry_count = getattr(record, "retry_count", 0) or 0
+        if retry_count >= MAX_SYNC_RETRIES:
+            skipped += 1
+            continue
+
+        # Экспоненциальный backoff: 15м → 30м → 60м
+        delay_minutes = RETRY_BACKOFF_BASE_MIN * (2 ** retry_count)
+        last_sync = getattr(record, "last_sync", None) or getattr(record, "updated_at", None)
+
+        if last_sync:
+            # Если last_sync naive — сделаем aware
+            if last_sync.tzinfo is None:
+                from datetime import timezone as _tz
+                last_sync = last_sync.replace(tzinfo=_tz.utc)
+            elapsed_min = (now - last_sync).total_seconds() / 60
+            if elapsed_min < delay_minutes:
+                skipped += 1
+                logger.debug(
+                    f"retry_failed_syncs: tg_id={record.tg_id} skipped, "
+                    f"only {elapsed_min:.0f}m elapsed (need {delay_minutes}m)"
+                )
+                continue
+
+        # Инкрементируем счётчик ДО постановки в очередь
+        await record.set({"retry_count": retry_count + 1})
+
+        task = ECampusTask(
+            task_type="sync_all",
+            tg_id=record.tg_id,
+            priority=Priority.LOW,
+            payload={"is_retry": True, "retry_attempt": retry_count + 1},
+        )
+        await queue.enqueue(task)
+        count += 1
+        logger.info(
+            f"retry_failed_syncs: enqueued tg_id={record.tg_id} "
+            f"attempt={retry_count + 1}/{MAX_SYNC_RETRIES}"
+        )
+
+    logger.info(f"retry_failed_syncs: enqueued={count} skipped={skipped}")
+    return {"enqueued": count, "skipped": skipped}

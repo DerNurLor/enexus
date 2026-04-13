@@ -17,8 +17,8 @@ export function DayPicker({ selected, onSelect }: DayPickerProps) {
   const weekLabel =
     format(weekStart, 'dd-MM-yyyy') + ' – ' + format(addDays(weekStart, 5), 'dd-MM-yyyy')
 
-  function prevWeek() { onSelect(addDays(selected, -7)) }
-  function nextWeek() { onSelect(addDays(selected, 7)) }
+  function prevWeek() { onSelect(startOfWeek(addDays(selected, -7), { weekStartsOn: 1 })) }
+  function nextWeek() { onSelect(startOfWeek(addDays(selected, 7), { weekStartsOn: 1 })) }
 
   return (
     <div className="flex flex-col gap-3">

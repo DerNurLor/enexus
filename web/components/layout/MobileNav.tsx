@@ -1,37 +1,67 @@
 'use client'
-
+/**
+ * web/components/layout/MobileNav.tsx
+ *
+ * Нижняя навигационная панель для мобильной версии.
+ * Показывает бейдж с количеством новых оценок на иконке «Предметы».
+ */
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { CalendarDays, User, DoorOpen, BookOpen } from 'lucide-react'
+import {
+  CalendarDays, BookOpen, User, Map,
+} from 'lucide-react'
+import { useScheduleStore } from '@/lib/store'
 
 const NAV_ITEMS = [
   { href: '/schedule', label: 'Расписание', icon: CalendarDays },
-  { href: '/rooms',    label: 'Аудитории',  icon: DoorOpen },
-  { href: '/ecampus',  label: 'Предметы',  icon: BookOpen },
-  { href: '/profile',  label: 'Профиль',    icon: User },
+  { href: '/map',      label: 'Карта',       icon: Map          },
+  { href: '/ecampus',  label: 'Предметы',    icon: BookOpen     },
+  { href: '/profile',  label: 'Профиль',     icon: User         },
 ]
 
 export function MobileNav() {
   const pathname = usePathname()
+  const newGradesCount = useScheduleStore((s) => s.newGradesCount)
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-50 lg:hidden"
+    <nav className="fixed bottom-0 left-0 right-0 z-40 lg:hidden"
       style={{
-        background: 'rgba(16,16,16,0.92)',
-        backdropFilter: 'blur(20px)',
-        WebkitBackdropFilter: 'blur(20px)',
-        borderTop: '1px solid var(--border)',
-        paddingBottom: 'var(--safe-bottom)',
+        background:   'var(--card)',
+        borderTop:    '1px solid var(--border)',
+        paddingBottom: 'env(safe-area-inset-bottom)',
       }}>
-      <div className="flex items-center justify-around h-16 px-2">
+      <div className="flex items-stretch">
         {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
-          const active = pathname === href || pathname.startsWith(href + '/')
+          const isActive = pathname === href || pathname.startsWith(href + '/')
+          const isEcampus = href === '/ecampus'
+          const badge = isEcampus && newGradesCount > 0 ? newGradesCount : 0
+
           return (
-            <Link key={href} href={href} className="nav-btn focus:outline-none focus-visible:outline-none" style={{ minWidth: 72 }}>
-              <Icon size={22} strokeWidth={active ? 2.5 : 1.8}
-                style={{ color: active ? 'var(--cyan)' : 'var(--t-muted)', transition: 'color 0.2s' }} />
-              <span className="text-[10px] font-medium tracking-wide"
-                style={{ color: active ? 'var(--cyan)' : 'var(--t-muted)', transition: 'color 0.2s' }}>
+            <Link
+              key={href}
+              href={href}
+              className="flex-1 flex flex-col items-center justify-center gap-1 py-2.5 min-h-[56px] relative"
+              style={{ color: isActive ? 'var(--accent)' : 'var(--t-muted)' }}
+            >
+              <div className="relative">
+                <Icon
+                  size={22}
+                  strokeWidth={isActive ? 2.2 : 1.6}
+                  style={{ color: isActive ? 'var(--accent)' : 'var(--t-muted)' }}
+                />
+                {badge > 0 && (
+                  <span
+                    className="absolute -top-1.5 -right-2 min-w-[16px] h-4 flex items-center justify-center px-1 text-[9px] font-bold rounded-full"
+                    style={{ background: 'var(--accent)', color: 'var(--accent-fg)' }}
+                  >
+                    {badge > 9 ? '9+' : badge}
+                  </span>
+                )}
+              </div>
+              <span
+                className="text-[10px] font-medium leading-none"
+                style={{ color: isActive ? 'var(--accent)' : 'var(--t-muted)' }}
+              >
                 {label}
               </span>
             </Link>

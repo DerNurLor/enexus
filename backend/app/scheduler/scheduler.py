@@ -52,6 +52,24 @@ def setup_scheduler() -> None:
         misfire_grace_time=3600,
     )
 
+    _scheduler.add_job(
+        _retry_failed_ecampus_syncs,
+        IntervalTrigger(hours=2),
+        id="retry_failed_ecampus_syncs",
+        name="Retry failed eCampus syncs (backoff)",
+        replace_existing=True,
+        misfire_grace_time=600,
+    )
+
+    _scheduler.add_job(
+        _run_campus_sync,
+        CronTrigger(hour=4, minute=30, timezone="UTC"),
+        id="daily_campus_sync",
+        name="Daily campus data sync from NCFU API",
+        replace_existing=True,
+        misfire_grace_time=3600,
+    )
+
     _scheduler.start()
     logger.info(
         f"Scheduler started — scrape every {settings.scrape_interval_hours}h, "
@@ -132,3 +150,24 @@ async def start_ecampus_worker() -> None:
     from app.ecampus.sync_service import task_handler
     logger.info("Starting eCampus queue worker...")
     asyncio.create_task(get_queue().start_worker(task_handler))
+
+
+async def _retry_failed_ecampus_syncs() -> None:
+    """Каждые 2 часа перезапускает упавшие синхронизации с exponential backoff."""
+    try:
+        from app.ecampus.sync_service import retry_failed_syncs
+        result = await retry_failed_syncs()
+        if result["enqueued"]:
+            logger.info(f"eCampus retry: enqueued={result['enqueued']} skipped={result['skipped']}")
+    except Exception as exc:
+        logger.error(f"eCampus retry job crashed: {exc}")
+
+
+async def _run_campus_sync() -> None:
+    """Ежедневная синхронизация данных кампусов из API СКФУ."""
+    try:
+        from app.scraper.campus_scraper import sync_campuses
+        result = await sync_campuses()
+        logger.info(f"Campus daily sync done: {result}")
+    except Exception as exc:
+        logger.error(f"Campus daily sync error: {exc}")

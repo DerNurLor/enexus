@@ -412,7 +412,7 @@ function QuickFilters({
 
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function ECampusPage() {
-  const { authToken, profile } = useScheduleStore()
+  const { authToken, profile, clearNewGrades, updateGradeSnapshot } = useScheduleStore()
   const qc = useQueryClient()
   const router = useRouter()
 
@@ -424,6 +424,9 @@ export default function ECampusPage() {
   const [sortBy,         setSortBy]          = useState<'name' | 'rating' | 'grades' | 'recent'>('name')
   const [showSortMenu,   setShowSortMenu]    = useState(false)
   const [sheetOpen,      setSheetOpen]       = useState(false)
+
+  // При открытии страницы предметов — сбрасываем бейдж
+  useEffect(() => { clearNewGrades() }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: status } = useQuery<any>({
     queryKey: ['ecampus-status'],
@@ -439,6 +442,13 @@ export default function ECampusPage() {
     staleTime: 60_000,
     refetchInterval: status?.sync_status === 'running' ? 5000 : false,
   })
+
+  // Обновляем снапшот оценок при получении новых данных — вычисляем бейдж
+  useEffect(() => {
+    if (ecampusData?.courses?.length) {
+      updateGradeSnapshot(ecampusData.courses)
+    }
+  }, [ecampusData?.courses]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const syncMutation = useMutation({
     mutationFn: () => authedFetch('/sync', { method: 'POST' }),

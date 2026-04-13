@@ -9,6 +9,7 @@ from datetime import datetime, date, timedelta
 from typing import Optional, List, AsyncGenerator
 import asyncio
 import orjson
+import re
 from loguru import logger
 
 from app.db.database import get_motor_db
@@ -379,7 +380,6 @@ async def resolve_teacher_schedule(
 ) -> List[DayType]:
     tid = teacher_id
     if tid is None and teacher_name:
-        import re as _r
         # 1. Exact match in full_name or short_name
         t = await Teacher.find_one({"full_name": {"$regex": teacher_name, "$options": "i"}})
         if t is None:
@@ -407,8 +407,8 @@ async def resolve_teacher_schedule(
                     # Use rapidfuzz to pick the best match
                     try:
                         from rapidfuzz import process as fz, fuzz as fzf
-                        norm_q = _r.sub(r'[\s\-_]', '', teacher_name.lower())
-                        norm_map = {_r.sub(r'[\s\-_]', '', c.full_name.lower()): c for c in candidates}
+                        norm_q = re.sub(r'[\s\-_]', '', teacher_name.lower())
+                        norm_map = {re.sub(r'[\s\-_]', '', c.full_name.lower()): c for c in candidates}
                         best = fz.extractOne(norm_q, list(norm_map.keys()), scorer=fzf.WRatio)
                         if best and best[1] >= 55:
                             t = norm_map[best[0]]
@@ -424,15 +424,15 @@ async def resolve_teacher_schedule(
             # Search by first letter only to get a broad candidate pool
             first_letter = surname_raw[0].upper()
             pool = await Teacher.find(
-                {"full_name": {"$regex": f"^{_r.escape(first_letter)}", "$options": "i"}}
+                {"full_name": {"$regex": f"^{re.escape(first_letter)}", "$options": "i"}}
             ).to_list(200)
             if pool:
                 try:
                     from rapidfuzz import process as fz, fuzz as fzf
-                    norm_q = _r.sub(r'[\s\-_]', '', surname_raw.lower())
+                    norm_q = re.sub(r'[\s\-_]', '', surname_raw.lower())
                     # Compare query against SURNAME ONLY (first word of full_name)
                     def _surname_norm(teacher):
-                        return _r.sub(r'[\s\-_]', '', teacher.full_name.split()[0].lower())
+                        return re.sub(r'[\s\-_]', '', teacher.full_name.split()[0].lower())
                     norm_map = {_surname_norm(c): c for c in pool}
                     best = fz.extractOne(norm_q, list(norm_map.keys()), scorer=fzf.WRatio)
                     if best and best[1] >= 70:   # higher threshold for broad pool
@@ -510,20 +510,19 @@ async def resolve_room_schedule(
 ) -> List[DayType]:
     rid = room_id
     if rid is None and room_name:
-        import re as _r
         rn = room_name.strip()
 
         # ── Gym / sport hall detection ───────────────────────────────────────
         # Covers: "спортзал", "спорт зал", "с/з", "с.з", "сз", "gym"
         # and building-prefixed variants: "9-с/з", "9 спортзал", "корпус 9 с/з"
-        _GYM_RE = _r.compile(
+        _GYM_RE = re.compile(
             r'спортивный\s*зал|спортзал|спорт\s*зал|с/з|с\.з\.?|^сз$|gym',
-            _r.IGNORECASE,
+            re.IGNORECASE,
         )
-        _GYM_WITH_BLDG_RE = _r.compile(
+        _GYM_WITH_BLDG_RE = re.compile(
             r'^(?:корпус\s*)?(\d{1,2})\s*[-–\s]\s*'
             r'(?:спортивный\s*зал|спортзал|спорт\s*зал|с/з|с\.з\.?|сз|gym)',
-            _r.IGNORECASE,
+            re.IGNORECASE,
         )
         bldg_gym = _GYM_WITH_BLDG_RE.match(rn)
         is_gym   = bool(bldg_gym) or bool(_GYM_RE.search(rn))
@@ -541,8 +540,8 @@ async def resolve_room_schedule(
                 gym_filter = {"$and": [
                     gym_filter,
                     {"$or": [
-                        {"building": {"$regex": _r.escape(bnum), "$options": "i"}},
-                        {"name":     {"$regex": f"^{_r.escape(bnum)}[-–]", "$options": "i"}},
+                        {"building": {"$regex": re.escape(bnum), "$options": "i"}},
+                        {"name":     {"$regex": f"^{re.escape(bnum)}[-–]", "$options": "i"}},
                     ]},
                 ]}
             r_obj = await Room.find_one(gym_filter)
@@ -551,9 +550,9 @@ async def resolve_room_schedule(
 
         if rid is None:
             # "11-405" or "11-216" → building=11, room=405
-            dash_m    = _r.match(r'^(\d{1,2})-(\d{3,})$', rn)
-            space_m   = _r.match(r'^(\d{1,2})\s+(\d{3,})$', rn)
-            bldg_kw_m = _r.match(r'(?:корпус\s*)?(\d{1,2})[\s,\-]+(\d{3,})', rn, _r.IGNORECASE)
+            dash_m    = re.match(r'^(\d{1,2})-(\d{3,})$', rn)
+            space_m   = re.match(r'^(\d{1,2})\s+(\d{3,})$', rn)
+            bldg_kw_m = re.match(r'(?:корпус\s*)?(\d{1,2})[\s,\-]+(\d{3,})', rn, re.IGNORECASE)
 
             bldg, rnum = None, None
             if dash_m:
@@ -565,36 +564,36 @@ async def resolve_room_schedule(
 
             if bldg and rnum:
                 r_obj = await Room.find_one({
-                    "name":     {"$regex": _r.escape(rnum), "$options": "i"},
-                    "building": {"$regex": _r.escape(bldg), "$options": "i"},
+                    "name":     {"$regex": re.escape(rnum), "$options": "i"},
+                    "building": {"$regex": re.escape(bldg), "$options": "i"},
                 })
                 if r_obj is None:
                     r_obj = await Room.find_one({
-                        "name": {"$regex": _r.escape(f"{bldg}-{rnum}"), "$options": "i"}
+                        "name": {"$regex": re.escape(f"{bldg}-{rnum}"), "$options": "i"}
                     })
                 if r_obj is None:
                     r_obj = await Room.find_one({
-                        "name": {"$regex": _r.escape(rnum), "$options": "i"}
+                        "name": {"$regex": re.escape(rnum), "$options": "i"}
                     })
                 if r_obj:
                     rid = r_obj.room_id
 
         if rid is None:
             # "11 407" (number + text room name)
-            bldg_m = _r.match(r'^(\d+)\s+(.+)$', rn)
+            bldg_m = re.match(r'^(\d+)\s+(.+)$', rn)
             if bldg_m:
                 bldg2, rname2 = bldg_m.group(1), bldg_m.group(2)
                 r_obj = await Room.find_one({
-                    "name":     {"$regex": _r.escape(rname2), "$options": "i"},
-                    "building": {"$regex": _r.escape(bldg2), "$options": "i"},
+                    "name":     {"$regex": re.escape(rname2), "$options": "i"},
+                    "building": {"$regex": re.escape(bldg2), "$options": "i"},
                 })
                 if r_obj:
                     rid = r_obj.room_id
 
         if rid is None:
-            r_obj = await Room.find_one({"name": {"$regex": f"^{_r.escape(rn)}$", "$options": "i"}})
+            r_obj = await Room.find_one({"name": {"$regex": f"^{re.escape(rn)}$", "$options": "i"}})
             if r_obj is None:
-                r_obj = await Room.find_one({"name": {"$regex": _r.escape(rn), "$options": "i"}})
+                r_obj = await Room.find_one({"name": {"$regex": re.escape(rn), "$options": "i"}})
             rid = r_obj.room_id if r_obj else None
     if rid is None:
         return []
@@ -623,7 +622,10 @@ async def resolve_now() -> List[LessonType]:
 
     async def _fetch():
         col = get_motor_db()["lessons"]
-        now_time = datetime.utcnow().strftime("%H:%M")
+        from zoneinfo import ZoneInfo
+        msk = datetime.now(ZoneInfo("Europe/Moscow"))
+        now_time = msk.strftime("%H:%M")
+        today_dt = datetime.combine(msk.date(), datetime.min.time())
         today_dt = datetime.combine(date.today(), datetime.min.time())
         pipeline = [
             {"$match": {
@@ -775,7 +777,6 @@ async def resolve_search(
     ck = cache_key("ncfu", "search", hash_params(q=nq, iid=institute_id))
 
     async def _fetch():
-        import re as _r
         # ── Groups: canonical regex instead of $text ─────────────────────────
         # $text splits "исс-б-о-22-2" into tokens [исс, б, о, 22, 2] matching
         # hundreds of unrelated groups. Regex on the canonical short-form is precise.
@@ -784,15 +785,15 @@ async def resolve_search(
         # 1. Anchored exact prefix: "^исс-б-о-22-2" — matches only groups
         #    that START with this pattern (catches main-campus groups, not branch "п-исс-…")
         groups = await Group.find(
-            {"name": {"$regex": f"^{_r.escape(canonical_g)}", "$options": "i"}}
+            {"name": {"$regex": f"^{re.escape(canonical_g)}", "$options": "i"}}
         ).limit(20).to_list()
 
         # 2. Dept+year prefix fallback: if nothing found, search all groups of that
         #    dept and year regardless of form/basis tokens (исс.*22 catches исс-б-о-22-*)
         if not groups:
-            pm = _r.match(r"^([а-яёa-z]+).*?(\d{2})", canonical_g)
+            pm = re.match(r"^([а-яёa-z]+).*?(\d{2})", canonical_g)
             if pm:
-                dept, year = _r.escape(pm.group(1)), _r.escape(pm.group(2))
+                dept, year = re.escape(pm.group(1)), re.escape(pm.group(2))
                 groups = await Group.find(
                     {"name": {"$regex": f"^{dept}[^а-яё]*{year}", "$options": "i"}}
                 ).limit(30).to_list()

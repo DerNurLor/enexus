@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Optional
 """
 config.py — hardened settings.
 
@@ -10,7 +12,6 @@ Security changes:
   [V13] redis_url default expects password: redis://:password@host:6379/0
   [V14] Secret fields use pydantic SecretStr — never appear in repr/logs.
 """
-from __future__ import annotations
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -79,7 +80,7 @@ class Settings(BaseSettings):
 
     # OpenAI
     # [V1] SecretStr — never leaked in repr or logs.
-    openai_api_key: SecretStr
+    openai_api_key: Optional[SecretStr] = SecretStr("")
 
     # Auth
     auth_mongo_db:  str       = "ncfu_auth"
