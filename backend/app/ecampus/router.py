@@ -250,6 +250,9 @@ async def connect_ecampus(
     # Удаляем временную сессию капчи
     await r.delete(f"ecampus:captcha_session:{current_user.tg_id}")
 
+    # Лёгкий запрос: получаем группу из viewModel и сразу пишем в профиль
+    background_tasks.add_task(_quick_fetch_group, current_user.tg_id, session_cookies)
+
     # Запускаем фоновый сбор данных (LOW приоритет)
     background_tasks.add_task(_background_sync, current_user.tg_id)
 
@@ -957,3 +960,108 @@ async def _background_sync(tg_id: int) -> None:
     queue = get_queue()
     task = ECampusTask(task_type="sync_all", tg_id=tg_id, priority=Priority.LOW, payload={})
     await queue.enqueue(task)
+
+
+async def _quick_fetch_group(tg_id: int, session_cookies: dict) -> None:
+    """
+    Лёгкий одиночный запрос к eCampus сразу после connect:
+    получает viewModel со /studies, вытаскивает GroupName из specialities[0],
+    ищет группу в локальной БД и записывает profile_group_id / profile_group_name
+    в miniapp_settings пользователя.
+
+    Запускается как BackgroundTask — ошибки логируются, но не прерывают ответ.
+    """
+    import httpx
+    from app.auth.models import AuthUser
+    from app.models.group import Group
+
+    try:
+        async with httpx.AsyncClient(
+            cookies=session_cookies,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                ),
+            },
+            follow_redirects=True,
+            timeout=httpx.Timeout(connect=10, read=30, write=10, pool=5),
+        ) as client:
+            resp = await client.get("https://ecampus.ncfu.ru/studies")
+            resp.raise_for_status()
+
+        # Парсим viewModel из JS на странице
+        import re, json as _json
+        vm: dict = {}
+        match = re.search(r'viewModel\s*=\s*(\{.+?\});', resp.text, re.DOTALL)
+        if match:
+            try:
+                vm = _json.loads(match.group(1))
+            except _json.JSONDecodeError:
+                pass
+
+        if not vm:
+            logger.warning(f"_quick_fetch_group: empty viewModel for tg_id={tg_id}")
+            return
+
+        # Ищем GroupName в specialities[0]
+        specialities = vm.get("specialities", [])
+        if not specialities:
+            logger.debug(f"_quick_fetch_group: no specialities in viewModel tg_id={tg_id}")
+            return
+
+        sp = specialities[0]
+        # eCampus хранит имя группы в поле GroupName (или groupName)
+        raw_group_name: str = (
+            sp.get("GroupName")
+            or sp.get("groupName")
+            or sp.get("Group")
+            or sp.get("group")
+            or ""
+        ).strip()
+
+        if not raw_group_name:
+            logger.debug(f"_quick_fetch_group: GroupName not found in specialities[0] tg_id={tg_id}, keys={list(sp.keys())}")
+            return
+
+        logger.info(f"_quick_fetch_group: found group '{raw_group_name}' for tg_id={tg_id}")
+
+        # Ищем группу в локальной БД (case-insensitive)
+        group_doc = await Group.find_one(
+            {"name": {"$regex": f"^{re.escape(raw_group_name)}$", "$options": "i"}}
+        )
+
+        group_id: int | None = group_doc.group_id if group_doc else None
+        group_name: str = group_doc.name if group_doc else raw_group_name
+
+        # Обновляем miniapp_settings пользователя
+        user = await AuthUser.find_one(AuthUser.tg_id == tg_id)
+        if not user:
+            logger.warning(f"_quick_fetch_group: AuthUser not found tg_id={tg_id}")
+            return
+
+        settings: dict = dict(user.miniapp_settings or {})
+
+        # Не перезатираем уже выставленные пользователем настройки
+        if settings.get("profile_group_id") or settings.get("profile_group_name"):
+            logger.debug(
+                f"_quick_fetch_group: profile_group already set for tg_id={tg_id}, skipping"
+            )
+            return
+
+        settings["profile_group_id"]   = group_id
+        settings["profile_group_name"] = group_name
+        settings["profile_role"]       = settings.get("profile_role") or "student"
+
+        user.miniapp_settings = settings
+        await user.save()
+
+        logger.info(
+            f"_quick_fetch_group: saved profile_group='{group_name}' "
+            f"(id={group_id}) for tg_id={tg_id}"
+        )
+
+    except Exception as exc:
+        # Не роняем connect — просто логируем
+        logger.warning(f"_quick_fetch_group failed for tg_id={tg_id}: {exc}")
