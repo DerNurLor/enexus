@@ -96,25 +96,34 @@ function SyncProgressBar({ status }: { status: any }) {
   const doneTerm     = status.sync_done_terms ?? 0
   const totalTerms   = status.sync_total_terms ?? 0
   const coursesFound = status.sync_courses_found ?? 0
+  const stage =
+    progress < 5  ? '🔌 Подключение к eCampus...' :
+    progress < 20 ? '🔐 Авторизация на портале...' :
+    progress < 40 ? '📚 Загрузка списка семестров...' :
+    progress < 60 ? (totalTerms > 0 ? `📖 Семестр ${doneTerm} из ${totalTerms} — сбор предметов...` : '📖 Загрузка предметов...') :
+    progress < 80 ? '📝 Загрузка оценок и материалов...' :
+    progress < 95 ? '💾 Сохранение данных...' :
+                    '✅ Почти готово...'
+
   return (
     <div className="mb-4 px-4 py-3 rounded-xl"
       style={{ background: 'color-mix(in srgb, var(--accent) 6%, transparent)', border: '1px solid color-mix(in srgb, var(--accent) 20%, transparent)' }}>
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-2">
           <Loader2 size={12} className="animate-spin" style={{ color: 'var(--accent)' }} />
-          <span className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>
-            {totalTerms > 0 ? `Семестр ${doneTerm} из ${totalTerms}` : 'Начало синхронизации...'}
-          </span>
+          <span className="text-xs font-semibold" style={{ color: 'var(--accent)' }}>{stage}</span>
         </div>
-        <div className="flex items-center gap-2">
-          {coursesFound > 0 && <span className="text-[10px]" style={{ color: 'var(--t-muted)' }}>{coursesFound} предметов</span>}
-          <span className="text-[11px] font-mono font-semibold" style={{ color: 'var(--accent)' }}>{Math.max(5, progress)}%</span>
-        </div>
+        <span className="text-[11px] font-mono font-semibold" style={{ color: 'var(--accent)' }}>{Math.max(5, progress)}%</span>
       </div>
-      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
+      <div className="h-1.5 rounded-full overflow-hidden mb-2" style={{ background: 'var(--border)' }}>
         <div className="h-full rounded-full transition-all duration-700"
           style={{ width: `${Math.max(5, progress)}%`, background: 'var(--accent)' }} />
       </div>
+      {coursesFound > 0 && (
+        <div className="text-[10px]" style={{ color: 'var(--t-muted)' }}>
+          Найдено предметов: {coursesFound}
+        </div>
+      )}
     </div>
   )
 }
@@ -164,8 +173,8 @@ function BottomSheet({ open, onClose, children }: {
 }
 
 // ── Course detail panel ───────────────────────────────────────────────────────
-function CourseDetail({ course, groupId, onClose }: {
-  course: any; groupId: number | null; onClose: () => void
+function CourseDetail({ course, groupId, onClose, onRefreshed }: {
+  course: any; groupId: number | null; onClose: () => void; onRefreshed?: () => void
 }) {
   const [activeTab, setActiveTab] = useState<string | null>(null)
   const router = useRouter()
@@ -435,12 +444,23 @@ export default function ECampusPage() {
     refetchInterval: (q) => q.state.data?.sync_status === 'running' ? 2000 : 30000,
   })
 
+  const syncMutation = useMutation({
+    mutationFn: () => authedFetch('/sync', { method: 'POST' }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ecampus-status'] })
+      qc.invalidateQueries({ queryKey: ['ecampus-data'] })
+    },
+    onError: () => {
+      qc.invalidateQueries({ queryKey: ['ecampus-status'] })
+    },
+  })
+
   const { data: ecampusData, isLoading } = useQuery<any>({
     queryKey: ['ecampus-data'],
     queryFn: () => authedFetch('/data'),
     enabled: !!authToken && !!status?.connected,
     staleTime: 60_000,
-    refetchInterval: status?.sync_status === 'running' ? 5000 : false,
+    refetchInterval: (status?.sync_status === 'running' || syncMutation.isPending) ? 2000 : false,
   })
 
   // Обновляем снапшот оценок при получении новых данных — вычисляем бейдж
@@ -450,10 +470,6 @@ export default function ECampusPage() {
     }
   }, [ecampusData?.courses]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const syncMutation = useMutation({
-    mutationFn: () => authedFetch('/sync', { method: 'POST' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['ecampus-status'] }),
-  })
 
   const isRunning = status?.sync_status === 'running'
 

@@ -97,6 +97,9 @@ interface ScheduleStore {
   // ── Actions: settings ────────────────────────────────────────────────────
   updateSettings: (patch: Partial<UiSettings>) => void
 
+  // ── Group confirmed by eCampus
+  groupConfirmed: boolean
+
   // ── eCampus grade badge ───────────────────────────────────────────────────
   // Число новых оценок с последнего визита на страницу предметов.
   // Хранится в localStorage через partialize. Сбрасывается при открытии страницы.
@@ -148,6 +151,8 @@ export const useScheduleStore = create<ScheduleStore>()(
       favorites: [],
       settings:  DEFAULT_SETTINGS,
 
+      groupConfirmed: false,
+
       // ── Grade badge ───────────────────────────────────────────────────────
       newGradesCount: 0,
 
@@ -194,6 +199,8 @@ export const useScheduleStore = create<ScheduleStore>()(
 
       // ── Favorites actions ─────────────────────────────────────────────────
       setFavorites: (favorites) => set({ favorites }),
+
+      // groupConfirmed: false,
 
       // ── Grade badge actions ───────────────────────────────────────────────
       updateGradeSnapshot: (courses) => {
@@ -272,6 +279,7 @@ export const useScheduleStore = create<ScheduleStore>()(
 
         set((state) => ({
           settings: { ...state.settings, ...newSettings },
+          groupConfirmed: !!(s as any).profile_group_confirmed || state.groupConfirmed,
           ...profileUpdate,
         }))
       },

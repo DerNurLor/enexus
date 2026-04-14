@@ -487,7 +487,11 @@ async def get_settings(authorization: Optional[str] = Header(None)):
 async def _do_update_settings(body: SettingsBody, authorization: Optional[str]) -> dict:
     user = await _auth_user(authorization)
     s = dict(user.miniapp_settings or {})
-    for k, v in body.model_dump(exclude_none=True).items():
+    patch = body.model_dump(exclude_none=True)
+    # Если группа подтверждена через eCampus — блокируем смену
+    if s.get("profile_group_confirmed") and ("profile_group_id" in patch or "profile_group_name" in patch):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "Группа подтверждена через eCampus и не может быть изменена")
+    for k, v in patch.items():
         s[k] = v
     user.miniapp_settings = s
     # Also persist accent_color on the user document itself for dashboard injection
