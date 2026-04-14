@@ -364,6 +364,48 @@ async def get_course_data(
 
 # ── Ручная синхронизация (умная) ─────────────────────────────────────────────
 
+@router.post("/sync/course/{course_id}")
+async def sync_single_course(
+    course_id: int,
+    term_id: int,
+    background_tasks: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """Обновление данных по конкретному предмету (HIGH приоритет)."""
+    from app.ecampus.sync_service import ECampusSyncRecord
+    from app.ecampus.queue import get_queue, ECampusTask, Priority
+
+    record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == current_user.tg_id)
+    if not record:
+        raise HTTPException(404, "Подключите eCampus в настройках.")
+
+    course = next(
+        (c for c in record.courses if c.get("Id") == course_id and c.get("term_id") == term_id),
+        None
+    )
+    if not course:
+        raise HTTPException(404, "Курс не найден.")
+
+    course_url = course.get("url") or course.get("Url")
+    if not course_url:
+        raise HTTPException(400, "URL курса недоступен.")
+
+    queue = get_queue()
+    task = ECampusTask(
+        task_type="fetch_course",
+        tg_id=current_user.tg_id,
+        priority=Priority.HIGH,
+        payload={"course_url": course_url, "course_id": str(course_id)},
+    )
+    task_id = await queue.enqueue(task)
+
+    result = await queue.get_result(task_id, timeout=20.0)
+    if result and result.get("ok"):
+        return {"ok": True, "data": result["data"]}
+
+    return {"ok": False, "detail": "Таймаут. Данные обновляются в фоне."}
+
+
 @router.post("/sync")
 async def manual_sync(
     background_tasks: BackgroundTasks,
@@ -1052,6 +1094,8 @@ async def _quick_fetch_group(tg_id: int, session_cookies: dict) -> None:
 
         settings["profile_group_id"]   = group_id
         settings["profile_group_name"] = group_name
+        settings["profile_group_confirmed"] = True
+        settings["profile_group_confirmed"] = True
         settings["profile_role"]       = settings.get("profile_role") or "student"
 
         user.miniapp_settings = settings

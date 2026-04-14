@@ -197,7 +197,7 @@ function SettingsSection() {
 
 // ── Profile done state ────────────────────────────────────────────────────────
 function ProfileDone({ onReset }: { onReset: () => void }) {
-  const { profile, tgUser, authToken, isAuthenticated } = useScheduleStore()
+  const { profile, tgUser, authToken, isAuthenticated, groupConfirmed } = useScheduleStore()
   const router = useRouter()
 
   function goToSchedule() {
@@ -301,11 +301,18 @@ function ProfileDone({ onReset }: { onReset: () => void }) {
             Открыть моё расписание <ChevronRight size={16} />
           </button>
         )}
-        <button onClick={onReset}
-          className="w-full h-12 rounded-2xl flex items-center justify-center gap-2 text-sm font-medium transition-colors hover:bg-white/5"
-          style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--t-secondary)' }}>
-          <Edit2 size={15} /> Изменить профиль расписания
-        </button>
+        {groupConfirmed ? (
+          <div className="w-full h-12 rounded-2xl flex items-center justify-center gap-2 text-xs"
+            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--t-muted)', cursor: 'not-allowed' }}>
+            🔒 Группа подтверждена через eCampus
+          </div>
+        ) : (
+          <button onClick={onReset}
+            className="w-full h-12 rounded-2xl flex items-center justify-center gap-2 text-sm font-medium transition-colors hover:bg-white/5"
+            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--t-secondary)' }}>
+            <Edit2 size={15} /> Изменить профиль расписания
+          </button>
+        )}
       </div>
     </div>
   )

@@ -375,6 +375,11 @@ async def _collect_all_data(client, record: ECampusSyncRecord, viewmodel: dict) 
                             )
                             if lessons:
                                 courses[ci]["lessons"][lt_name] = lessons
+                                # Собираем файлы из уроков
+                                for lesson in lessons:
+                                    for f in lesson.get("files", []):
+                                        if f.get("url"):
+                                            all_files.append({**f, "course_id": str(courses[ci].get("Id", "")), "course_name": courses[ci].get("Name", "")})
                             return
                         except asyncio.TimeoutError:
                             if attempt == 0:

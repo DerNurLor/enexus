@@ -99,6 +99,7 @@ export interface ServerSettings {
   default_teacher?:  string | null
   theme?:            string
   accent_color?:     string
+  profile_group_confirmed?: boolean
 }
 
 export interface QuotaStatus {
