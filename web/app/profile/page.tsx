@@ -301,12 +301,7 @@ function ProfileDone({ onReset }: { onReset: () => void }) {
             Открыть моё расписание <ChevronRight size={16} />
           </button>
         )}
-        {groupConfirmed ? (
-          <div className="w-full h-12 rounded-2xl flex items-center justify-center gap-2 text-xs"
-            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--t-muted)', cursor: 'not-allowed' }}>
-            🔒 Группа подтверждена через eCampus
-          </div>
-        ) : (
+        {!groupConfirmed && (
           <button onClick={onReset}
             className="w-full h-12 rounded-2xl flex items-center justify-center gap-2 text-sm font-medium transition-colors hover:bg-white/5"
             style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--t-secondary)' }}>
@@ -345,6 +340,7 @@ function ProfilePageInner() {
     profile, profileComplete, setProfile, clearProfile,
     tgUser, authToken, isAuthenticated, tgAuthReady, settings,
     setTgUser, setAuthToken, setTgAuthReady, applyServerSettings, setFavorites,
+    groupConfirmed,
   } = useScheduleStore()
 
   const [step, setStep] = useState<OnboardStep>('done')
@@ -359,10 +355,12 @@ function ProfilePageInner() {
   // Без этого все условия рендера проваливаются и возвращается null (пустая страница).
   // Воспроизводится в браузере и electron у анонимного пользователя без профиля.
   useEffect(() => {
-    if (tgAuthReady && step === 'done' && !profileComplete && !tgUser) {
+    // Если группа подтверждена — онбординг недоступен, остаёмся в 'done'
+    if (groupConfirmed && step !== 'done') { setStep('done'); return }
+    if (tgAuthReady && step === 'done' && !profileComplete && !tgUser && !groupConfirmed) {
       setStep('choose-mode')
     }
-  }, [tgAuthReady, profileComplete, tgUser, step])
+  }, [tgAuthReady, profileComplete, tgUser, step, groupConfirmed])
   const [selectedRole, setRole] = useState<UserRole>('student')
   const [query, setQuery]       = useState('')
   const [selectedGroupId, setSGId]      = useState<number | null>(null)
@@ -386,6 +384,8 @@ function ProfilePageInner() {
 
   // Синхронизируем профиль на сервер при сохранении
   async function handleSaveProfile() {
+    // Блокировка: eCampus уже определил группу — ручная смена запрещена
+    if (groupConfirmed) return
     let newProfile: typeof profile
     if (selectedRole === 'student' && selectedGroupId) {
       newProfile = { role: 'student', groupId: selectedGroupId, groupName: selectedGroupName, teacherId: null, teacherName: null }
@@ -412,6 +412,8 @@ function ProfilePageInner() {
   }
 
   function resetForm() {
+    // Если группа подтверждена eCampus — сброс запрещён
+    if (groupConfirmed) return
     clearProfile()
     setStep('choose-mode')
     setQuery('')
@@ -497,15 +499,19 @@ function ProfilePageInner() {
 
           <div className="card px-5 py-5 mb-4">
             <p className="text-sm font-semibold mb-1" style={{ color: 'var(--t-primary)' }}>Расписание</p>
-            <p className="text-xs mb-4" style={{ color: 'var(--t-secondary)' }}>
-              Настройте профиль, чтобы расписание открывалось автоматически
-            </p>
-            <button
-              onClick={() => setStep('choose-role')}
-              className="w-full h-11 rounded-2xl flex items-center justify-center gap-2 text-sm font-semibold text-black"
-              style={{ background: 'var(--cyan)' }}>
-              <GraduationCap size={16} /> Настроить профиль расписания
-            </button>
+            {!groupConfirmed && (
+              <>
+                <p className="text-xs mb-4" style={{ color: 'var(--t-secondary)' }}>
+                  Настройте профиль, чтобы расписание открывалось автоматически
+                </p>
+                <button
+                  onClick={() => setStep('choose-role')}
+                  className="w-full h-11 rounded-2xl flex items-center justify-center gap-2 text-sm font-semibold text-black"
+                  style={{ background: 'var(--cyan)' }}>
+                  <GraduationCap size={16} /> Настроить профиль расписания
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -546,6 +552,9 @@ function ProfilePageInner() {
   }
 
   // ── CHOOSE ROLE ─────────────────────────────────────────────────────────────
+  if (step === 'choose-role' || step === 'choose-group' || step === 'choose-teacher') {
+    if (groupConfirmed) { return null }
+  }
   if (step === 'choose-role') {
     return (
       <div className="px-4 lg:px-0">

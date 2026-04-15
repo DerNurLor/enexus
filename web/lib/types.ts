@@ -105,3 +105,30 @@ export interface InstituteMeta {
   name:         string
   buildings:    string[]
 }
+// ── Teacher extended types ────────────────────────────────────────────────────
+export interface TeacherFull extends TeacherMeta {
+  lesson_types:  string[]
+  group_ids:     number[]
+  group_names:   string[]
+  lessons_count: number
+  schedule_scraped_at: string | null
+}
+
+export interface TeacherStats {
+  teacher_id:    number
+  full_name:     string
+  total_lessons: number
+  subjects:      Array<{ name: string; count: number }>
+  lesson_types:  Array<{ name: string; count: number }>
+  top_rooms:     Array<{ name: string; count: number }>
+  top_buildings: Array<{ name: string; count: number }>
+  top_groups:    Array<{ name: string; count: number }>
+}
+
+export interface TodayRoom {
+  room_name:  string
+  building:   string | null
+  time_start: string
+  time_end:   string
+  subject:    string
+}

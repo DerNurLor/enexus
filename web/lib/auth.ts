@@ -221,7 +221,9 @@ export async function fetchSettings(): Promise<ServerSettings> {
     headers: getAuthHeader(),
   })
   if (!res.ok) return {}
-  return res.json()
+  const data = await res.json()
+  // Сервер возвращает { settings: {...} } — unwrap
+  return (data?.settings ?? data) as ServerSettings
 }
 
 export async function fetchFavorites(): Promise<FavoriteItem[]> {

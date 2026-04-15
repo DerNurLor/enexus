@@ -69,6 +69,7 @@ class ECampusSyncRecord(Document):
     grades:   dict[str, Any] = Field(default_factory=dict)
     files:    list[dict] = Field(default_factory=list)
     links:    list[dict] = Field(default_factory=list)
+    zachetka: dict       = Field(default_factory=dict)   # /details/zachetka viewModel
 
     class Settings:
         name = "ecampus_sync"
@@ -197,6 +198,7 @@ async def _handle_sync_all(task) -> dict:
             "files":                 result["files"],
             "links":                 result["links"],
         })
+        # zachetka уже сохранена внутри _collect_all_data после получения
 
         logger.info(f"Sync OK for tg_id={tg_id}: {len(result['courses'])} courses")
         return result
@@ -266,6 +268,21 @@ async def _collect_all_data(client, record: ECampusSyncRecord, viewmodel: dict) 
             logger.info(f"Profile synced for tg_id={record.tg_id}: {len(details)} entries")
     except Exception as _e:
         logger.warning(f"Profile fetch failed for tg_id={record.tg_id}: {_e}")
+
+    # Зачётная книжка — итоговые оценки за все семестры
+    try:
+        zachetka = await client.get_zachetka()
+        if zachetka.get("education_details"):
+            await record.set({"zachetka": zachetka})
+            total_records = sum(
+                sum(len(term["exams"]) + len(term["zachets"]) + len(term["other"])
+                    for term in year["terms"])
+                for ed in zachetka["education_details"]
+                for year in ed["study_years"]
+            )
+            logger.info(f"Zachetka synced for tg_id={record.tg_id}: {total_records} records")
+    except Exception as _e:
+        logger.warning(f"Zachetka fetch failed for tg_id={record.tg_id}: {_e}")
 
     # Извлекаем данные из viewModel
     specialities = viewmodel.get("specialities", [])

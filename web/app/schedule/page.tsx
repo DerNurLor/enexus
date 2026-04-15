@@ -13,6 +13,7 @@ import { DayPicker } from '@/components/schedule/DayPicker'
 import { LessonCard } from '@/components/schedule/LessonCard'
 import { SearchDropdown } from '@/components/schedule/SearchDropdown'
 import { useScheduleStore } from '@/lib/store'
+import { TeacherDashboard } from '@/components/schedule/TeacherDashboard'
 import { api } from '@/lib/api'
 import type { Lesson, GroupMeta, TeacherMeta, RoomMeta } from '@/lib/types'
 
@@ -440,6 +441,14 @@ function SchedulePageInner() {
             {nextLesson.subject}
           </p>
         </div>
+      )}
+
+      {mode === 'teacher' && teacherId && (
+        <TeacherDashboard
+          teacherId={teacherId}
+          teacherName={teacherName || ''}
+          todayLessons={lessons}
+        />
       )}
 
       <div className="mb-3">

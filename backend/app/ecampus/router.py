@@ -281,7 +281,13 @@ async def get_sync_status(
         error_msg=record.error_msg,
         last_sync=record.last_sync.isoformat() if record.last_sync else None,
         courses_count=len(record.courses),
-        files_count=len(record.files),
+        files_count=len(record.files) or sum(
+            1
+            for c in (record.courses or [])
+            for lessons in (c.get('lessons') or {}).values()
+            for l in (lessons if isinstance(lessons, list) else [])
+            for _ in (l.get('files') or [])
+        ),
         sync_progress=record.sync_progress,
         sync_done_terms=record.sync_done_terms,
         sync_total_terms=record.sync_total_terms,
@@ -306,6 +312,7 @@ async def get_sync_data(current_user: AuthUser = Depends(get_current_user)):
         "grades":      record.grades,
         "files":       record.files,
         "links":       record.links,
+        "zachetka":    record.zachetka or {},
     }
 
 
@@ -994,6 +1001,32 @@ async def get_course_materials(
     return {"materials": materials}
 
 
+# ── Переподтверждение группы (для уже подключённых) ─────────────────────────
+
+@router.post("/reconfirm")
+async def reconfirm_group(
+    background_tasks: BackgroundTasks,
+    current_user: AuthUser = Depends(get_current_user),
+):
+    """
+    Повторно запускает _quick_fetch_group для уже подключённого пользователя.
+    Нужен если пользователь подключил eCampus до того как появился флаг confirmed.
+    """
+    from app.ecampus.sync_service import ECampusSyncRecord, decrypt_credential
+    import json as _json
+
+    record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == current_user.tg_id)
+    if not record:
+        raise HTTPException(status_code=404, detail="eCampus не подключён")
+
+    cookies = record.get_session_cookies()
+    if not cookies:
+        raise HTTPException(status_code=400, detail="Сессия истекла, переподключитесь")
+
+    background_tasks.add_task(_quick_fetch_group, current_user.tg_id, cookies)
+    return {"ok": True, "message": "Группа будет подтверждена в течение нескольких секунд"}
+
+
 # ── Фоновые задачи ────────────────────────────────────────────────────────────
 
 async def _background_sync(tg_id: int) -> None:
@@ -1085,18 +1118,12 @@ async def _quick_fetch_group(tg_id: int, session_cookies: dict) -> None:
 
         settings: dict = dict(user.miniapp_settings or {})
 
-        # Не перезатираем уже выставленные пользователем настройки
-        if settings.get("profile_group_id") or settings.get("profile_group_name"):
-            logger.debug(
-                f"_quick_fetch_group: profile_group already set for tg_id={tg_id}, skipping"
-            )
-            return
-
-        settings["profile_group_id"]   = group_id
-        settings["profile_group_name"] = group_name
+        # eCampus — источник истины. Всегда перезаписываем группу и ставим confirmed.
+        # После этого бэкенд отклоняет любые попытки изменить profile_* через API.
+        settings["profile_group_id"]        = group_id
+        settings["profile_group_name"]      = group_name
         settings["profile_group_confirmed"] = True
-        settings["profile_group_confirmed"] = True
-        settings["profile_role"]       = settings.get("profile_role") or "student"
+        settings["profile_role"]            = "student"
 
         user.miniapp_settings = settings
         await user.save()

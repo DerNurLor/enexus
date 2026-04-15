@@ -23,6 +23,8 @@ from app.models.conversation import Message as MessageModel
 from app.bot.handlers.ai_handler import handle_message
 from app.bot.handlers.commands  import cmd_roles, cmd_miniapp, cmd_limit, cmd_support, cmd_suggest, cmd_about
 from app.bot.handlers.bot_login import handle_login_code, handle_login_callback, cmd_login, cmd_code, LoginConfirmCallback
+from app.bot.handlers.grades import cmd_grades, cmd_stats, cmd_subjects, cmd_ecampus, cb_stats, _build_stats_keyboard
+from app.bot.handlers.extra_handlers import cmd_classmates, cmd_teacher, cmd_me, cb_teacher, cb_me
 from app.bot.message_store import store_message, store_callback_choice, store_bot_reply, _entities_to_html
 from datetime import datetime, timezone
 import logging
@@ -125,13 +127,13 @@ async def cmd_start(message: TelegramMessage) -> None:
             "  • <i>Свободные аудитории в корпусе 11</i>\n"
             "  • <i>Что сейчас у группы АИС-б-о-25-1?</i>\n\n"
             "📋 <b>Команды:</b>\n"
-            "  /help    — полная справка по возможностям\n"
-            "  /miniapp — расписание в приложении 📅\n"
-            "  /limit   — ваш лимит запросов\n"
-            "  /roles   — ваши роли и привилегии\n"
-            "  /support — написать в поддержку\n"
-            "  /suggest — предложить улучшение\n"
-            "  /about   — о боте",
+            "  /me         — личный кабинет 👤\n"
+            "  /miniapp    — расписание в приложении 📅\n"
+            "  /grades     — мои оценки из eCampus\n"
+            "  /stats      — статистика 📊\n"
+            "  /classmates — одногруппники 👥\n"
+            "  /teacher    — найти преподавателя\n"
+            "  /help       — полная справка",
         parse_mode="HTML",
     )
     # Сохраняем ответ бота — Telegram не присылает Update на исходящие сообщения
@@ -146,29 +148,26 @@ async def cmd_help(message: TelegramMessage) -> None:
     sent = await message.answer(
         "📖 <b>Справка по боту расписания СКФУ</b>\n\n"
             "Просто напиши запрос на естественном языке:\n\n"
-            "📅 <b>Расписание группы:</b>\n"
+            "📅 <b>Расписание:</b>\n"
             "  <i>Расписание ИСС-б-о-22-3</i>\n"
-            "  <i>Что у группы АИС25 завтра?</i>\n"
-            "  <i>Пары на эту неделю у группы МАТ-22</i>\n\n"
+            "  <i>Что у группы АИС25 завтра?</i>\n\n"
             "👤 <b>Преподаватель:</b>\n"
-            "  <i>Где Подзолко сейчас?</i>\n"
-            "  <i>Расписание Иванова на завтра</i>\n\n"
+            "  <i>Где Подзолко сейчас?</i>  ·  <i>Расписание Иванова</i>\n\n"
             "🚪 <b>Аудитории:</b>\n"
-            "  <i>Свободные аудитории прямо сейчас</i>\n"
-            "  <i>Что сейчас в аудитории 305 корпуса 2?</i>\n"
-            "  <i>Свободные аудитории в корпусе 11 с 14:00</i>\n\n"
-            "🔍 <b>Поиск:</b>\n"
-            "  <i>Найди группу ИСС</i>  ·  <i>Найди Петрова</i>\n\n"
+            "  <i>Свободные аудитории прямо сейчас</i>\n\n"
             "📋 <b>Команды:</b>\n"
-            "  /miniapp — открыть расписание в приложении 📅\n"
-            "  /limit   — узнать остаток лимита запросов\n"
-            "  /roles   — ваши роли и права доступа\n"
-            "  /support — написать в поддержку\n"
-            "  /suggest — предложить идею или улучшение\n"
-            "  /about   — информация о боте\n"
-            "  /start   — начало работы\n"
-            "  /help    — эта справка\n\n"
-            "💡 <i>В группах обращайтесь к боту через упоминание: @botname запрос</i>",
+            "  /me          — личный кабинет 👤\n"
+            "  /miniapp     — расписание в приложении 📅\n"
+            "  /grades      — мои оценки из eCampus\n"
+            "  /stats       — статистика успеваемости 📊\n"
+            "  /subjects    — список предметов\n"
+            "  /classmates  — мои одногруппники 👥\n"
+            "  /teacher     — найти преподавателя\n"
+            "  /ecampus     — статус eCampus\n"
+            "  /limit       — лимит запросов\n"
+            "  /support     — поддержка\n"
+            "  /suggest     — предложить идею\n\n"
+            "💡 <i>В группах обращайтесь через упоминание: @botname запрос</i>",
         parse_mode="HTML",
     )
     asyncio.ensure_future(store_message(sent, role="bot"))
@@ -709,7 +708,66 @@ async def cb_feedback(cb: CallbackQuery) -> None:
     logger.info(f"Feedback {rating} from user {user_id} on msg {message_id} chat {chat_id}")
 
 
-# ── Text messages → AI handler ─────────────────────────────────────────────────
+# ── eCampus grades commands ────────────────────────────────────────────────────
+
+@router.message(Command("ecampus"))
+async def handle_ecampus(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message, role="user"))
+    await cmd_ecampus(message)
+
+
+@router.message(Command("grades"))
+async def handle_grades(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message, role="user"))
+    await cmd_grades(message)
+
+
+@router.message(Command("stats"))
+async def handle_stats(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message, role="user"))
+    await cmd_stats(message)
+
+
+@router.message(Command("subjects"))
+async def handle_subjects(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message, role="user"))
+    await cmd_subjects(message)
+
+
+@router.message(Command("classmates"))
+async def handle_classmates(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message, role="user"))
+    await cmd_classmates(message)
+
+
+@router.message(Command("teacher"))
+async def handle_teacher(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message, role="user"))
+    await cmd_teacher(message)
+
+
+@router.message(Command("me"))
+async def handle_me(message: TelegramMessage) -> None:
+    asyncio.ensure_future(store_message(message, role="user"))
+    await cmd_me(message)
+
+
+@router.callback_query(F.data.startswith("stats:"))
+async def handle_cb_stats(cb: CallbackQuery) -> None:
+    await cb_stats(cb)
+
+
+@router.callback_query(F.data.startswith("teacher:"))
+async def handle_cb_teacher(cb: CallbackQuery) -> None:
+    await cb_teacher(cb)
+
+
+@router.callback_query(F.data.startswith("me:"))
+async def handle_cb_me(cb: CallbackQuery) -> None:
+    await cb_me(cb)
+
+
+# ── Text messages → AI handler ─────────────────────────────────────────────────────
 
 @router.message(F.text)
 async def any_text_message(message: TelegramMessage) -> None:
@@ -806,14 +864,20 @@ async def handle_contact(message: TelegramMessage) -> None:
 # ── Command menu list (registered on startup) ──────────────────────────────────
 
 BOT_COMMANDS = [
-    BotCommand(command="start",   description="Начало работы"),
-    BotCommand(command="help",    description="Справка"),
-    BotCommand(command="login",   description="Войти на сайт"),
-    BotCommand(command="code",    description="Ввести код для входа (/code XXXXXX)"),
-    BotCommand(command="miniapp", description="Открыть расписание (Mini App)"),
-    BotCommand(command="limit",   description="Мой лимит запросов"),
-    BotCommand(command="roles",   description="Мои роли и права"),
-    BotCommand(command="support", description="Написать в поддержку"),
-    BotCommand(command="suggest", description="Предложить идею"),
-    BotCommand(command="about",   description="О боте"),
+    BotCommand(command="start",       description="Начало работы"),
+    BotCommand(command="me",          description="Личный кабинет 👤"),
+    BotCommand(command="help",        description="Справка"),
+    BotCommand(command="miniapp",     description="Открыть расписание (Mini App) 📅"),
+    BotCommand(command="grades",      description="Мои оценки из eCampus"),
+    BotCommand(command="stats",       description="Статистика успеваемости 📊"),
+    BotCommand(command="subjects",    description="Список предметов"),
+    BotCommand(command="classmates",  description="Мои одногруппники 👥"),
+    BotCommand(command="teacher",     description="Найти преподавателя 👤"),
+    BotCommand(command="ecampus",     description="Статус eCampus"),
+    BotCommand(command="limit",       description="Лимит запросов"),
+    BotCommand(command="login",       description="Войти на сайт"),
+    BotCommand(command="code",        description="Ввести код (/code XXXXXX)"),
+    BotCommand(command="support",     description="Поддержка"),
+    BotCommand(command="suggest",     description="Предложить идею"),
+    BotCommand(command="about",       description="О боте"),
 ]

@@ -36,12 +36,8 @@ from app.cache.redis import get_redis
 # Set to True from handler when bot-side error occurred — middleware will decrement quota
 quota_error_flag: ContextVar[bool] = ContextVar("quota_error_flag", default=False)
 
-# Commands that are always free (never consume quota)
-_EXEMPT_COMMANDS = frozenset({
-    "/start", "/help", "/miniapp", "/mykey",
-    "/roles", "/support", "/suggest", "/about", "/limit",
-    "/login", "/code",   # авторизация через код — не AI-запрос
-})
+# Все команды /... освобождены от квоты — они никогда не идут в ИИ.
+_EXEMPT_COMMANDS: frozenset[str] = frozenset()  # оставлен для совместимости
 
 def _make_limit_msg(chat_type: str, miniapp_url: str) -> tuple[str, object]:
     """Return (text, reply_markup) for the limit-exceeded message."""
@@ -79,11 +75,9 @@ def _quota_key(chat_id: int) -> str:
 
 
 def _is_exempt(message: Message) -> bool:
-    text = (message.text or "").strip().lower()
-    if not text.startswith("/"):
-        return False
-    cmd = text.split()[0].split("@")[0]   # strip @botname suffix
-    return cmd in _EXEMPT_COMMANDS
+    """Любая команда /... никогда не считается AI-запросом и не тратит квоту."""
+    text = (message.text or "").strip()
+    return text.startswith("/")
 
 
 def _is_premium(message: Message) -> bool:

@@ -468,14 +468,20 @@ async def remove_favorite(
 # ── Settings ──────────────────────────────────────────────────────────────────
 
 class SettingsBody(BaseModel):
-    weekFromMonday:  Optional[bool] = None
-    time24h:         Optional[bool] = None
-    compact:         Optional[bool] = None
-    notifications:   Optional[bool] = None
-    default_group:   Optional[str]  = None
-    default_teacher: Optional[str]  = None
-    theme:           Optional[str]  = None
-    accent_color:    Optional[str]  = None   # hex color e.g. "#7c6eff"
+    weekFromMonday:      Optional[bool] = None
+    time24h:             Optional[bool] = None
+    compact:             Optional[bool] = None
+    notifications:       Optional[bool] = None
+    default_group:       Optional[str]  = None
+    default_teacher:     Optional[str]  = None
+    theme:               Optional[str]  = None
+    accent_color:        Optional[str]  = None
+    # Профиль расписания (сохраняется только если группа не подтверждена)
+    profile_role:         Optional[str]  = None
+    profile_group_id:     Optional[int]  = None
+    profile_group_name:   Optional[str]  = None
+    profile_teacher_id:   Optional[int]  = None
+    profile_teacher_name: Optional[str]  = None
 
 
 @router.get("/api/settings")
@@ -484,17 +490,26 @@ async def get_settings(authorization: Optional[str] = Header(None)):
     return {"settings": user.miniapp_settings or {}}
 
 
+_PROFILE_FIELDS = frozenset({
+    "profile_role", "profile_group_id", "profile_group_name",
+    "profile_teacher_id", "profile_teacher_name",
+})
+
 async def _do_update_settings(body: SettingsBody, authorization: Optional[str]) -> dict:
     user = await _auth_user(authorization)
     s = dict(user.miniapp_settings or {})
     patch = body.model_dump(exclude_none=True)
-    # Если группа подтверждена через eCampus — блокируем смену
-    if s.get("profile_group_confirmed") and ("profile_group_id" in patch or "profile_group_name" in patch):
-        raise HTTPException(status.HTTP_403_FORBIDDEN, "Группа подтверждена через eCampus и не может быть изменена")
+
+    # Группа подтверждена eCampus — полностью блокируем изменение профиля
+    if s.get("profile_group_confirmed") and _PROFILE_FIELDS.intersection(patch):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            "Профиль расписания заблокирован: группа подтверждена через eCampus",
+        )
+
     for k, v in patch.items():
         s[k] = v
     user.miniapp_settings = s
-    # Also persist accent_color on the user document itself for dashboard injection
     if body.accent_color:
         user.accent_color = body.accent_color
     await user.save()
@@ -508,6 +523,11 @@ async def update_settings_post(body: SettingsBody, authorization: Optional[str] 
 
 @router.patch("/api/settings")
 async def update_settings_patch(body: SettingsBody, authorization: Optional[str] = Header(None)):
+    return await _do_update_settings(body, authorization)
+
+
+@router.put("/api/settings")
+async def update_settings_put(body: SettingsBody, authorization: Optional[str] = Header(None)):
     return await _do_update_settings(body, authorization)
 
 

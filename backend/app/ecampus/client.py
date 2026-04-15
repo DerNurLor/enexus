@@ -372,6 +372,130 @@ class ECampusClient:
 
         return results
 
+
+    async def get_zachetka(self) -> dict:
+        """
+        Получает зачётную книжку студента с /details/zachetka.
+
+        Возвращает распарсенный viewModel:
+          {
+            "education_details": [  # список специальностей
+              {
+                "full_name": str,
+                "entrance_year": int,
+                "course": int,
+                "specialty": str,
+                "specialty_name": str,
+                "study_form": str,
+                "study_period": float,
+                "education_level": str,
+                "study_years": [
+                  {
+                    "name": str,          # "1 курс"
+                    "terms": [
+                      {
+                        "name": str,      # "1 семестр"
+                        "exams":  [ {discipline, hours, mark, date, teacher, type} ],
+                        "zachets": [...],
+                        "other":   [...],
+                      }
+                    ]
+                  }
+                ]
+              }
+            ],
+            "ovz": [  # курсовые работы
+              {kurs, sem, name, mark, date, teacher, topic, type}
+            ]
+          }
+        """
+        assert self._client is not None
+        resp = await self._client.get(
+            f"{ECAMPUS_BASE}/details/zachetka",
+            headers={
+                "Accept":     "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Referer":    f"{ECAMPUS_BASE}/details",
+                "Connection": "keep-alive",
+            },
+        )
+        resp.raise_for_status()
+
+        # viewModel встроен в JS как `var viewModel = {...};`
+        m = re.search(r"var viewModel\s*=\s*(\{.+?\});", resp.text, re.DOTALL)
+        if not m:
+            logger.warning("get_zachetka: viewModel not found in page")
+            return {"education_details": [], "ovz": []}
+
+        # Убираем JSON.parse("...") — заменяем на обычные строки ISO дат
+        raw_json = m.group(1)
+        raw_json = re.sub(
+            r'JSON\.parse\("(\\"[^"]*\\"|[^"]*?)"\)',
+            lambda mm: mm.group(1).replace('\\"', '"'),
+            raw_json,
+        )
+
+        try:
+            vm = json.loads(raw_json)
+        except json.JSONDecodeError as e:
+            logger.warning(f"get_zachetka: JSON parse failed: {e}")
+            return {"education_details": [], "ovz": []}
+
+        def _item(raw: dict) -> dict:
+            """Нормализует одну запись (экзамен/зачёт/прочее)."""
+            return {
+                "discipline": (raw.get("Discipline") or "").strip(),
+                "hours":      raw.get("Hours") or 0,
+                "mark":       (raw.get("Mark") or "").strip(),
+                "date":       (raw.get("Date") or "")[:10],
+                "teacher":    (raw.get("Teacher") or "").strip(),
+                "type":       (raw.get("Kod_v_name") or "").strip(),
+            }
+
+        result_eds = []
+        for ed in vm.get("EducationDetails", []):
+            study_years = []
+            for year in ed.get("StudyYears", []):
+                terms = []
+                for term in year.get("Terms", []):
+                    terms.append({
+                        "name":    term.get("Name", ""),
+                        "exams":   [_item(x) for x in term.get("Exams",  [])],
+                        "zachets": [_item(x) for x in term.get("Zachets", [])],
+                        "other":   [_item(x) for x in term.get("Other",   [])],
+                    })
+                study_years.append({"name": year.get("Name", ""), "terms": terms})
+
+            result_eds.append({
+                "full_name":       (ed.get("FullName") or "").strip(),
+                "entrance_year":   ed.get("EntranceYear"),
+                "course":          ed.get("Course"),
+                "specialty":       (ed.get("Specialty") or "").strip(),
+                "specialty_name":  (ed.get("SpecialtyName") or "").strip(),
+                "study_form":      (ed.get("StudyForm") or "").strip(),
+                "study_period":    ed.get("StudyPeriod"),
+                "education_level": (ed.get("EducationLevel") or "").strip(),
+                "study_years":     study_years,
+            })
+
+        ovz = []
+        for o in vm.get("OVZ", []):
+            ovz.append({
+                "kurs":    o.get("Kurs"),
+                "sem":     o.get("Sem"),
+                "name":    (o.get("Name") or "").strip(),
+                "mark":    (o.get("AttName") or "").strip(),
+                "date":    (o.get("Date") or "")[:10],
+                "teacher": (o.get("TeacherName") or "").strip(),
+                "topic":   (o.get("Topic") or "").strip(),
+                "type":    (o.get("Kod_v_name") or "").strip(),
+            })
+
+        logger.info(
+            f"get_zachetka: {len(result_eds)} specialties, "
+            f"{sum(sum(len(t['exams'])+len(t['zachets'])+len(t['other']) for t in y['terms']) for e in result_eds for y in e['study_years'])} records"
+        )
+        return {"education_details": result_eds, "ovz": ovz}
+
     def get_cookies(self) -> dict:
         """Возвращает текущие cookies для сохранения в Redis/БД."""
         return self._cookies

@@ -80,5 +80,5 @@ def get_avatar_url(tg_id: int) -> Optional[str]:
     local = AVATAR_DIR / f"{tg_id}.jpg"
     if local.exists():
         base = settings.webhook_base_url.rstrip("/")
-        return f"{base}/avatars/{tg_id}"   # served with Cache-Control + ETag
+        return f"{base}/static/avatars/{tg_id}.jpg"
     return None
