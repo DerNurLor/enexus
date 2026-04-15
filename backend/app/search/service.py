@@ -1,255 +1,229 @@
 """
 search/service.py
 =================
-Нормализация запросов и построение MongoDB-фильтров.
+Индустриальный стандарт поиска для коротких строк (группы, преподаватели, аудитории).
 
-normalize_group_name() — ключевая функция для сопоставления названий групп.
-Покрывает сценарии:
-  • замена пробелов ↔ дефисов:  "ИСС б о 22 3" → "ИСС-б-о-22-3"
-  • регистр:                    "исс-Б-О-22-3" → нижний для поиска
-  • лишние/пропущенные символы: "ИСС--б-о--22-3", "ИСС б  о22 3"
-  • транслитерация латиницы:    "ISS-b-o-22-3" → кириллица
-  • опечатки и перестановки:    fuzzy matching
-  • сокращения:                 "аис25" → "аис-б-о-25"
+Алгоритм — тот же что используют Typesense, Meilisearch, PostgreSQL pg_trgm,
+Elasticsearch fuzzy, Apple Spotlight:
+
+  MONGODB:  широкий кандидат-сет через prefix $regex (использует индекс, O(log n))
+  PYTHON:   ранжирование через rapidfuzz — token_set_ratio + partial_ratio + WRatio
+
+token_set_ratio — лучшая метрика для «слов в произвольном порядке»:
+  "исс 22 2"  vs "исс б о 22 2"  → 100
+  "подзолко"  vs "подзолко и в"  → 100
+  "305"       vs "305 корп 2"    → 100
+
+Всё что делает normalize() — lowercase + разделители→пробел + split digits.
+Никаких if-веток, никаких знаний о структуре «кафедра-форма-основа-год-подгруппа».
+
+Публичный API
+─────────────
+  normalize(s)                        → str
+  prefix(q)                           → str   mongo prefix
+  score(query, candidate)             → float 0–100
+  rank(candidates, query, ...)        → list
+  mongo_prefix_filter(q, field)       → dict
+
+  # Обратная совместимость — старые имена работают через новый движок
+  normalize_query / normalize_group_name / normalize_group_variants
+  build_mongo_search / build_group_search
+  fuzzy_match / fuzzy_match_group
+  rank_group_candidates / score_group_relevance / rank_candidates
+  letter_prefix / similarity / expand / build_mongo_filter
 """
+from __future__ import annotations
 
 import re
-from rapidfuzz import process as fz_process, fuzz
+from typing import Any, Callable, TypeVar
 
-try:
-    from transliterate import translit
-    _TRANSLIT = True
-except ImportError:
-    _TRANSLIT = False
+from rapidfuzz import fuzz
+
+T = TypeVar("T")
 
 
-ABBREVIATIONS: dict[str, str] = {
-    "СКФУ": "Северо-Кавказский федеральный университет",
-}
+# ── normalize ─────────────────────────────────────────────────────────────────
+
+def normalize(s: str) -> str:
+    """
+    Приводит строку к нормализованному виду для сравнения.
+    Единственная нормализация во всём модуле — никаких знаний о структуре данных.
+
+    "ИСС-б-о-22-3"  → "исс б о 22 3"
+    "исс222"        → "исс 22 2"
+    "исс-222"       → "исс 22 2"
+    "аис25"         → "аис 25"
+    "Подзолко И.В." → "подзолко и в"
+    "305/2"         → "305 2"
+    """
+    s = s.lower().strip()
+    # Разделители → пробел
+    s = re.sub(r"[.\-_/\\]+", " ", s)
+    # Граница буква↔цифра
+    s = re.sub(r"([а-яёa-z])(\d)", r"\1 \2", s)
+    s = re.sub(r"(\d)([а-яёa-z])", r"\1 \2", s)
+    # Длинные числа разбиваем по 2: "222"→"22 2", "2231"→"22 31"
+    def _chunk(m: re.Match) -> str:
+        d = m.group(0)
+        return d[:2] + " " + d[2:] if len(d) > 2 else d
+    s = re.sub(r"\d{3,}", _chunk, s)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+# ── prefix ────────────────────────────────────────────────────────────────────
+
+def prefix(q: str) -> str:
+    """
+    Первый буквенный токен из normalize(q) — MongoDB prefix для $regex.
+
+    "исс222"        → "исс"
+    "подзолко"      → "подзолко"
+    "305"           → "305"
+    "ИСС-б-о-22-3"  → "исс"
+    """
+    tokens = normalize(q).split()
+    for t in tokens:
+        if re.match(r"^[а-яёa-z]{2,}$", t):
+            return t
+    return tokens[0][:3] if tokens else q[:3].lower()
+
+
+# ── score ─────────────────────────────────────────────────────────────────────
+
+def score(query: str, candidate: str) -> float:
+    """
+    Нечёткое сходство [0–100] после normalize().
+    Максимум из token_set_ratio + partial_ratio + WRatio.
+    """
+    qn = normalize(query)
+    cn = normalize(candidate)
+    return max(
+        fuzz.token_set_ratio(qn, cn),
+        fuzz.partial_ratio(qn, cn),
+        fuzz.WRatio(qn, cn),
+    )
+
+
+# ── branch penalty ────────────────────────────────────────────────────────────
+
+def _branch_penalty(candidate_name: str, query: str) -> float:
+    """Штраф -30 для групп-филиалов (п-ИСС, е-АИС)."""
+    c_tokens = normalize(candidate_name).split()
+    if c_tokens and re.match(r"^[а-яёa-z]{1,2}$", c_tokens[0]):
+        q_tokens = normalize(query).split()
+        if not q_tokens or q_tokens[0] != c_tokens[0]:
+            return -30.0
+    return 0.0
+
+
+# ── rank ──────────────────────────────────────────────────────────────────────
+
+def rank(
+    candidates: list[T],
+    query: str,
+    *,
+    get_name: Callable[[T], str] = str,
+    threshold: float = 40.0,
+    limit: int = 15,
+    branch_penalty: bool = False,
+) -> list[T]:
+    """
+    Ранжирует кандидатов по нечёткому сходству с query.
+    """
+    scored: list[tuple[T, float]] = []
+    for obj in candidates:
+        name = get_name(obj)
+        s = score(query, name)
+        if branch_penalty:
+            s += _branch_penalty(name, query)
+        scored.append((obj, s))
+    scored.sort(key=lambda x: -x[1])
+    return [obj for obj, s in scored if s >= threshold][:limit]
+
+
+# ── mongo_prefix_filter ───────────────────────────────────────────────────────
+
+def mongo_prefix_filter(q: str, field: str) -> dict:
+    """
+    MongoDB $regex по prefix(q) — использует индекс, быстро.
+    Возвращает широкий кандидат-сет для ранжирования через rank().
+    """
+    pfx = prefix(q)
+    return {field: {"$regex": f"^{re.escape(pfx)}", "$options": "i"}}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Обратная совместимость
+# ═══════════════════════════════════════════════════════════════════════════════
+
+expand             = normalize
+letter_prefix      = prefix
+similarity         = score
+build_mongo_filter = mongo_prefix_filter
 
 
 def normalize_query(q: str) -> str:
-    q = q.strip()
-    for abbr, full in ABBREVIATIONS.items():
-        q = q.replace(abbr, full)
-    if _TRANSLIT and re.search(r"[a-zA-Z]", q):
-        try:
-            from transliterate import translit
-            q = translit(q, "ru")
-        except Exception:
-            pass
     return q.strip()
 
 
-_FORM_ALIASES: dict[str, str] = {
-    "бак": "б", "бакалавр": "б", "bak": "б",
-    "маг": "м", "магистр": "м",
-    "асп": "а", "аспирант": "а",
-    "спец": "с", "специалист": "с",
-    "b": "б", "m": "м",
-}
-
-_BASE_ALIASES: dict[str, str] = {
-    "очная": "о", "очн": "о",
-    "заочная": "з", "заоч": "з",
-    "очно-заочная": "оз",
-}
-
-# Простая таблица транслитерации для одиночных букв
-_LAT_TO_CYR = {
-    'a': 'а', 'b': 'б', 'c': 'с', 'd': 'd', 'e': 'е',
-    'g': 'г', 'h': 'х', 'i': 'и', 'j': 'й', 'k': 'к',
-    'l': 'л', 'm': 'м', 'n': 'н', 'o': 'о', 'p': 'п',
-    'q': 'к', 'r': 'р', 's': 'с', 't': 'т', 'u': 'у',
-    'v': 'в', 'w': 'в', 'x': 'кс', 'y': 'ы', 'z': 'з',
-}
-
-
 def normalize_group_name(raw: str) -> str:
-    """
-    Нормализует произвольное написание названия учебной группы
-    к каноническому виду: «кафедра-б-о-гг-н» (нижний регистр).
-
-    Примеры:
-      "ИСС-б-о-22-3"   → "исс-б-о-22-3"
-      "исс б о 22 3"   → "исс-б-о-22-3"
-      "ИСС  Б О 22  3" → "исс-б-о-22-3"
-      "исс-б-о22-3"    → "исс-б-о-22-3"
-      "ISS-b-o-22-3"   → "исс-б-о-22-3"
-      "аис25"           → "аис-б-о-25"
-      "аис-25-3"        → "аис-б-о-25-3"
-    """
-    s = raw.strip()
-
-    # 1. Транслитерировать латиницу → кириллицу (библиотека, если есть)
-    if _TRANSLIT and re.search(r"[a-zA-Z]", s):
-        try:
-            from transliterate import translit
-            s = translit(s, "ru")
-        except Exception:
-            pass
-
-    # 2. Нижний регистр
-    s = s.lower()
-
-    # 3. Оставшиеся латинские буквы — побуквенно
-    def _lat_char(m):
-        res = _LAT_TO_CYR.get(m.group(0))
-        return res if res is not None else m.group(0)
-    s = re.sub(r'[a-z]', _lat_char, s)
-
-    # 4. Пробелы/дефисы/подчёркивания → дефис
-    s = re.sub(r'[\s\-_/\\]+', '-', s)
-
-    # 5. Убрать всё кроме букв, цифр, дефиса
-    s = re.sub(r'[^\w\-]', '', s, flags=re.UNICODE)
-    s = s.strip('-')
-
-    # 6. Разбить на токены
-    tokens = [t for t in s.split('-') if t]
-
-    # 7. Заменить алиасы формы/основы
-    tokens = [_FORM_ALIASES.get(t, _BASE_ALIASES.get(t, t)) for t in tokens]
-
-    # 8. Короткая запись "аис25" / "аис253" → "аис-б-о-25-3"
-    if len(tokens) == 1 and re.match(r'^[а-яё]+\d{2,}$', tokens[0]):
-        m = re.match(r'^([а-яё]+)(\d{2})(\d?)$', tokens[0])
-        if m:
-            tokens = [m.group(1), "б", "о", m.group(2)]
-            if m.group(3):
-                tokens.append(m.group(3))
-
-    # 9. Если 2 токена вида "кафедра-25" — добавить б-о между ними
-    if len(tokens) == 2 and re.match(r'^\d{2}$', tokens[1]):
-        tokens = [tokens[0], "б", "о", tokens[1]]
-
-    return '-'.join(tokens)
+    return normalize(raw)
 
 
 def normalize_group_variants(raw: str) -> list[str]:
-    """
-    Возвращает несколько вариантов нормализации одного запроса.
-    Используется для $or-поиска в MongoDB.
-    """
-    canonical = normalize_group_name(raw)
-    lower_raw = raw.strip().lower()
-    # Вариант без разделителей: "иссбо223"
-    no_sep = re.sub(r'[\s\-_]+', '', canonical)
-    # Дедупликация с сохранением порядка
-    seen, variants = set(), []
-    for v in [canonical, lower_raw, no_sep]:
+    n   = normalize(raw)
+    low = raw.strip().lower()
+    seen: set[str] = set()
+    result: list[str] = []
+    for v in [n, low]:
         if v and v not in seen:
             seen.add(v)
-            variants.append(v)
-    return variants
-
-
-def fuzzy_match(query: str, candidates: list[str], threshold: int = 75) -> list[str]:
-    if not candidates:
-        return []
-    results = fz_process.extract(query, candidates, scorer=fuzz.WRatio, limit=20)
-    return [r[0] for r in results if r[1] >= threshold]
-
-
-def fuzzy_match_group(query: str, candidates: list[str], threshold: int = 70) -> list[str]:
-    """
-    Fuzzy-match для групп: нормализуем и запрос, и кандидатов,
-    чтобы регистр/дефисы/пробелы не влияли на score.
-    """
-    if not candidates:
-        return []
-    norm_query = normalize_group_name(query)
-    norm_map = {normalize_group_name(c): c for c in candidates}
-    results = fz_process.extract(
-        norm_query, list(norm_map.keys()),
-        scorer=fuzz.WRatio, limit=10,
-    )
-    return [norm_map[r[0]] for r in results if r[1] >= threshold]
+            result.append(v)
+    return result
 
 
 def build_mongo_search(q: str, text_fields: list[str]) -> dict:
-    """Build a $text or $regex query depending on query length."""
-    if len(q) >= 3:
-        return {"$text": {"$search": q, "$language": "russian"}}
-    return {text_fields[0]: {"$regex": f"^{re.escape(q)}", "$options": "i"}}
-
-
-def score_group_relevance(group_name: str, query_canonical: str) -> int:
-    """
-    Рассчитывает релевантность группы для запроса.
-    Штрафует группы из филиалов (пятигорск, ессентуки и т.д.),
-    которые содержат лишние префиксы типа 'п-', 'е-', 'к-'.
-
-    Логика:
-      - Базовый fuzzy-score от rapidfuzz
-      - Штраф -40 если название начинается с одно/двух-буквенного префикса+дефис
-        (признак филиала: п-исп-222, е-исс-22 и т.д.)
-      - Бонус +10 если запрос точно совпадает с "ядром" имени (без префикса)
-    """
-    try:
-        from rapidfuzz import fuzz as fzf
-        base_score = fzf.WRatio(query_canonical, normalize_group_name(group_name))
-    except ImportError:
-        base_score = 50
-
-    # Штраф за префикс филиала: "п-исп-222" → prefix "п"
-    branch_prefix = re.match(r'^([а-яёa-z]{1,2})-', group_name.lower())
-    if branch_prefix:
-        prefix = branch_prefix.group(1)
-        # Если запрос НЕ начинается с этого же префикса — это филиал, штрафуем
-        if not query_canonical.startswith(prefix + '-'):
-            base_score -= 40
-
-    return base_score
-
-
-def rank_group_candidates(
-    candidates: list,
-    raw_query: str,
-    *,
-    get_name=lambda c: c,
-) -> list:
-    """
-    Сортирует кандидатов по релевантности к запросу.
-    candidates: любые объекты, get_name(c) → строка имени группы.
-    Возвращает отсортированный список (лучшие первыми).
-    """
-    canonical = normalize_group_name(raw_query)
-    scored = [(c, score_group_relevance(get_name(c), canonical)) for c in candidates]
-    scored.sort(key=lambda x: -x[1])
-    return [c for c, _ in scored]
+    return mongo_prefix_filter(q, text_fields[0])
 
 
 def build_group_search(raw_query: str) -> dict:
-    """
-    MongoDB filter для поиска группы, устойчивый к опечаткам,
-    разным разделителям, регистру и сокращениям.
+    return mongo_prefix_filter(raw_query, "name")
 
-    Стратегия:
-      1. $text на канонической форме (использует индекс, быстро)
-      2. $regex на каждом из вариантов (fallback)
-    Возвращает $or всех условий.
-    """
-    variants = normalize_group_variants(raw_query)
-    conditions: list[dict] = []
 
-    canonical = variants[0]
-    # $text поиск — убираем дефисы, т.к. $text их игнорирует
-    text_query = re.sub(r'-', ' ', canonical)
-    if len(text_query.strip()) >= 3:
-        conditions.append({"$text": {"$search": text_query, "$language": "russian"}})
+def fuzzy_match(query: str, candidates: list[str], threshold: int = 60) -> list[str]:
+    return rank(candidates, query, get_name=str, threshold=float(threshold))
 
-    # Regex для каждого варианта
-    for v in variants:
-        if not v:
-            continue
-        # Разрешаем любые разделители между токенами
-        flex = re.escape(v)
-        flex = re.sub(r'(\\\s|\\-|_)+', r'[\\s\\-_]*', flex)
-        conditions.append({"name": {"$regex": flex, "$options": "i"}})
 
-    if not conditions:
-        return {}
-    if len(conditions) == 1:
-        return conditions[0]
-    return {"$or": conditions}
+def fuzzy_match_group(query: str, candidates: list[str], threshold: int = 60) -> list[str]:
+    return rank(candidates, query, get_name=str, threshold=float(threshold), branch_penalty=True)
+
+
+def score_group_relevance(group_name: str, query_canonical: str) -> float:
+    return score(query_canonical, group_name) + _branch_penalty(group_name, query_canonical)
+
+
+def rank_group_candidates(
+    candidates: list[Any],
+    raw_query: str,
+    *,
+    get_name: Callable[[Any], str] = str,
+) -> list[Any]:
+    return rank(candidates, raw_query, get_name=get_name, threshold=40.0, branch_penalty=True)
+
+
+def rank_candidates(
+    candidates: list[Any],
+    query: str,
+    *,
+    get_name: Callable[[Any], str] = str,
+    threshold: float = 40.0,
+    limit: int = 15,
+    apply_branch_penalty: bool = False,
+) -> list[Any]:
+    return rank(
+        candidates, query,
+        get_name=get_name,
+        threshold=threshold,
+        limit=limit,
+        branch_penalty=apply_branch_penalty,
+    )

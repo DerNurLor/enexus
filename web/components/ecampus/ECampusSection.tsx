@@ -72,6 +72,7 @@ export function ECampusSection({ token }: Props) {
   const [reauthCaptcha, setReauthCaptcha] = useState('')
   const [reauthAutoCaptha, setReauthAutoCaptcha] = useState(true)
   const [reauthMsg,    setReauthMsg]    = useState<string | null>(null)
+  const [syncCooldown, setSyncCooldown] = useState(false)
 
   const qc = useQueryClient()
 
@@ -166,12 +167,19 @@ export function ECampusSection({ token }: Props) {
   const handleSync = useCallback(async () => {
     setReauthState('checking')
     setReauthMsg(null)
+    // Optimistic update: immediately show running progress bar
+    qc.setQueryData(['ecampus-status'], (old: any) =>
+      old ? { ...old, sync_status: 'running', sync_progress: 1 } : old
+    )
     try {
       const result = await authedFetch('/sync', { method: 'POST' })
       if (result.ok) {
-        // Сессия валидна или тихая переавторизация прошла — просто обновляем
         setReauthState('idle')
         qc.invalidateQueries({ queryKey: ['ecampus-status'] })
+        authedFetch('/reconfirm', { method: 'POST' }).catch(() => {})
+        // КД 60 секунд
+        setSyncCooldown(true)
+        setTimeout(() => setSyncCooldown(false), 60_000)
         return
       }
       if (result.session_expired) {
@@ -473,12 +481,13 @@ export function ECampusSection({ token }: Props) {
           {reauthState !== 'need_captcha' && (
             <div className="flex gap-2 pt-1 flex-wrap" style={{ borderTop: '1px solid var(--border)' }}>
               <button
-                onClick={handleSync}
-                disabled={isRunning || isChecking}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs disabled:opacity-50 hover:bg-white/5"
-                style={{ color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)' }}>
+                onClick={() => { if (!syncCooldown) handleSync() }}
+                disabled={isRunning || isChecking || syncCooldown}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs disabled:opacity-50 hover:bg-white/5 transition-all"
+                style={{ color: syncCooldown ? 'var(--t-muted)' : 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)' }}
+                title={syncCooldown ? 'Подождите 60 сек' : 'Синхронизировать данные'}>
                 <RefreshCw size={11} className={(isRunning || isChecking) ? 'animate-spin' : ''} />
-                Обновить
+                {syncCooldown ? 'Обновлено ✓' : 'Обновить'}
               </button>
 
               {status.sync_status === 'ok' && (

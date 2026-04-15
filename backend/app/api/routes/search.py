@@ -101,20 +101,26 @@ async def universal_search(
     Search all entity types simultaneously.
     Returns matched groups, teachers, and rooms in one response.
     """
-    regex = {"$regex": q, "$options": "i"}
+    import re as _re
+    from app.search.service import prefix as _pfx, rank
 
-    g_filter: dict = {"name": regex}
-    t_filter: dict = {"$or": [{"full_name": regex}, {"subjects": regex}]}
-    r_filter: dict = {"$or": [{"name": regex}, {"building": regex}]}
+    pfx = _pfx(q)
+    g_filter: dict = {"name": {"$regex": f"^{_re.escape(pfx)}", "$options": "i"}}
+    t_filter: dict = {"full_name": {"$regex": f"^{_re.escape(pfx)}", "$options": "i"}}
+    r_filter: dict = {"name": {"$regex": f"^{_re.escape(pfx)}", "$options": "i"}}
 
     if institute_id:
-        g_filter["institute_id"]    = institute_id
-        t_filter["institute_ids"]   = institute_id
-        r_filter["institute_ids"]   = institute_id
+        g_filter["institute_id"]  = institute_id
+        t_filter["institute_ids"] = institute_id
+        r_filter["institute_ids"] = institute_id
 
-    groups   = await Group.find(g_filter).limit(limit).to_list()
-    teachers = await Teacher.find(t_filter).limit(limit).to_list()
-    rooms    = await Room.find(r_filter).limit(limit).to_list()
+    g_cands = await Group.find(g_filter).limit(limit * 4).to_list()
+    t_cands = await Teacher.find(t_filter).limit(limit * 4).to_list()
+    r_cands = await Room.find(r_filter).limit(limit * 4).to_list()
+
+    groups   = rank(g_cands,  q, get_name=lambda g: g.name,       threshold=40.0, limit=limit, branch_penalty=True)
+    teachers = rank(t_cands,  q, get_name=lambda t: t.full_name,  threshold=45.0, limit=limit)
+    rooms    = rank(r_cands,  q, get_name=lambda r: r.name,       threshold=40.0, limit=limit)
 
     return {
         "query": q,
@@ -155,18 +161,30 @@ async def search_teachers(
     has_schedule: Optional[bool] = Query(None, description="Only teachers with scraped schedule"),
     limit:        int            = Query(50, ge=1, le=500),
 ):
-    filters: dict = {}
-    if q:            filters["full_name"]    = {"$regex": q, "$options": "i"}
-    if subject:      filters["subjects"]     = {"$regex": subject, "$options": "i"}
-    if lesson_type:  filters["lesson_types"] = {"$regex": lesson_type, "$options": "i"}
-    if institute_id: filters["institute_ids"] = institute_id
-    if group_id:     filters["group_ids"]    = group_id
-    if has_schedule is True:
-        filters["schedule_scraped_at"] = {"$ne": None}
-    elif has_schedule is False:
-        filters["schedule_scraped_at"] = None
+    import re as _re
+    from app.search.service import prefix as _pfx, rank
 
-    teachers = await Teacher.find(filters).sort("full_name").limit(limit).to_list()
+    base_filters: dict = {}
+    if subject:      base_filters["subjects"]     = {"$regex": subject, "$options": "i"}
+    if lesson_type:  base_filters["lesson_types"] = {"$regex": lesson_type, "$options": "i"}
+    if institute_id: base_filters["institute_ids"] = institute_id
+    if group_id:     base_filters["group_ids"]    = group_id
+    if has_schedule is True:
+        base_filters["schedule_scraped_at"] = {"$ne": None}
+    elif has_schedule is False:
+        base_filters["schedule_scraped_at"] = None
+
+    if q:
+        pfx = _pfx(q)
+        # Prefix по фамилии (обычно первая) + contains-fallback
+        t_filter = {**base_filters, "full_name": {"$regex": f"^{_re.escape(pfx)}", "$options": "i"}}
+        cands = await Teacher.find(t_filter).limit(limit * 4).to_list()
+        if not cands:
+            t_filter2 = {**base_filters, "full_name": {"$regex": _re.escape(pfx), "$options": "i"}}
+            cands = await Teacher.find(t_filter2).limit(limit * 4).to_list()
+        teachers = rank(cands, q, get_name=lambda t: t.full_name, threshold=45.0, limit=limit)
+    else:
+        teachers = await Teacher.find(base_filters).sort("full_name").limit(limit).to_list()
 
     return {
         "total": len(teachers),
@@ -200,19 +218,30 @@ async def search_rooms(
     has_schedule: Optional[bool] = Query(None),
     limit:        int            = Query(50, ge=1, le=500),
 ):
-    filters: dict = {}
-    if q:            filters["name"]         = {"$regex": q, "$options": "i"}
-    if building:     filters["building"]     = {"$regex": building, "$options": "i"}
-    if subject:      filters["subjects"]     = {"$regex": subject, "$options": "i"}
-    if teacher_id:   filters["teacher_ids"]  = teacher_id
-    if group_id:     filters["group_ids"]    = group_id
-    if institute_id: filters["institute_ids"] = institute_id
-    if has_schedule is True:
-        filters["schedule_scraped_at"] = {"$ne": None}
-    elif has_schedule is False:
-        filters["schedule_scraped_at"] = None
+    import re as _re
+    from app.search.service import prefix as _pfx, rank
 
-    rooms = await Room.find(filters).sort("name").limit(limit).to_list()
+    base_filters: dict = {}
+    if building:     base_filters["building"]     = {"$regex": building, "$options": "i"}
+    if subject:      base_filters["subjects"]     = {"$regex": subject, "$options": "i"}
+    if teacher_id:   base_filters["teacher_ids"]  = teacher_id
+    if group_id:     base_filters["group_ids"]    = group_id
+    if institute_id: base_filters["institute_ids"] = institute_id
+    if has_schedule is True:
+        base_filters["schedule_scraped_at"] = {"$ne": None}
+    elif has_schedule is False:
+        base_filters["schedule_scraped_at"] = None
+
+    if q:
+        pfx = _pfx(q)
+        r_filter = {**base_filters, "name": {"$regex": f"^{_re.escape(pfx)}", "$options": "i"}}
+        cands = await Room.find(r_filter).limit(limit * 4).to_list()
+        if not cands:
+            r_filter2 = {**base_filters, "name": {"$regex": _re.escape(pfx), "$options": "i"}}
+            cands = await Room.find(r_filter2).limit(limit * 4).to_list()
+        rooms = rank(cands, q, get_name=lambda r: r.name, threshold=40.0, limit=limit)
+    else:
+        rooms = await Room.find(base_filters).sort("name").limit(limit).to_list()
 
     return {
         "total": len(rooms),
@@ -243,7 +272,7 @@ async def search_groups(
     has_schedule: Optional[bool] = Query(None),
     limit:        int            = Query(50, ge=1, le=500),
 ):
-    from app.search.service import rank_group_candidates, normalize_group_name, normalize_group_variants
+    from app.search.service import letter_prefix, rank_candidates
     import re as _re
 
     base_filters: dict = {}
@@ -256,57 +285,19 @@ async def search_groups(
         base_filters["schedule_scraped_at"] = None
 
     if q:
-        variants = normalize_group_variants(q)
-        canonical = variants[0]
-        fetch_limit = limit * 4
-        seen_ids: set = set()
-        candidates = []
+        pfx = letter_prefix(q)
+        # Шаг 1: широкий prefix-захват кандидатов через индекс
+        g_filter = {**base_filters, "name": {"$regex": f"^{_re.escape(pfx)}", "$options": "i"}}
+        candidates = await Group.find(g_filter).limit(limit * 6).to_list()
 
-        # ── Шаг 1: $text поиск (быстрый, по индексу) ──────────────────────
-        text_q = _re.sub(r'-', ' ', canonical)
-        if len(text_q.strip()) >= 3:
-            try:
-                text_filter = {**base_filters, "$text": {"$search": text_q, "$language": "russian"}}
-                text_results = await Group.find(text_filter).limit(fetch_limit).to_list()
-                for g in text_results:
-                    if g.id not in seen_ids:
-                        seen_ids.add(g.id)
-                        candidates.append(g)
-            except Exception:
-                pass  # $text индекс может отсутствовать
-
-        # ── Шаг 2: regex по каждому варианту отдельно ─────────────────────
-        for v in variants:
-            if not v or len(candidates) >= fetch_limit:
-                break
-            # Гибкий regex: разрешаем любые разделители между токенами
-            flex = _re.escape(v)
-            flex = _re.sub(r'(\\\ |\\-|_)+', r'[\\s\\-_]*', flex)
-            regex_filter = {**base_filters, "name": {"$regex": flex, "$options": "i"}}
-            try:
-                regex_results = await Group.find(regex_filter).limit(fetch_limit).to_list()
-                for g in regex_results:
-                    if g.id not in seen_ids:
-                        seen_ids.add(g.id)
-                        candidates.append(g)
-            except Exception:
-                pass
-
-        # ── Шаг 3: fallback по префиксу если мало результатов ─────────────
-        if len(candidates) < 3:
-            prefix = canonical[:4]
-            prefix_filter = {**base_filters, "name": {"$regex": f"^{_re.escape(prefix)}", "$options": "i"}}
-            try:
-                prefix_results = await Group.find(prefix_filter).limit(fetch_limit).to_list()
-                for g in prefix_results:
-                    if g.id not in seen_ids:
-                        seen_ids.add(g.id)
-                        candidates.append(g)
-            except Exception:
-                pass
-
-        # ── Шаг 4: ранжируем по fuzzy-score ───────────────────────────────
-        groups = rank_group_candidates(candidates, q, get_name=lambda g: g.name)[:limit]
+        # Шаг 2: ранжируем через token_set_ratio (без единой regex-цепочки)
+        groups = rank_candidates(
+            candidates, q,
+            get_name=lambda g: g.name,
+            threshold=40.0,
+            limit=limit,
+            apply_branch_penalty=True,
+        )
     else:
         groups = await Group.find(base_filters).sort("name").limit(limit).to_list()
 

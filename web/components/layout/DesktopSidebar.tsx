@@ -12,16 +12,20 @@ import {
 } from 'lucide-react'
 import { useScheduleStore } from '@/lib/store'
 
-const NAV_ITEMS = [
-  { href: '/schedule', label: 'Расписание', icon: CalendarDays },
-  { href: '/map',      label: 'Карта',       icon: Map          },
-  { href: '/ecampus',  label: 'Предметы',    icon: BookOpen     },
-  { href: '/profile',  label: 'Профиль',     icon: User         },
-]
-
 export function DesktopSidebar() {
   const pathname = usePathname()
   const newGradesCount = useScheduleStore((s) => s.newGradesCount)
+  const profile = useScheduleStore((s) => s.profile)
+  const isTeacher = profile?.role === 'teacher'
+
+  const NAV_ITEMS = [
+    { href: '/schedule', label: 'Расписание', icon: CalendarDays },
+    { href: '/map',      label: 'Карта',       icon: Map          },
+    isTeacher
+      ? { href: '/teacher', label: 'Мои занятия', icon: BookOpen }
+      : { href: '/ecampus', label: 'Предметы',    icon: BookOpen },
+    { href: '/profile',  label: 'Профиль',     icon: User         },
+  ]
 
   return (
     <aside
@@ -42,8 +46,7 @@ export function DesktopSidebar() {
       <nav className="flex-1 px-3 flex flex-col gap-1">
         {NAV_ITEMS.map(({ href, label, icon: Icon }) => {
           const isActive = pathname === href || pathname.startsWith(href + '/')
-          const isEcampus = href === '/ecampus'
-          const badge = isEcampus && newGradesCount > 0 ? newGradesCount : 0
+          const badge = href === '/ecampus' && newGradesCount > 0 ? newGradesCount : 0
 
           return (
             <Link

@@ -240,6 +240,12 @@ export const useScheduleStore = create<ScheduleStore>()(
 
       // ── Apply server settings ─────────────────────────────────────────────
       applyServerSettings: (s) => {
+        // DEBUG: убрать после подтверждения работы
+        console.log('[store] applyServerSettings received:', {
+          profile_group_confirmed: (s as any).profile_group_confirmed,
+          profile_group_name: (s as any).profile_group_name,
+          profile_role: (s as any).profile_role,
+        })
         const current = get()
         const newSettings: Partial<UiSettings> = {}
 
@@ -279,7 +285,11 @@ export const useScheduleStore = create<ScheduleStore>()(
 
         set((state) => ({
           settings: { ...state.settings, ...newSettings },
-          groupConfirmed: !!(s as any).profile_group_confirmed || state.groupConfirmed,
+          // groupConfirmed: confirmed если сервер явно сказал true
+          // ИЛИ если есть profile_group_name но нет явного false
+          // (покрывает старые записи где флаг ещё не был записан)
+          groupConfirmed: (s as any).profile_group_confirmed === true
+            || ((s as any).profile_group_confirmed !== false && !!(s as any).profile_group_name),
           ...profileUpdate,
         }))
       },
@@ -300,6 +310,7 @@ export const useScheduleStore = create<ScheduleStore>()(
         tgUser:          state.tgUser,   // кешируем для быстрого рендера
         favorites:       state.favorites,
         settings:        state.settings,
+        // groupConfirmed НЕ персистируем — всегда читается с сервера при initAuth
       }),
     }
   )

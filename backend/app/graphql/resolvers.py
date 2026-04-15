@@ -777,68 +777,55 @@ async def resolve_search(
     ck = cache_key("ncfu", "search", hash_params(q=nq, iid=institute_id))
 
     async def _fetch():
-        # ── Groups: canonical regex instead of $text ─────────────────────────
-        # $text splits "исс-б-о-22-2" into tokens [исс, б, о, 22, 2] matching
-        # hundreds of unrelated groups. Regex on the canonical short-form is precise.
-        canonical_g = normalize_group_name(nq)
+        from app.search.service import prefix as _prefix, rank, mongo_prefix_filter
 
-        # 1. Anchored exact prefix: "^исс-б-о-22-2" — matches only groups
-        #    that START with this pattern (catches main-campus groups, not branch "п-исс-…")
-        groups = await Group.find(
-            {"name": {"$regex": f"^{re.escape(canonical_g)}", "$options": "i"}}
-        ).limit(20).to_list()
+        pfx = _prefix(nq)
 
-        # 2. Dept+year prefix fallback: if nothing found, search all groups of that
-        #    dept and year regardless of form/basis tokens (исс.*22 catches исс-б-о-22-*)
-        if not groups:
-            pm = re.match(r"^([а-яёa-z]+).*?(\d{2})", canonical_g)
-            if pm:
-                dept, year = re.escape(pm.group(1)), re.escape(pm.group(2))
-                groups = await Group.find(
-                    {"name": {"$regex": f"^{dept}[^а-яё]*{year}", "$options": "i"}}
-                ).limit(30).to_list()
+        # ── Groups: prefix $regex → широкий набор → ранжирование ─────────────
+        g_filter: dict = {"name": {"$regex": f"^{re.escape(pfx)}", "$options": "i"}}
+        if institute_id:
+            g_filter["institute_id"] = institute_id
+        group_cands = await Group.find(g_filter).limit(100).to_list()
+        groups = rank(
+            group_cands, nq,
+            get_name=lambda g: g.name,
+            threshold=40.0,
+            limit=15,
+            branch_penalty=True,
+        )
 
-        # 3. Last resort — raw $text on original query (covers plain name queries)
-        if not groups:
-            groups = await Group.find(
-                build_mongo_search(nq, ["name"])
+        # ── Teachers: prefix по фамилии + contains-fallback ──────────────────
+        t_filter: dict = {"full_name": {"$regex": f"^{re.escape(pfx)}", "$options": "i"}}
+        if institute_id:
+            t_filter["institute_ids"] = institute_id
+        teacher_cands = await Teacher.find(t_filter).limit(60).to_list()
+        if not teacher_cands:
+            # Фамилия может быть не первой (запрос с инициалами) — ищем contains
+            t_filter2: dict = {"full_name": {"$regex": re.escape(pfx), "$options": "i"}}
+            if institute_id:
+                t_filter2["institute_ids"] = institute_id
+            teacher_cands = await Teacher.find(t_filter2).limit(60).to_list()
+        teachers = rank(
+            teacher_cands, nq,
+            get_name=lambda t: t.full_name,
+            threshold=45.0,
+            limit=10,
+        )
+
+        # ── Rooms: числовой prefix ("305") или буквенный ("акт") ─────────────
+        r_filter: dict = mongo_prefix_filter(nq, "name")
+        room_cands = await Room.find(r_filter).limit(30).to_list()
+        if not room_cands:
+            # contains-fallback для "305/2", "зал"
+            room_cands = await Room.find(
+                {"name": {"$regex": re.escape(pfx), "$options": "i"}}
             ).limit(30).to_list()
-
-        if institute_id:
-            groups = [g for g in groups if g.institute_id == institute_id]
-
-        t_f: dict = build_mongo_search(nq, ["full_name"])
-        r_f: dict = build_mongo_search(nq, ["name"])
-        if institute_id:
-            t_f["institute_ids"] = institute_id
-
-        teachers = await Teacher.find(t_f).limit(15).to_list()
-        rooms    = await Room.find(r_f).limit(15).to_list()
-
-        # ── Teacher fallback: regex on full_name (handles $text misses) ─────
-        # $text may fail for non-Slavic surnames. Always try regex as backup.
-        if not teachers and len(nq) >= 3:
-            # Direct regex first (exact surname)
-            teachers = await Teacher.find(
-                {"full_name": {"$regex": nq.strip().split()[0], "$options": "i"}}
-            ).limit(15).to_list()
-        # ── Fuzzy surname fallback for oblique cases (е.г. "Щербины" → "Щербин") ──
-        if not teachers and len(nq) >= 3:
-            surname_raw = nq.strip().split()[0]
-            for trim in range(1, 5):
-                prefix = surname_raw[:-trim] if len(surname_raw) > trim else surname_raw
-                if len(prefix) < 3:
-                    break
-                cands = await Teacher.find(
-                    {"full_name": {"$regex": prefix, "$options": "i"}}
-                ).limit(15).to_list()
-                if cands:
-                    teachers = cands
-                    break
-
-        # ── Smart group ranking: penalise branch-campus groups (п-исп-222) ──
-        if groups:
-            groups = rank_group_candidates(groups, q, get_name=lambda g: g.name)[:15]
+        rooms = rank(
+            room_cands, nq,
+            get_name=lambda r: r.name,
+            threshold=40.0,
+            limit=10,
+        )
 
         return {
             "groups":   [_group_type(g).__dict__   for g in groups],

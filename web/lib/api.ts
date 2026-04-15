@@ -87,6 +87,19 @@ export const api = {
   getBuildings: () =>
     get<{ buildings: string[] }>('/rooms/buildings-list'),
 
+  // ── Teacher-specific ─────────────────────────────────────────────────────
+  getTeacher: (teacherId: number) =>
+    get<import('./types').TeacherFull>(`/teachers/${teacherId}`),
+
+  getTeacherStats: (teacherId: number) =>
+    get<import('./types').TeacherStats>(`/teachers/${teacherId}/stats`),
+
+  getTeacherTodayRooms: (teacherId: number) =>
+    get<{ date: string; rooms: import('./types').TodayRoom[] }>(`/teachers/${teacherId}/today-rooms`),
+
+  getTeacherGroups: (teacherId: number) =>
+    get<{ teacher_id: number; full_name: string; group_count: number; groups: import('./types').GroupMeta[] }>(`/search/teacher-groups`, { teacher_id: teacherId }),
+
   // ── Quota (требует JWT) ───────────────────────────────────────────────────
   getQuotaStatus: () =>
     authedGet<import('./auth').QuotaStatus>('/miniapp/api/profile/limits'),

@@ -37,6 +37,42 @@ const TERM_MAP: Record<number, { sem: number; year: number }> = {
   248161: { sem: 7, year: 4 }, 248162: { sem: 8, year: 4 },
 }
 
+/**
+ * Вычисляет фактический рейтинг предмета из занятий.
+ * eCampus нередко отдаёт CurrentRating = 0 или null — считаем сами.
+ * Возвращает { gained, max, pct } где pct = 0–100.
+ */
+function computeRating(course: any): { gained: number; max: number; pct: number } {
+  // Сначала пробуем данные из самого курса (если eCampus заполнил)
+  const apiGained = course.CurrentRating as number | null | undefined
+  const apiMax    = course.MaxRating    as number | null | undefined
+
+  // Считаем из уроков — это источник истины
+  let gained = 0
+  let max    = 0
+  for (const lessons of Object.values(course.lessons || {}) as any[][]) {
+    for (const l of lessons) {
+      if (l.GainedScore) gained += Number(l.GainedScore) || 0
+      if (l.MaxScore)    max    += Number(l.MaxScore)    || 0
+    }
+  }
+
+  // Если eCampus дал MaxRating но не заполнил MaxScore в уроках — используем его
+  if (max === 0 && apiMax && apiMax > 0) max = apiMax
+
+  // Если считать не из чего — берём значения из API как есть
+  if (max === 0 && apiMax && apiMax > 0) {
+    gained = apiGained || 0
+    max    = apiMax
+  } else if (gained === 0 && apiGained && apiGained > 0 && max > 0) {
+    // API дал CurrentRating, а GainedScore в уроках нет — доверяем API
+    gained = apiGained
+  }
+
+  const pct = max > 0 ? Math.min((gained / max) * 100, 100) : 0
+  return { gained, max, pct }
+}
+
 async function authedFetch(path: string, options: RequestInit = {}) {
   const { getToken } = await import('@/lib/auth')
   const token = getToken()
@@ -173,12 +209,27 @@ function BottomSheet({ open, onClose, children }: {
 }
 
 // ── Course detail panel ───────────────────────────────────────────────────────
-function CourseDetail({ course, groupId, onClose, onRefreshed }: {
+function CourseDetail({ course, groupId, onClose, onRefreshed, zachetkaIndex }: {
   course: any; groupId: number | null; onClose: () => void; onRefreshed?: () => void
+  zachetkaIndex?: Record<string, Array<{mark: string; type: string; date: string; year: string; term: string}>>
 }) {
   const [activeTab, setActiveTab] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState(false)
   const router = useRouter()
   const { profile } = useScheduleStore()
+  const qc = useQueryClient()
+
+  const handleRefreshCourse = async () => {
+    setRefreshing(true)
+    try {
+      await authedFetch('/sync', { method: 'POST' })
+      await qc.invalidateQueries({ queryKey: ['ecampus-data'] })
+      await qc.invalidateQueries({ queryKey: ['ecampus-status'] })
+      onRefreshed?.()
+    } catch { /* silent */ } finally {
+      setRefreshing(false)
+    }
+  }
 
   const { data: lessonsData, isLoading: lessonsLoading } = useQuery({
     queryKey: ['ecampus-lessons', course.Id, course.term_id, groupId],
@@ -206,6 +257,13 @@ function CourseDetail({ course, groupId, onClose, onRefreshed }: {
       .flat().filter((l: any) => l.GradeText?.trim()).length
   }, [lessonsData])
 
+  // Итоговые оценки из зачётки — ищем по названию предмета
+  const finalGrades = useMemo(() => {
+    if (!zachetkaIndex) return []
+    const key = (course.Name || '').toLowerCase().trim()
+    return zachetkaIndex[key] ?? []
+  }, [zachetkaIndex, course.Name])
+
   return (
     <div className="flex flex-col gap-3 animate-fade-up">
       {/* Header */}
@@ -217,26 +275,75 @@ function CourseDetail({ course, groupId, onClose, onRefreshed }: {
             </h2>
             <p className="text-[11px]" style={{ color: 'var(--t-muted)' }}>{course.term_name}</p>
           </div>
-          <button onClick={onClose} className="shrink-0 p-1.5 rounded-lg hover:bg-white/5"
-            style={{ color: 'var(--t-muted)' }}>
-            <X size={14} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button onClick={handleRefreshCourse} disabled={refreshing}
+              className="shrink-0 p-1.5 rounded-lg hover:bg-white/5 disabled:opacity-40"
+              title="Обновить предмет"
+              style={{ color: 'var(--accent)' }}>
+              <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+            </button>
+            <button onClick={onClose} className="shrink-0 p-1.5 rounded-lg hover:bg-white/5"
+              style={{ color: 'var(--t-muted)' }}>
+              <X size={14} />
+            </button>
+          </div>
         </div>
 
-        {course.MaxRating > 0 && (
-          <div className="mb-3">
-            <div className="flex justify-between text-[11px] mb-1" style={{ color: 'var(--t-muted)' }}>
-              <span>Рейтинг</span>
-              <span className="font-mono font-semibold" style={{ color: 'var(--accent)' }}>
-                {course.CurrentRating?.toFixed(2)} / {course.MaxRating}
+        {/* Итоговые оценки из зачётной книжки */}
+        {finalGrades.length > 0 && (
+          <div className="mb-3 rounded-xl overflow-hidden" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
+            <div className="px-3 py-2 flex items-center gap-1.5" style={{ borderBottom: '1px solid var(--border)' }}>
+              <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--t-muted)' }}>
+                Зачётная книжка
               </span>
             </div>
-            <div className="relative h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
-              <div className="h-full rounded-full transition-all"
-                style={{ width: `${Math.min(course.CurrentRating / course.MaxRating * 100, 100)}%`, background: 'var(--accent)' }} />
-            </div>
+            {finalGrades.map((g, i) => {
+              const markLow = g.mark.toLowerCase()
+              const markColor =
+                markLow === 'отлично'             ? '#a6e3a1' :
+                markLow === 'хорошо'              ? '#89b4fa' :
+                markLow === 'удовлетворительно'   ? '#f9e2af' :
+                markLow === 'неудовлетворительно' ? '#f38ba8' :
+                markLow.includes('зачтено') && !markLow.includes('не') ? '#94e2d5' :
+                markLow.includes('не зачтено')    ? '#f38ba8' : '#a6adc8'
+              return (
+                <div key={i} className="px-3 py-2 flex items-center justify-between gap-2"
+                  style={{ borderBottom: i < finalGrades.length - 1 ? '1px solid var(--border)' : undefined }}>
+                  <div className="min-w-0">
+                    <p className="text-[11px] truncate" style={{ color: 'var(--t-secondary)' }}>{g.type}</p>
+                    {g.date && (
+                      <p className="text-[9px]" style={{ color: 'var(--t-muted)' }}>{g.year} · {g.term} · {g.date}</p>
+                    )}
+                  </div>
+                  <span className="shrink-0 text-[11px] font-bold px-2 py-0.5 rounded"
+                    style={{ background: `${markColor}18`, color: markColor, border: `1px solid ${markColor}30` }}>
+                    {g.mark}
+                  </span>
+                </div>
+              )
+            })}
           </div>
         )}
+
+        {(() => {
+          const r = computeRating(course)
+          if (r.max === 0) return null
+          const rColor = r.pct >= 70 ? '#a6e3a1' : r.pct >= 50 ? '#f9e2af' : '#f38ba8'
+          return (
+            <div className="mb-3">
+              <div className="flex justify-between text-[11px] mb-1" style={{ color: 'var(--t-muted)' }}>
+                <span>Рейтинг</span>
+                <span className="font-mono font-semibold" style={{ color: rColor }}>
+                  {r.gained.toFixed(1)} / {r.max} <span style={{ opacity: 0.6 }}>({r.pct.toFixed(0)}%)</span>
+                </span>
+              </div>
+              <div className="relative h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
+                <div className="h-full rounded-full transition-all"
+                  style={{ width: `${r.pct}%`, background: rColor }} />
+              </div>
+            </div>
+          )
+        })()}
 
         {allGradedCount > 0 && (
           <div className="flex items-center gap-1.5 text-[11px] mb-3" style={{ color: '#34d399' }}>
@@ -433,6 +540,7 @@ export default function ECampusPage() {
   const [sortBy,         setSortBy]          = useState<'name' | 'rating' | 'grades' | 'recent'>('name')
   const [showSortMenu,   setShowSortMenu]    = useState(false)
   const [sheetOpen,      setSheetOpen]       = useState(false)
+  const [syncCooldown,   setSyncCooldown]    = useState(false)
 
   // При открытии страницы предметов — сбрасываем бейдж
   useEffect(() => { clearNewGrades() }, []) // eslint-disable-line react-hooks/exhaustive-deps
@@ -445,10 +553,18 @@ export default function ECampusPage() {
   })
 
   const syncMutation = useMutation({
+    onMutate: () => {
+      qc.setQueryData(['ecampus-status'], (old: any) =>
+        old ? { ...old, sync_status: 'running', sync_progress: 1 } : old
+      )
+    },
     mutationFn: () => authedFetch('/sync', { method: 'POST' }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ecampus-status'] })
       qc.invalidateQueries({ queryKey: ['ecampus-data'] })
+      // КД 60 секунд после успешного обновления
+      setSyncCooldown(true)
+      setTimeout(() => setSyncCooldown(false), 60_000)
     },
     onError: () => {
       qc.invalidateQueries({ queryKey: ['ecampus-status'] })
@@ -470,6 +586,31 @@ export default function ECampusPage() {
     }
   }, [ecampusData?.courses]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Индекс зачётки: discipline.toLowerCase() → список итоговых записей
+  const zachetkaIndex = useMemo(() => {
+    const idx: Record<string, Array<{mark: string; type: string; date: string; year: string; term: string}>> = {}
+    for (const ed of ecampusData?.zachetka?.education_details ?? []) {
+      for (const year of ed.study_years ?? []) {
+        for (const term of year.terms ?? []) {
+          for (const cat of ['exams', 'zachets', 'other'] as const) {
+            for (const item of (term as any)[cat] ?? []) {
+              if (!item.discipline || !item.mark) continue
+              const key = item.discipline.toLowerCase().trim()
+              if (!idx[key]) idx[key] = []
+              idx[key].push({
+                mark:  item.mark,
+                type:  item.type  || '',
+                date:  item.date  || '',
+                year:  year.name  || '',
+                term:  term.name  || '',
+              })
+            }
+          }
+        }
+      }
+    }
+    return idx
+  }, [ecampusData?.zachetka])
 
   const isRunning = status?.sync_status === 'running'
 
@@ -526,7 +667,7 @@ export default function ECampusPage() {
       courses = courses.filter(c => c.LessonTypes?.some((lt: any) => COURSE_WORK_TYPES.has(lt.LessonType)))
 
     if (sortBy === 'rating')
-      courses.sort((a, b) => (b.CurrentRating || 0) - (a.CurrentRating || 0))
+      courses.sort((a, b) => computeRating(b).pct - computeRating(a).pct)
     else if (sortBy === 'grades') {
       const cnt = (c: any) => Object.values(c.lessons || {}).flat().filter((l: any) => l.GradeText?.trim()).length
       courses.sort((a, b) => cnt(b) - cnt(a))
@@ -552,9 +693,9 @@ export default function ECampusPage() {
       !c.LessonTypes?.some((lt: any) => EXAM_TYPES.has(lt.LessonType))
     ).length
     const withCourseWork = courses.filter(c => c.LessonTypes?.some((lt: any) => COURSE_WORK_TYPES.has(lt.LessonType))).length
-    const withRating     = courses.filter(c => c.MaxRating > 0)
+    const withRating     = courses.filter(c => computeRating(c).max > 0)
     const avgRating      = withRating.length
-      ? withRating.reduce((s, c) => s + (c.CurrentRating || 0), 0) / withRating.length : 0
+      ? withRating.reduce((s, c) => s + computeRating(c).pct, 0) / withRating.length : 0
     const totalGrades    = courses.reduce((s, c) =>
       s + Object.values(c.lessons || {}).flat().filter((l: any) => l.GradeText?.trim()).length, 0)
     return { total: courses.length, withExam, withCredit, withCourseWork, avgRating, totalGrades }
@@ -618,11 +759,14 @@ export default function ECampusPage() {
               {new Date(status.last_sync).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}
             </span>
           )}
-          <button onClick={() => syncMutation.mutate()} disabled={isRunning || syncMutation.isPending}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] hover:bg-white/5 disabled:opacity-40"
-            style={{ color: 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)' }}>
+          <button
+            onClick={() => { if (!syncCooldown) syncMutation.mutate() }}
+            disabled={isRunning || syncMutation.isPending || syncCooldown}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] hover:bg-white/5 disabled:opacity-40 transition-all"
+            style={{ color: syncCooldown ? 'var(--t-muted)' : 'var(--accent)', border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)' }}
+            title={syncCooldown ? 'Подождите 60 сек перед повторным обновлением' : 'Обновить данные'}>
             <RefreshCw size={11} className={isRunning ? 'animate-spin' : ''} />
-            Обновить
+            {syncCooldown ? 'Обновлено ✓' : 'Обновить'}
           </button>
         </div>
       </div>
@@ -647,7 +791,7 @@ export default function ECampusPage() {
               {[
                 { label: 'Всего',       value: termStats.total,                                             icon: BookMarked, color: 'var(--accent)' },
                 { label: 'Оценок',      value: termStats.totalGrades,                                       icon: Award,      color: '#34d399' },
-                { label: 'Ср. рейтинг', value: termStats.avgRating > 0 ? termStats.avgRating.toFixed(1) : '—', icon: TrendingUp, color: '#fbbf24' },
+                { label: 'Ср. рейтинг', value: termStats.avgRating > 0 ? `${termStats.avgRating.toFixed(0)}%` : '—', icon: TrendingUp, color: '#fbbf24' },
                 { label: 'Курс. работ', value: termStats.withCourseWork,                                    icon: FileText,   color: '#a78bfa' },
               ].map(({ label, value, icon: Icon, color }) => (
                 <div key={label} className="card px-3 py-2.5 text-center">
@@ -802,15 +946,17 @@ export default function ECampusPage() {
                             {gradeCount} оц.
                           </span>
                         )}
-                        {!isLoading && course.MaxRating > 0 && (
-                          <span className="text-[10px] font-mono font-semibold tabular-nums"
-                            style={{
-                              color: course.CurrentRating / course.MaxRating >= 0.7 ? '#34d399'
-                                : course.CurrentRating / course.MaxRating >= 0.4 ? '#fbbf24' : '#f87171',
-                            }}>
-                            {course.CurrentRating?.toFixed(0)}/{course.MaxRating}
-                          </span>
-                        )}
+                        {!isLoading && (() => {
+                          const r = computeRating(course)
+                          if (r.max === 0) return null
+                          const rColor = r.pct >= 70 ? '#34d399' : r.pct >= 40 ? '#fbbf24' : '#f87171'
+                          return (
+                            <span className="text-[10px] font-mono font-semibold tabular-nums"
+                              style={{ color: rColor }}>
+                              {r.gained.toFixed(0)}/{r.max}<span style={{ opacity: 0.55 }}> {r.pct.toFixed(0)}%</span>
+                            </span>
+                          )
+                        })()}
                       </div>
                     </div>
                   </button>
@@ -833,6 +979,7 @@ export default function ECampusPage() {
               <div className="mt-4 lg:mt-0 hidden lg:block">
                 <div className="card pb-4">
                   <CourseDetail course={selectedCourse} groupId={profile?.groupId ?? null}
+                    zachetkaIndex={zachetkaIndex}
                     onClose={() => { setSelectedCourse(null) }} />
                 </div>
               </div>
@@ -851,6 +998,7 @@ export default function ECampusPage() {
       <BottomSheet open={sheetOpen && !!selectedCourse} onClose={() => { setSheetOpen(false); setSelectedCourse(null) }}>
         {selectedCourse && (
           <CourseDetail course={selectedCourse} groupId={profile?.groupId ?? null}
+            zachetkaIndex={zachetkaIndex}
             onClose={() => { setSheetOpen(false); setSelectedCourse(null) }} />
         )}
       </BottomSheet>

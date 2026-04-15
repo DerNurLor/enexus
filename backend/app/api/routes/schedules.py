@@ -451,6 +451,110 @@ async def export_ics(
     )
 
 
+
+@router.get("/teacher/{teacher_id}/export.ics", summary="Export teacher schedule as iCalendar (.ics)")
+async def export_teacher_ics(
+    teacher_id: int,
+    weeks: int = Query(4, ge=1, le=16, description="Число недель от сегодня"),
+):
+    """
+    Экспорт расписания преподавателя в формат iCalendar.
+    Открывается в Google Calendar, Apple Calendar, Outlook.
+    Пример: /schedules/teacher/123/export.ics?weeks=8
+    """
+    from app.models.lesson import LessonDoc
+    from app.models.teacher import Teacher
+
+    teacher = await Teacher.find_one(Teacher.teacher_id == teacher_id)
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+
+    today   = date_type.today()
+    date_to = today + timedelta(weeks=weeks)
+
+    lessons = await LessonDoc.find(
+        LessonDoc.teacher_id == teacher_id,
+        LessonDoc.date >= today,
+        LessonDoc.date <= date_to,
+    ).sort("+date").to_list()
+
+    def _dt(d: date_type, t: str) -> str:
+        hh, mm = t.split(":") if t and ":" in t else ("00", "00")
+        return f"{d.strftime('%Y%m%d')}T{hh}{mm}00"
+
+    def _escape(s: str) -> str:
+        return (s or "").replace("\\", "\\\\").replace(",", "\\,").replace(";", "\\;").replace("\n", "\\n")
+
+    lines: list[str] = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//NCFU Schedule Bot//RU",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+        f"X-WR-CALNAME:Расписание {teacher.short_name or teacher.full_name}",
+        "X-WR-TIMEZONE:Europe/Moscow",
+        "X-WR-CALDESC:Расписание занятий СКФУ",
+    ]
+
+    now_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+    for lesson in lessons:
+        uid     = f"{lesson.id}@ncfu.schedule"
+        dtstart = _dt(lesson.date, lesson.time_start)
+        dtend   = _dt(lesson.date, lesson.time_end)
+
+        summary = _escape(lesson.subject or "Занятие")
+        if lesson.lesson_type:
+            summary += f" ({_escape(lesson.lesson_type)})"
+        if lesson.subgroup:
+            summary += f" — {_escape(lesson.subgroup)}"
+
+        location = _escape(lesson.room_name or "")
+        group    = _escape(lesson.group_name or "")
+
+        description_parts = []
+        if group:
+            description_parts.append(f"Группа: {group}")
+        if lesson.note:
+            description_parts.append(_escape(lesson.note))
+        description = "\\n".join(description_parts)
+
+        lines += [
+            "BEGIN:VEVENT",
+            f"UID:{uid}",
+            f"DTSTAMP:{now_stamp}",
+            f"DTSTART;TZID=Europe/Moscow:{dtstart}",
+            f"DTEND;TZID=Europe/Moscow:{dtend}",
+            f"SUMMARY:{summary}",
+        ]
+        if location:
+            lines.append(f"LOCATION:{location}")
+        if description:
+            lines.append(f"DESCRIPTION:{description}")
+        lines.append("END:VEVENT")
+
+    lines.append("END:VCALENDAR")
+    content = "\r\n".join(lines) + "\r\n"
+
+    from urllib.parse import quote as _quote
+    safe_name     = (teacher.short_name or teacher.full_name).replace(" ", "_")
+    ascii_name    = safe_name.encode("ascii", errors="ignore").decode() or "teacher"
+    ascii_filename = f"{ascii_name}_schedule.ics"
+    utf8_filename  = f"{safe_name}_schedule.ics"
+    encoded        = _quote(utf8_filename, safe="")
+    content_disposition = (
+        f'attachment; filename="{ascii_filename}"; filename*=UTF-8\'\'{encoded}'
+    )
+
+    return Response(
+        content=content,
+        media_type="text/calendar; charset=utf-8",
+        headers={
+            "Content-Disposition": content_disposition,
+            "Cache-Control": "no-cache",
+        },
+    )
+
 @router.get("/teacher/{teacher_id}/day", summary="Schedule for a teacher on a specific date")
 async def get_teacher_day(
     teacher_id: int,

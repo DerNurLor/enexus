@@ -135,3 +135,75 @@ async def get_teacher_week(
         "week":       week,
         "days":       sorted(days_map.values(), key=lambda d: d["date"]),
     }
+
+@router.get("/{teacher_id}/stats", summary="Aggregated stats for a teacher")
+async def get_teacher_stats(teacher_id: int):
+    """
+    Возвращает агрегированную статистику преподавателя:
+    предметы, типы занятий, топ аудиторий, топ корпусов.
+    Источник: LessonDoc (весь период).
+    """
+    from app.models.lesson import LessonDoc
+    from collections import Counter
+
+    t = await Teacher.find_one(Teacher.teacher_id == teacher_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+
+    lessons = await LessonDoc.find(
+        LessonDoc.teacher_id == teacher_id
+    ).to_list()
+
+    subjects: Counter = Counter()
+    lesson_types: Counter = Counter()
+    rooms: Counter = Counter()
+    buildings: Counter = Counter()
+    groups: Counter = Counter()
+
+    for l in lessons:
+        if l.subject:      subjects[l.subject] += 1
+        if l.lesson_type:  lesson_types[l.lesson_type] += 1
+        if l.room_name:    rooms[l.room_name] += 1
+        if l.building:     buildings[l.building] += 1
+        if l.group_name:   groups[l.group_name] += 1
+
+    total = len(lessons)
+    return {
+        "teacher_id":    teacher_id,
+        "full_name":     t.full_name,
+        "total_lessons": total,
+        "subjects":      [{"name": k, "count": v} for k, v in subjects.most_common(20)],
+        "lesson_types":  [{"name": k, "count": v} for k, v in lesson_types.most_common(10)],
+        "top_rooms":     [{"name": k, "count": v} for k, v in rooms.most_common(10)],
+        "top_buildings": [{"name": k, "count": v} for k, v in buildings.most_common(10)],
+        "top_groups":    [{"name": k, "count": v} for k, v in groups.most_common(20)],
+    }
+
+
+@router.get("/{teacher_id}/today-rooms", summary="Rooms used by teacher today")
+async def get_teacher_today_rooms(teacher_id: int):
+    """Аудитории и корпуса преподавателя на сегодня."""
+    from app.models.lesson import LessonDoc
+    from datetime import date as date_type
+    today = date_type.today()
+    t = await Teacher.find_one(Teacher.teacher_id == teacher_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+    lessons = await LessonDoc.find(
+        LessonDoc.teacher_id == teacher_id,
+        LessonDoc.date == today,
+    ).sort("+time_start").to_list()
+    rooms = []
+    seen = set()
+    for l in lessons:
+        key = (l.room_name, l.building)
+        if key not in seen and l.room_name:
+            seen.add(key)
+            rooms.append({
+                "room_name": l.room_name,
+                "building":  l.building,
+                "time_start": l.time_start,
+                "time_end":   l.time_end,
+                "subject":    l.subject,
+            })
+    return {"date": today.isoformat(), "rooms": rooms}
