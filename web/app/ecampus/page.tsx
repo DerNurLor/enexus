@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { useScheduleStore } from '@/lib/store'
+import { useGestures }       from '@/hooks/useGestures'
 import { PageHeader } from '@/components/layout/PageHeader'
 import {
   BookOpen, RefreshCw, Search, X, BarChart2, FileText,
@@ -289,41 +290,28 @@ function CourseDetail({ course, groupId, onClose, onRefreshed, zachetkaIndex }: 
           </div>
         </div>
 
-        {/* Итоговые оценки из зачётной книжки */}
-        {finalGrades.length > 0 && (
-          <div className="mb-3 rounded-xl overflow-hidden" style={{ background: 'var(--surface)', border: '1px solid var(--border)' }}>
-            <div className="px-3 py-2 flex items-center gap-1.5" style={{ borderBottom: '1px solid var(--border)' }}>
-              <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--t-muted)' }}>
-                Зачётная книжка
+        {/* Итоговая оценка из зачётки — компактно под названием */}
+        {finalGrades.length > 0 && (() => {
+          const g = finalGrades[0]
+          const markLow = g.mark.toLowerCase()
+          const markColor =
+            markLow === 'отлично'             ? '#a6e3a1' :
+            markLow === 'хорошо'              ? '#89b4fa' :
+            markLow === 'удовлетворительно'   ? '#f9e2af' :
+            markLow === 'неудовлетворительно' ? '#f38ba8' :
+            markLow.includes('зачтено') && !markLow.includes('не') ? '#94e2d5' :
+            markLow.includes('не зачтено')    ? '#f38ba8' : '#a6adc8'
+          return (
+            <div className="flex items-center gap-2 mb-3">
+              <span className="text-[10px]" style={{ color: 'var(--t-muted)' }}>{g.type}</span>
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded"
+                style={{ background: `${markColor}18`, color: markColor, border: `1px solid ${markColor}30` }}>
+                {g.mark}
               </span>
+              {g.date && <span className="text-[9px]" style={{ color: 'var(--t-muted)' }}>{g.date}</span>}
             </div>
-            {finalGrades.map((g, i) => {
-              const markLow = g.mark.toLowerCase()
-              const markColor =
-                markLow === 'отлично'             ? '#a6e3a1' :
-                markLow === 'хорошо'              ? '#89b4fa' :
-                markLow === 'удовлетворительно'   ? '#f9e2af' :
-                markLow === 'неудовлетворительно' ? '#f38ba8' :
-                markLow.includes('зачтено') && !markLow.includes('не') ? '#94e2d5' :
-                markLow.includes('не зачтено')    ? '#f38ba8' : '#a6adc8'
-              return (
-                <div key={i} className="px-3 py-2 flex items-center justify-between gap-2"
-                  style={{ borderBottom: i < finalGrades.length - 1 ? '1px solid var(--border)' : undefined }}>
-                  <div className="min-w-0">
-                    <p className="text-[11px] truncate" style={{ color: 'var(--t-secondary)' }}>{g.type}</p>
-                    {g.date && (
-                      <p className="text-[9px]" style={{ color: 'var(--t-muted)' }}>{g.year} · {g.term} · {g.date}</p>
-                    )}
-                  </div>
-                  <span className="shrink-0 text-[11px] font-bold px-2 py-0.5 rounded"
-                    style={{ background: `${markColor}18`, color: markColor, border: `1px solid ${markColor}30` }}>
-                    {g.mark}
-                  </span>
-                </div>
-              )
-            })}
-          </div>
-        )}
+          )
+        })()}
 
         {(() => {
           const r = computeRating(course)
@@ -458,31 +446,56 @@ function CourseDetail({ course, groupId, onClose, onRefreshed, zachetkaIndex }: 
 // ── Term selector (горизонтальный скролл-пилюли) ─────────────────────────────
 function TermSelector({
   termIds, coursesByTerm, selectedTerm, onSelect,
+  isRunning, loadedTermIds, totalTerms,
 }: {
   termIds: number[]
   coursesByTerm: Record<number, any[]>
   selectedTerm: number | null
   onSelect: (tid: number) => void
+  isRunning?: boolean
+  loadedTermIds?: number[]
+  totalTerms?: number
 }) {
+  const allIds = Object.keys(TERM_MAP).map(Number)
+  const displayIds = (isRunning && totalTerms && totalTerms > 0)
+    ? allIds.slice(0, totalTerms)
+    : termIds
+
   return (
     <div className="flex gap-2 overflow-x-auto pb-1" style={{ scrollbarWidth: 'none' }}>
-      {termIds.map(tid => {
-        const t = TERM_MAP[tid]
+      {displayIds.map((tid) => {
+        const tm = TERM_MAP[tid]
         const count = coursesByTerm[tid]?.length || 0
         const isActive = selectedTerm === tid
+        const done    = isRunning ? (loadedTermIds?.includes(tid) ?? false) : false
+        const loading = isRunning && !done && count === 0
         return (
-          <button key={tid} onClick={() => onSelect(tid)}
-            className="shrink-0 flex flex-col items-center px-4 py-2.5 rounded-2xl transition-all"
+          <button key={tid} onClick={() => count > 0 ? onSelect(tid) : undefined}
+            className="shrink-0 flex flex-col items-center px-3 py-2 rounded-2xl transition-all relative"
             style={{
               background: isActive ? 'var(--accent)' : 'var(--card)',
-              color: isActive ? 'var(--accent-fg)' : 'var(--t-secondary)',
-              border: `1px solid ${isActive ? 'var(--accent)' : 'var(--border)'}`,
-              minWidth: 72,
+              color: isActive ? 'var(--accent-fg)' : (count === 0 && isRunning) ? 'var(--t-muted)' : 'var(--t-secondary)',
+              border: `1px solid ${isActive ? 'var(--accent)' : done ? 'rgba(74,222,128,0.4)' : 'var(--border)'}`,
+              minWidth: 68,
+              opacity: (count === 0 && isRunning && !done && !loading) ? 0.5 : 1,
             }}>
+            {/* Статус-индикатор */}
+            {done && !isActive && (
+              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full flex items-center justify-center badge-pop"
+                style={{ background: '#4ade80', fontSize: 9 }}>✓</span>
+            )}
+            {loading && (
+              <span className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full flex items-center justify-center"
+                style={{ background: 'var(--accent)' }}>
+                <span className="w-2 h-2 rounded-full animate-pulse" style={{ background: 'white' }} />
+              </span>
+            )}
             <span className="text-xs font-semibold">
-              {t ? `${t.year} · ${t.sem} сем` : `${tid}`}
+              {tm ? `${tm.year}к ${tm.sem}с` : `${tid}`}
             </span>
-            <span className="text-[9px] opacity-60 mt-0.5">{count} пр.</span>
+            <span className="text-[9px] opacity-60 mt-0.5">
+              {loading ? '...' : done || count > 0 ? `${count} пр.` : '—'}
+            </span>
           </button>
         )
       })}
@@ -533,6 +546,21 @@ export default function ECampusPage() {
   const router = useRouter()
 
   const [selectedTerm,   setSelectedTerm]   = useState<number | null>(null)
+
+  // Жесты для ecampus: свайп влево/вправо = следующий/предыдущий семестр
+  const ecampusGestures = useGestures({
+    onSwipeLeft: () => {
+      if (!termIds.length) return
+      const idx = selectedTerm ? termIds.indexOf(selectedTerm) : 0
+      if (idx < termIds.length - 1) setSelectedTerm(termIds[idx + 1])
+    },
+    onSwipeRight: () => {
+      if (!termIds.length) return
+      const idx = selectedTerm ? termIds.indexOf(selectedTerm) : 0
+      if (idx > 0) setSelectedTerm(termIds[idx - 1])
+    },
+    swipeThreshold: 70,
+  })
   const [selectedCourse, setSelectedCourse] = useState<any>(null)
   const [searchQuery,    setSearchQuery]     = useState('')
   const [searchAllTerms, setSearchAllTerms]  = useState(false)
@@ -576,6 +604,8 @@ export default function ECampusPage() {
     queryFn: () => authedFetch('/data'),
     enabled: !!authToken && !!status?.connected,
     staleTime: 60_000,
+    // placeholderData сохраняет предыдущие данные пока идёт refetch — список предметов не пропадает
+    placeholderData: (prev: any) => prev,
     refetchInterval: (status?.sync_status === 'running' || syncMutation.isPending) ? 2000 : false,
   })
 
@@ -749,7 +779,7 @@ export default function ECampusPage() {
   }
 
   return (
-    <div className="px-4 lg:px-0 pb-8">
+    <div className="px-4 lg:px-0 pb-8 page-enter" {...ecampusGestures}>
       {/* Header */}
       <div className="flex items-center justify-between mb-4">
         <PageHeader title="Предметы" />
@@ -782,8 +812,15 @@ export default function ECampusPage() {
         <div className="flex flex-col gap-4">
 
           {/* Выбор семестра — горизонтальный скролл */}
-          <TermSelector termIds={termIds} coursesByTerm={coursesByTerm} selectedTerm={selectedTerm}
-            onSelect={(tid) => { setSelectedTerm(tid); setSelectedCourse(null); setSheetOpen(false) }} />
+          <TermSelector
+            termIds={termIds}
+            coursesByTerm={coursesByTerm}
+            selectedTerm={selectedTerm}
+            onSelect={(tid) => { setSelectedTerm(tid); setSelectedCourse(null); setSheetOpen(false) }}
+            isRunning={isRunning}
+            loadedTermIds={status?.sync_loaded_term_ids}
+            totalTerms={status?.sync_total_terms}
+          />
 
           {/* Статистика */}
           {selectedTerm && (
@@ -871,7 +908,7 @@ export default function ECampusPage() {
 
           {/* Список курсов + Desktop detail */}
           <div className="lg:grid lg:grid-cols-2 lg:gap-4">
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-1.5 stagger-spring">
               {filteredCourses.length === 0 ? (
                 <div className="card px-5 py-8 text-center">
                   {isRunning
@@ -896,7 +933,7 @@ export default function ECampusPage() {
                 return (
                   <button key={`${course.Id}-${course.term_id}`}
                     onClick={() => handleCourseClick(course)}
-                    className="w-full text-left px-4 py-3 rounded-xl transition-all"
+                    className="w-full text-left px-4 py-3 rounded-xl transition-all tap-scale"
                     style={{
                       background: isSelected ? 'color-mix(in srgb, var(--accent) 10%, transparent)' : 'var(--card)',
                       border: `1px solid ${isSelected ? 'var(--accent)' : 'var(--border)'}`,
@@ -929,23 +966,28 @@ export default function ECampusPage() {
                       </div>
                       <div className="flex flex-col items-end gap-1 shrink-0">
                         {isLoading && <CourseSpinner />}
-                        {!isLoading && course.LessonTypes?.some((lt: any) => EXAM_TYPES.has(lt.LessonType)) && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold"
-                            style={{ background: '#f8717115', color: '#f87171' }}>Экзамен</span>
-                        )}
-                        {!isLoading && course.LessonTypes?.some((lt: any) => CREDIT_TYPES.has(lt.LessonType)) &&
-                          !course.LessonTypes?.some((lt: any) => EXAM_TYPES.has(lt.LessonType)) && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold"
-                            style={{ background: '#fbbf2415', color: '#fbbf24' }}>
-                            {course.LessonTypes?.some((lt: any) => lt.LessonType === 55) ? 'Диф.зачёт' : 'Зачёт'}
-                          </span>
-                        )}
-                        {!isLoading && gradeCount > 0 && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold"
-                            style={{ background: '#34d39915', color: '#34d399' }}>
-                            {gradeCount} оц.
-                          </span>
-                        )}
+                        {/* Итоговая оценка из зачётки — главный приоритет */}
+                        {!isLoading && (() => {
+                          const key = (course.Name || '').toLowerCase().trim()
+                          const fg = zachetkaIndex?.[key]
+                          if (!fg?.length) return null
+                          const g = fg[0]
+                          const ml = g.mark.toLowerCase()
+                          const [bg, clr] =
+                            ml === 'отлично'             ? ['#a6e3a118', '#a6e3a1'] :
+                            ml === 'хорошо'              ? ['#89b4fa18', '#89b4fa'] :
+                            ml === 'удовлетворительно'   ? ['#f9e2af18', '#f9e2af'] :
+                            ml === 'неудовлетворительно' ? ['#f38ba818', '#f38ba8'] :
+                            ml.includes('зачтено') && !ml.includes('не') ? ['#94e2d518', '#94e2d5'] :
+                            ml.includes('не зачтено') ? ['#f38ba818', '#f38ba8'] :
+                            ['#a6adc818', '#a6adc8']
+                          return (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded"
+                              style={{ background: bg, color: clr, border: `1px solid ${clr}30` }}>
+                              {g.mark}
+                            </span>
+                          )
+                        })()}
                         {!isLoading && (() => {
                           const r = computeRating(course)
                           if (r.max === 0) return null
@@ -957,6 +999,12 @@ export default function ECampusPage() {
                             </span>
                           )
                         })()}
+                        {!isLoading && gradeCount > 0 && (
+                          <span className="text-[9px] px-1 py-0.5 rounded"
+                            style={{ color: 'var(--t-muted)' }}>
+                            {gradeCount} оц.
+                          </span>
+                        )}
                       </div>
                     </div>
                   </button>

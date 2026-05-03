@@ -244,3 +244,276 @@ button, a {
   transform: translateY(-1px);
   box-shadow: 0 4px 20px rgba(0,0,0,0.3);
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   ANIMATION SYSTEM v2
+   1. Визуальный фидбек   — ripple, scale-tap, bounce-star
+   2. Функциональное      — btn-morph (check → spinner → done)
+   3. Ориентация          — slide-left, slide-right (смена дня)
+   4. Иерархия            — spring-in, page-enter
+   5. Состояние системы   — progress-bar, count-up
+   6. Забавные            — wiggle, float, heartbeat
+═══════════════════════════════════════════════════════════════ */
+
+/* --- Физические кривые (всё через ease, не linear) --- */
+:root {
+  --spring:  cubic-bezier(0.34, 1.56, 0.64, 1);   /* пружина с перелётом */
+  --snap:    cubic-bezier(0.25, 0.46, 0.45, 0.94); /* быстро в конце */
+  --bounce:  cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  --smooth:  cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* 1. ВИЗУАЛЬНЫЙ ФИДБЕК ───────────────────────────────── */
+
+/* Ripple — волна от нажатия */
+@keyframes ripple {
+  0%   { transform: scale(0);   opacity: 0.35; }
+  100% { transform: scale(2.5); opacity: 0; }
+}
+.ripple-container { position: relative; overflow: hidden; }
+.ripple-container::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: currentColor;
+  transform: scale(0);
+  opacity: 0;
+  pointer-events: none;
+}
+.ripple-container:active::after {
+  animation: ripple 0.4s var(--snap) forwards;
+}
+
+/* Scale tap — физический отклик кнопок */
+@keyframes scaleTap {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(0.94); }
+  100% { transform: scale(1); }
+}
+.tap-scale:active { animation: scaleTap 0.15s var(--snap) forwards; }
+
+/* Звёздочка избранного — bounce при добавлении */
+@keyframes starBounce {
+  0%   { transform: scale(1); }
+  30%  { transform: scale(1.5) rotate(-15deg); }
+  60%  { transform: scale(0.85) rotate(10deg); }
+  100% { transform: scale(1) rotate(0); }
+}
+.star-bounce { animation: starBounce 0.4s var(--spring) forwards; }
+
+/* 2. ФУНКЦИОНАЛЬНОЕ ИЗМЕНЕНИЕ ──────────────────────────── */
+
+/* Кнопка → состояние (иконка меняется) */
+@keyframes iconSwap {
+  0%   { opacity: 1; transform: scale(1) rotate(0deg); }
+  50%  { opacity: 0; transform: scale(0.5) rotate(90deg); }
+  51%  { opacity: 0; transform: scale(0.5) rotate(-90deg); }
+  100% { opacity: 1; transform: scale(1) rotate(0deg); }
+}
+.icon-swap { animation: iconSwap 0.3s var(--smooth) forwards; }
+
+/* Морф кнопки "Обновить" → "✓" */
+@keyframes btnSuccess {
+  0%   { transform: scale(1); }
+  50%  { transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
+.btn-success { animation: btnSuccess 0.3s var(--spring) forwards; }
+
+/* 3. ОРИЕНТАЦИЯ В ПРОСТРАНСТВЕ ────────────────────────── */
+
+/* Смена дня — слайд влево/вправо */
+@keyframes slideInRight {
+  from { opacity: 0; transform: translateX(20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes slideInLeft {
+  from { opacity: 0; transform: translateX(-20px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+@keyframes slideOutLeft {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(-20px); }
+}
+@keyframes slideOutRight {
+  from { opacity: 1; transform: translateX(0); }
+  to   { opacity: 0; transform: translateX(20px); }
+}
+.slide-in-right { animation: slideInRight 0.22s var(--snap) forwards; }
+.slide-in-left  { animation: slideInLeft  0.22s var(--snap) forwards; }
+
+/* Навигация между страницами */
+@keyframes pageEnter {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.page-enter { animation: pageEnter 0.3s var(--snap) forwards; }
+
+/* 4. ИЕРАРХИЯ И ВЗАИМОДЕЙСТВИЕ ─────────────────────────── */
+
+/* Spring появление — карточки с пружиной */
+@keyframes springIn {
+  0%   { opacity: 0; transform: scale(0.92) translateY(10px); }
+  60%  { opacity: 1; transform: scale(1.02) translateY(-2px); }
+  100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+.spring-in { animation: springIn 0.35s var(--spring) forwards; }
+
+@keyframes slideInUp {
+  from { opacity: 0; transform: translateY(24px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* Stagger с пружиной (заменяем старый) */
+.stagger-spring > * {
+  opacity: 0;
+  animation: springIn 0.35s var(--spring) forwards;
+}
+.stagger-spring > *:nth-child(1)  { animation-delay: 0ms; }
+.stagger-spring > *:nth-child(2)  { animation-delay: 50ms; }
+.stagger-spring > *:nth-child(3)  { animation-delay: 100ms; }
+.stagger-spring > *:nth-child(4)  { animation-delay: 150ms; }
+.stagger-spring > *:nth-child(5)  { animation-delay: 200ms; }
+.stagger-spring > *:nth-child(6)  { animation-delay: 250ms; }
+.stagger-spring > *:nth-child(7)  { animation-delay: 300ms; }
+.stagger-spring > *:nth-child(8)  { animation-delay: 350ms; }
+
+/* Expand — раскрытие контента (для аккордеонов) */
+@keyframes expandDown {
+  from { opacity: 0; max-height: 0; transform: translateY(-6px); }
+  to   { opacity: 1; max-height: 800px; transform: translateY(0); }
+}
+.expand-down { animation: expandDown 0.3s var(--snap) forwards; overflow: hidden; }
+
+/* Hover lift — карточки поднимаются */
+.card-lift {
+  transition: transform 0.18s var(--spring), box-shadow 0.18s var(--smooth);
+  cursor: pointer;
+}
+.card-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.25);
+}
+.card-lift:active { transform: translateY(0) scale(0.98); }
+
+/* 5. СОСТОЯНИЕ СИСТЕМЫ ────────────────────────────────── */
+
+/* Progress bar анимация загрузки */
+@keyframes progressPulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.6; }
+}
+@keyframes progressWave {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(200%); }
+}
+.progress-bar {
+  position: relative;
+  overflow: hidden;
+  border-radius: 999px;
+}
+.progress-bar::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.25), transparent);
+  animation: progressWave 1.5s ease infinite;
+}
+
+/* Индикатор "идёт сейчас" — пульс с кольцом */
+@keyframes livePulseRing {
+  0%   { transform: scale(1); opacity: 0.6; }
+  100% { transform: scale(2.2); opacity: 0; }
+}
+.live-ring {
+  position: relative;
+}
+.live-ring::before {
+  content: '';
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  border: 2px solid #4ade80;
+  animation: livePulseRing 1.5s ease-out infinite;
+}
+
+/* Счётчик — fade-up смена числа */
+@keyframes countUp {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.count-change { animation: countUp 0.2s var(--snap) forwards; }
+
+/* 6. ЗАБАВНЫЕ АНИМАЦИИ ────────────────────────────────── */
+
+/* Wiggle — встряска при ошибке или добавлении */
+@keyframes wiggle {
+  0%,100% { transform: rotate(0deg); }
+  20%     { transform: rotate(-8deg); }
+  40%     { transform: rotate(8deg); }
+  60%     { transform: rotate(-5deg); }
+  80%     { transform: rotate(5deg); }
+}
+.wiggle { animation: wiggle 0.4s var(--smooth) forwards; }
+
+/* Float — парение активной пары */
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-3px); }
+}
+.float { animation: float 3s ease-in-out infinite; }
+
+/* Heartbeat — для бейджа с уведомлением */
+@keyframes heartbeat {
+  0%, 100% { transform: scale(1); }
+  14%       { transform: scale(1.2); }
+  28%       { transform: scale(1); }
+  42%       { transform: scale(1.15); }
+  70%       { transform: scale(1); }
+}
+.heartbeat { animation: heartbeat 2s ease infinite; }
+
+/* Бейдж появляется pop */
+@keyframes badgePop {
+  0%   { transform: scale(0) rotate(-20deg); opacity: 0; }
+  60%  { transform: scale(1.2) rotate(5deg);  opacity: 1; }
+  100% { transform: scale(1) rotate(0deg);    opacity: 1; }
+}
+.badge-pop { animation: badgePop 0.35s var(--spring) forwards; }
+
+/* Shine — блик на карточке */
+@keyframes shine {
+  from { background-position: -100% center; }
+  to   { background-position: 200% center; }
+}
+.shine-once {
+  background: linear-gradient(105deg, transparent 40%, rgba(255,255,255,0.06) 50%, transparent 60%);
+  background-size: 200% 100%;
+  animation: shine 0.6s var(--snap) forwards;
+}
+
+/* Skeleton shimmer улучшенный */
+@keyframes skeletonShimmer {
+  0%   { background-position: -200% 0; }
+  100% { background-position:  200% 0; }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--card) 25%,
+    rgba(255,255,255,0.04) 37%,
+    var(--card) 63%
+  );
+  background-size: 400% 100%;
+  animation: skeletonShimmer 1.4s ease infinite;
+}
+
+/* Respect prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
