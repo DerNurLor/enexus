@@ -47,12 +47,13 @@ interface SyncStatus {
   sync_progress:      number
   sync_done_terms:    number
   sync_total_terms:   number
+  sync_loaded_term_ids?: number[]
   sync_courses_found: number
 }
 
-interface Props { token: string | null }
+interface Props { token: string | null; tgAuthReady?: boolean }
 
-export function ECampusSection({ token }: Props) {
+export function ECampusSection({ token, tgAuthReady = true }: Props) {
   // ── Состояние формы первого подключения ───────────────────────────────────
   const [showForm,     setShowForm]     = useState(false)
   const [showData,     setShowData]     = useState(false)
@@ -232,7 +233,23 @@ export function ECampusSection({ token }: Props) {
     }
   }, [reauthCaptcha, reauthAutoCaptha, qc, loadCaptcha])
 
-  if (!token) return null
+  // Пока токен не инициализирован (плохая сеть) — показываем skeleton, не прячем секцию
+  if (!token) {
+    if (!tgAuthReady) {
+      return (
+        <div className="mt-4 rounded-2xl overflow-hidden" style={{ border: '1px solid var(--border)' }}>
+          <div className="px-4 py-3 flex items-center gap-2">
+            <div className="h-4 w-32 rounded skeleton" />
+          </div>
+          <div className="px-4 pb-3 flex flex-col gap-2">
+            <div className="h-3 w-48 rounded skeleton" />
+            <div className="h-8 w-full rounded-xl skeleton" />
+          </div>
+        </div>
+      )
+    }
+    return null
+  }
 
   const isRunning    = status?.sync_status === 'running'
   const isPending    = connectStatus === 'solving_captcha' || connectStatus === 'connecting'

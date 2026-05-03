@@ -478,49 +478,47 @@ async def _upsert_chat_meta(
     The upsert is intentionally lightweight: it only writes when values change.
     """
     try:
-        settings = await ChatSettings.find_one(ChatSettings.chat_id == chat_id)
-        if settings is None:
-            settings = ChatSettings(
-                chat_id=chat_id,
-                chat_key=chat_key,
-                chat_type=chat_type,
-                title=title,
-                username=username,
-                message_limit=DEFAULT_LIMIT,
-            )
-            await settings.insert()
-            return
-
-        # Only save when something actually changed to avoid unnecessary writes
-        dirty = False
-        if title and settings.title != title:
-            settings.title = title
-            dirty = True
-        if username and settings.username != username:
-            settings.username = username
-            dirty = True
-        if settings.chat_type != chat_type:
-            settings.chat_type = chat_type
-            dirty = True
-        if dirty:
-            from datetime import datetime, timezone
-            settings.updated_at = datetime.now(timezone.utc)
-            await settings.save()
+        # Используем upsert чтобы избежать E11000 при одновременном создании
+        from app.auth.database import get_auth_db
+        from datetime import datetime, timezone
+        col = get_auth_db()["chat_settings"]
+        now = datetime.now(timezone.utc)
+        await col.update_one(
+            {"chat_id": chat_id},
+            {"$setOnInsert": {
+                "chat_id": chat_id,
+                "chat_key": chat_key,
+                "message_limit": DEFAULT_LIMIT,
+                "created_at": now,
+            }, "$set": {
+                "chat_type": chat_type,
+                "title": title,
+                "username": username,
+                "updated_at": now,
+            }},
+            upsert=True,
+        )
     except Exception as exc:
         logger.warning(f'_upsert_chat_meta failed chat_id={chat_id}: {exc}')
 
 
 async def _enforce_limit(chat_id: int, chat_key: str) -> None:
     try:
+        # Upsert — избегаем дубликатов при параллельных запросах
+        from app.auth.database import get_auth_db
+        from datetime import datetime, timezone
+        col = get_auth_db()["chat_settings"]
+        await col.update_one(
+            {"chat_id": chat_id},
+            {"$setOnInsert": {
+                "chat_id": chat_id,
+                "chat_key": chat_key,
+                "message_limit": DEFAULT_LIMIT,
+                "created_at": datetime.now(timezone.utc),
+            }},
+            upsert=True,
+        )
         settings = await ChatSettings.find_one(ChatSettings.chat_id == chat_id)
-
-        if settings is None:
-            settings = ChatSettings(
-                chat_id=chat_id,
-                chat_key=chat_key,
-                message_limit=DEFAULT_LIMIT,
-            )
-            await settings.insert()
 
         limit = settings.message_limit
         if limit is None:

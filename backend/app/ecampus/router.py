@@ -55,6 +55,7 @@ class SyncStatusResponse(BaseModel):
     sync_progress:      int = 0
     sync_done_terms:    int = 0
     sync_total_terms:   int = 0
+    sync_loaded_term_ids: list = []
     sync_courses_found: int = 0
 
 
@@ -291,6 +292,7 @@ async def get_sync_status(
         sync_progress=record.sync_progress,
         sync_done_terms=record.sync_done_terms,
         sync_total_terms=record.sync_total_terms,
+        sync_loaded_term_ids=record.sync_loaded_term_ids or [],
         sync_courses_found=record.sync_courses_found,
     )
 

@@ -38,21 +38,33 @@ function TgAuthInit() {
   } = useScheduleStore()
 
   useEffect(() => {
-    const timeout = setTimeout(() => setTgAuthReady(true), 5000)
+    // Таймаут 10 сек — если сеть совсем плохая, не блокируем рендер
+    const timeout = setTimeout(() => setTgAuthReady(true), 10000)
 
-    authenticateWithTelegram()
-      .then((result) => {
+    async function tryAuth(attempt = 0): Promise<void> {
+      try {
+        const result = await authenticateWithTelegram()
         if (result) {
           setToken(result.token)
           setAuthToken(result.token)
-          setTgUser(result.user)
+          if (result.user) setTgUser(result.user)
           applyServerSettings(result.settings)
-          if (result.favorites.length > 0) setFavorites(result.favorites)
+          if (result.favorites?.length > 0) setFavorites(result.favorites)
         }
-      })
-      .catch(() => {})
-      .finally(() => { clearTimeout(timeout); setTgAuthReady(true) })
+        clearTimeout(timeout)
+        setTgAuthReady(true)
+      } catch {
+        if (attempt === 0) {
+          // Плохая сеть — ждём 2 сек и пробуем ещё раз
+          setTimeout(() => tryAuth(1), 2000)
+        } else {
+          clearTimeout(timeout)
+          setTgAuthReady(true)
+        }
+      }
+    }
 
+    tryAuth()
     return () => clearTimeout(timeout)
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 

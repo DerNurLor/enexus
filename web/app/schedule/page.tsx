@@ -4,7 +4,7 @@ import { useState, useRef, useEffect, useCallback, Suspense, useMemo } from 'rea
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { Search, CalendarRange, X, WifiOff, Clock, MapPin, ChevronRight } from 'lucide-react'
+import { Search, CalendarRange, X, WifiOff, Clock, MapPin, ChevronRight, Star, RefreshCw, History } from 'lucide-react'
 import { format, addDays, startOfWeek, getISOWeek } from 'date-fns'
 import { ru } from 'date-fns/locale'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -13,7 +13,9 @@ import { DayPicker } from '@/components/schedule/DayPicker'
 import { LessonCard } from '@/components/schedule/LessonCard'
 import { SearchDropdown } from '@/components/schedule/SearchDropdown'
 import { useScheduleStore } from '@/lib/store'
+import { getToken } from '@/lib/auth'
 import { TeacherDashboard } from '@/components/schedule/TeacherDashboard'
+import { useGestures }       from '@/hooks/useGestures'
 import { api } from '@/lib/api'
 import type { Lesson, GroupMeta, TeacherMeta, RoomMeta } from '@/lib/types'
 
@@ -137,7 +139,52 @@ function SchedulePageInner() {
   const {
     mode, groupId, groupName, teacherId, teacherName, roomId, roomName,
     setMode, setGroup, setTeacher, setRoom, profile, profileComplete, authToken,
+    favorites, setFavorites,
   } = useScheduleStore()
+
+  const isFavorite = useMemo(() => {
+    if (mode === 'group' && groupId)
+      return favorites.some(f => f.type === 'group' && String(f.id) === String(groupId))
+    if (mode === 'teacher' && teacherId)
+      return favorites.some(f => f.type === 'teacher' && String(f.id) === String(teacherId))
+    return false
+  }, [favorites, mode, groupId, teacherId])
+
+  async function toggleFavorite() {
+    const token = getToken()
+    if (!token) return
+    const base = (process.env.NEXT_PUBLIC_API_URL || '') + '/miniapp'
+    if (mode === 'group' && groupId && groupName) {
+      const fid = `group:${groupId}`
+      if (isFavorite) {
+        await fetch(`${base}/api/favorites/${encodeURIComponent(fid)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
+        setFavorites(favorites.filter(f => !(f.type === 'group' && String(f.id) === String(groupId))))
+      } else {
+        await fetch(`${base}/api/favorites`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ type: 'group', id: groupId, label: groupName }) })
+        setFavorites([...favorites, { type: 'group', id: groupId, name: groupName }])
+      }
+      if ('vibrate' in navigator) navigator.vibrate(15)
+    } else if (mode === 'teacher' && teacherId && teacherName) {
+      const fid = `teacher:${teacherId}`
+      if (isFavorite) {
+        await fetch(`${base}/api/favorites/${encodeURIComponent(fid)}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } })
+        setFavorites(favorites.filter(f => !(f.type === 'teacher' && String(f.id) === String(teacherId))))
+      } else {
+        await fetch(`${base}/api/favorites`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` }, body: JSON.stringify({ type: 'teacher', id: teacherId, label: teacherName }) })
+        setFavorites([...favorites, { type: 'teacher', id: teacherId, name: teacherName }])
+      }
+      if ('vibrate' in navigator) navigator.vibrate(15)
+    }
+  }
+
+  function addToHistory(name: string) {
+    if (!name) return
+    setSearchHistory(prev => {
+      const next = [name, ...prev.filter(h => h !== name)].slice(0, 8)
+      try { localStorage.setItem('schedule_search_history', JSON.stringify(next)) } catch {}
+      return next
+    })
+  }
 
   // Загружаем оценки из eCampus если пользователь авторизован и смотрит свою группу
   const isOwnGroup = !!(profile?.groupId && groupId && profile.groupId === groupId)
@@ -176,9 +223,23 @@ function SchedulePageInner() {
 
   const [query, setQuery]               = useState('')
   const [showDropdown, setShowDropdown] = useState(false)
-  const [selectedDate, setSelectedDate] = useState(new Date())
+  const [selectedDate, setSelectedDateRaw] = useState(new Date())
+  function setSelectedDate(next: Date) {
+    const prev = selectedDate
+    const dir = next > prev ? 'left' : 'right'
+    setSlideDir(dir)
+    setSelectedDateRaw(next)
+    setTimeout(() => setSlideDir(null), 250)
+    if ('vibrate' in navigator) navigator.vibrate(6)
+  }
   const [isOffline, setIsOffline]       = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
+  const inputRef      = useRef<HTMLInputElement>(null)
+  const containerRef  = useRef<HTMLDivElement>(null)
+  const [slideDir,     setSlideDir]         = useState<'left' | 'right' | null>(null)
+  const [isRefreshing, setIsRefreshing]     = useState(false)
+  const [searchHistory, setSearchHistory]   = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('schedule_search_history') || '[]') } catch { return [] }
+  })
   const now = useLiveClock()
 
   // УЛУЧШЕНИЕ: применяем профиль сразу при монтировании если entityId пуст.
@@ -331,7 +392,7 @@ function SchedulePageInner() {
 
   function renderLessons(items: Lesson[]) {
     return (
-      <div className="flex flex-col gap-3 stagger">
+      <div className="flex flex-col gap-3 stagger-spring">
         {items.map((lesson, i) => {
           const isCurrent = isToday && lesson.time_start <= nowStr && lesson.time_end >= nowStr
           const isPast    = isToday && lesson.time_end < nowStr
@@ -380,15 +441,64 @@ function SchedulePageInner() {
     )
   }
 
+  // Жесты для всей страницы расписания
+  const pageGestures = useGestures({
+    // Свайп влево — следующий день
+    onSwipeLeft: () => setSelectedDate(new Date(selectedDate.getTime() + 86400000)),
+    // Свайп вправо — предыдущий день
+    onSwipeRight: () => setSelectedDate(new Date(selectedDate.getTime() - 86400000)),
+    // Свайп вверх — перейти на сегодня (если не текущая дата)
+    onSwipeUp: () => {
+      const today = format(new Date(), 'yyyy-MM-dd')
+      if (dateStr !== today) setSelectedDate(new Date())
+    },
+    // Edge swipe слева — предыдущий режим поиска
+    onEdgeSwipeRight: () => {
+      const modes: SearchMode[] = ['group', 'teacher', 'room']
+      const idx = modes.indexOf(mode)
+      if (idx > 0) handleModeChange(modes[idx - 1])
+    },
+    swipeThreshold: 60,
+    velocityThreshold: 0.25,
+  })
+
+  async function handleRefresh() {
+    if (!entityId || isFetching || isRefreshing) return
+    if ('vibrate' in navigator) navigator.vibrate(15)
+    setIsRefreshing(true)
+    await queryClient.invalidateQueries({ queryKey: ['schedule', 'day', mode, entityId, dateStr] })
+    setTimeout(() => setIsRefreshing(false), 800)
+  }
+
   return (
-    <div className="px-4 lg:px-0">
+    <div className="px-4 lg:px-0" ref={containerRef}
+      {...pageGestures}>
       <PageHeader
         title="Расписание"
         action={
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-mono"
-            style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--cyan)' }}>
-            <Clock size={12} />
-            {getMoscowTime(now).hhmmss}
+          <div className="flex items-center gap-2">
+            {entityId && (
+              <button onClick={handleRefresh} disabled={isFetching || isRefreshing}
+                className="p-1.5 rounded-lg hover:bg-white/5 transition-all disabled:opacity-40 tap-scale"
+                title="Обновить расписание"
+                style={{ color: isRefreshing ? 'var(--cyan)' : 'var(--t-muted)' }}>
+                <RefreshCw size={14} className={isRefreshing || isFetching ? 'animate-spin' : ''} />
+              </button>
+            )}
+            {entityId && authToken && (
+              <button onClick={toggleFavorite}
+                className="p-1.5 rounded-lg hover:bg-white/5 transition-colors"
+                title={isFavorite ? 'Убрать из избранного' : 'Добавить в избранное'}
+                style={{ color: 'var(--cyan)' }}>
+                <Star size={14} fill={isFavorite ? 'var(--cyan)' : 'none'}
+                  className={isFavorite ? 'star-bounce' : ''} />
+              </button>
+            )}
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-mono"
+              style={{ background: 'var(--card)', border: '1px solid var(--border)', color: 'var(--cyan)' }}>
+              <Clock size={12} />
+              {getMoscowTime(now).hhmmss}
+            </div>
           </div>
         }
       />
@@ -404,10 +514,10 @@ function SchedulePageInner() {
 
       {/* УЛУЧШЕНИЕ: Виджет «текущая пара» — сразу виден без скролла */}
       {isToday && entityId && currentLesson && (
-        <div className="mb-4 px-4 py-3 rounded-xl"
+        <div className="mb-4 px-4 py-3 rounded-xl float"
           style={{ background: 'rgba(74,222,128,0.06)', border: '1px solid rgba(74,222,128,0.2)' }}>
           <div className="flex items-center gap-2 mb-1">
-            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse flex-shrink-0" />
+            <span className="w-2 h-2 rounded-full bg-green-400 live-ring flex-shrink-0" style={{ flexShrink: 0 }} />
             <span className="text-xs font-semibold" style={{ color: '#4ade80' }}>Сейчас идёт</span>
             <span className="text-xs ml-auto" style={{ color: 'var(--t-muted)' }}>
               до {currentLesson.time_end}
@@ -462,7 +572,8 @@ function SchedulePageInner() {
           placeholder={entityName || PLACEHOLDER[mode]}
           value={query}
           onChange={(e) => { setQuery(e.target.value); setShowDropdown(true) }}
-          onFocus={() => query.length >= 2 && setShowDropdown(true)}
+          onFocus={() => setShowDropdown(true)}
+          onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
         />
         {(query || entityName) && (
           <button className="absolute right-3 top-1/2 -translate-y-1/2"
@@ -471,8 +582,53 @@ function SchedulePageInner() {
           </button>
         )}
         {showDropdown && query.length >= 2 && !!searchData && (
-          <SearchDropdown mode={mode} data={searchData as any}
+          <SearchDropdown mode={mode} data={searchData as any} query={query}
+            onSelect={(name) => addToHistory(name)}
             onClose={() => { setShowDropdown(false); setQuery('') }} />
+        )}
+        {/* История и избранное — когда фокус без запроса */}
+        {showDropdown && query.length < 2 && (favorites.length > 0 || searchHistory.length > 0) && (
+          <div className="absolute top-full left-0 right-0 mt-1 z-50 rounded-2xl overflow-hidden shadow-xl"
+            style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+            {favorites.filter(f => f.type === mode || (mode === 'room' ? false : f.type === mode)).length > 0 && (
+              <div>
+                <div className="flex items-center gap-1.5 px-3 pt-2.5 pb-1">
+                  <Star size={11} style={{ color: 'var(--cyan)' }} />
+                  <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--t-muted)' }}>Избранное</span>
+                </div>
+                {favorites.filter(f => f.type === mode).map(fav => (
+                  <button key={`${fav.type}:${fav.id}`}
+                    onMouseDown={() => {
+                      if (fav.type === 'group') { setMode('group'); setGroup(Number(fav.id), fav.name); }
+                      else { setMode('teacher'); setTeacher(Number(fav.id), fav.name); }
+                      setQuery(''); setShowDropdown(false); addToHistory(fav.name)
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/5 transition-colors text-sm"
+                    style={{ color: 'var(--t-primary)' }}>
+                    <Star size={12} fill="var(--cyan)" style={{ color: 'var(--cyan)', flexShrink: 0 }} />
+                    {fav.name}
+                  </button>
+                ))}
+              </div>
+            )}
+            {searchHistory.length > 0 && (
+              <div>
+                <div className="flex items-center gap-1.5 px-3 pt-2.5 pb-1">
+                  <History size={11} style={{ color: 'var(--t-muted)' }} />
+                  <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--t-muted)' }}>Недавние</span>
+                </div>
+                {searchHistory.slice(0, 5).map(h => (
+                  <button key={h}
+                    onMouseDown={() => { setQuery(h); setShowDropdown(true) }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-white/5 transition-colors text-sm"
+                    style={{ color: 'var(--t-secondary)' }}>
+                    <History size={12} style={{ color: 'var(--t-muted)', flexShrink: 0 }} />
+                    {h}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
 
@@ -497,15 +653,38 @@ function SchedulePageInner() {
       ) : (isLoading || isFetching) && !showingCache ? (
         <div className="flex flex-col gap-3">
           {[1,2,3].map(i => (
-            <div key={i} className="card h-20 animate-pulse" style={{ opacity: 0.5 }} />
+            <div key={i} className="card px-4 py-3" style={{ animationDelay: `${i * 80}ms` }}>
+              <div className="flex items-center gap-2 mb-2">
+                <div className="h-5 w-14 rounded-lg skeleton" />
+                <div className="h-5 w-20 rounded-lg skeleton" style={{ animationDelay: '0.1s' }} />
+              </div>
+              <div className="h-4 w-3/4 rounded-lg skeleton mb-1.5" style={{ animationDelay: '0.15s' }} />
+              <div className="h-3 w-1/2 rounded-lg skeleton" style={{ animationDelay: '0.2s', opacity: 0.7 }} />
+            </div>
           ))}
         </div>
       ) : lessons.length === 0 ? (
-        <div className="flex flex-col items-center py-16 gap-3">
-          <CalendarRange size={40} style={{ color: 'var(--t-muted)' }} />
-          <span className="text-sm" style={{ color: 'var(--t-muted)' }}>
-            {isOffline ? 'Нет данных в кеше для этого дня' : (dayData?.message || 'Занятий нет')}
-          </span>
+        <div className="flex flex-col items-center py-12 gap-3">
+          <CalendarRange size={36} style={{ color: 'var(--t-muted)', opacity: 0.5 }} />
+          <p className="text-sm font-medium" style={{ color: 'var(--t-secondary)' }}>
+            {isOffline ? 'Нет данных в кеше' : 'Занятий нет'}
+          </p>
+          {!isOffline && (
+            <p className="text-xs" style={{ color: 'var(--t-muted)' }}>
+              {isToday ? 'Сегодня выходной или каникулы' : 'В этот день пар нет'}
+            </p>
+          )}
+          <div className="flex gap-2 mt-1">
+            <button onClick={() => {
+              const tomorrow = new Date(selectedDate)
+              tomorrow.setDate(tomorrow.getDate() + 1)
+              setSelectedDate(tomorrow)
+            }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs hover:bg-white/5 transition-colors"
+              style={{ border: '1px solid var(--border)', color: 'var(--t-secondary)' }}>
+              Следующий день →
+            </button>
+          </div>
         </div>
       ) : (
         <>
@@ -518,7 +697,9 @@ function SchedulePageInner() {
               Обновление…
             </p>
           )}
-          {renderLessons(lessons)}
+          <div className={slideDir === 'left' ? 'slide-in-left' : slideDir === 'right' ? 'slide-in-right' : ''}>
+            {renderLessons(lessons)}
+          </div>
         </>
       )}
     </div>

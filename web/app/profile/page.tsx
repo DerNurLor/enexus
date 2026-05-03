@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   User, GraduationCap, BookOpen, Search, Check, ChevronRight,
   Edit2, X, Shield, Clock, Zap, Bell, SunMoon, Sun, Moon,
-  MessageCircle, ChevronDown,
+  MessageCircle, ChevronDown, BarChart2, Table2, UserCircle2,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { useScheduleStore } from '@/lib/store'
@@ -16,6 +16,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { loginWithBotToken } from '@/lib/auth'
 import { TelegramAuthSection } from '@/components/auth/TelegramAuthSection'
 import { ECampusSection } from '@/components/ecampus/ECampusSection'
+import { ZachetkaModal, StatsModal } from '@/components/ecampus/ProfileModals'
 
 type OnboardStep = 'choose-mode' | 'choose-role' | 'choose-group' | 'choose-teacher' | 'done'
 
@@ -149,21 +150,9 @@ function SettingsSection() {
       </p>
 
       <ToggleRow
-        label="Неделя с понедельника"
-        desc="Показывать расписание с пн, а не с сегодня"
-        checked={!!settings.weekFromMonday}
-        onChange={v => set('weekFromMonday', v)}
-      />
-      <ToggleRow
         label="24-часовой формат"
         checked={settings.time24h !== false}
         onChange={v => set('time24h', v)}
-      />
-      <ToggleRow
-        label="Компактный вид"
-        desc="Меньше деталей на карточке занятия"
-        checked={!!settings.compact}
-        onChange={v => set('compact', v)}
       />
 
       {/* Theme */}
@@ -197,8 +186,30 @@ function SettingsSection() {
 
 // ── Profile done state ────────────────────────────────────────────────────────
 function ProfileDone({ onReset }: { onReset: () => void }) {
-  const { profile, tgUser, authToken, isAuthenticated, groupConfirmed } = useScheduleStore()
+  const { profile, tgUser, authToken, isAuthenticated, groupConfirmed, tgAuthReady } = useScheduleStore()
   const router = useRouter()
+  const [showZachetka, setShowZachetka]   = useState(false)
+  const [showStats,    setShowStats]      = useState(false)
+
+  // Загружаем ecampus данные для ФИО, зачётки и статистики
+  const { data: ecampusData } = useQuery({
+    queryKey: ['ecampus-data'],
+    queryFn:  async () => {
+      const { getToken } = await import('@/lib/auth')
+      const token = getToken()
+      if (!token) return null
+      const res = await fetch((process.env.NEXT_PUBLIC_API_URL || '') + '/api/ecampus/data', {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) return null
+      return res.json()
+    },
+    enabled: !!authToken,
+    staleTime: 300_000,
+  })
+
+  // ФИО из зачётной книжки
+  const fullNameFromEcampus = ecampusData?.zachetka?.education_details?.[0]?.full_name ?? null
 
   function goToSchedule() {
     if (!profile) { router.push('/schedule'); return }
@@ -264,6 +275,15 @@ function ProfileDone({ onReset }: { onReset: () => void }) {
           <p className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--t-muted)' }}>
             Мои данные
           </p>
+          {/* ФИО */}
+          {fullNameFromEcampus && (
+            <div className="flex items-center justify-between py-2" style={{ borderBottom: '1px solid var(--border)' }}>
+              <span className="text-sm flex items-center gap-1.5" style={{ color: 'var(--t-secondary)' }}>
+                <UserCircle2 size={14} style={{ color: 'var(--accent)' }} /> ФИО
+              </span>
+              <span className="text-sm font-medium" style={{ color: 'var(--t-primary)' }}>{fullNameFromEcampus}</span>
+            </div>
+          )}
           <div className="flex items-center justify-between py-2" style={{ borderBottom: '1px solid var(--border)' }}>
             <span className="text-sm" style={{ color: 'var(--t-secondary)' }}>Роль</span>
             <span className="text-sm font-medium" style={{ color: 'var(--t-primary)' }}>
@@ -271,23 +291,48 @@ function ProfileDone({ onReset }: { onReset: () => void }) {
             </span>
           </div>
           {profile.role === 'student' && (
-            <div className="flex items-center justify-between py-2">
+            <div className="flex items-center justify-between py-2" style={{ borderBottom: '1px solid var(--border)' }}>
               <span className="text-sm" style={{ color: 'var(--t-secondary)' }}>Группа</span>
               <span className="text-sm font-bold" style={{ color: 'var(--cyan)' }}>{profile.groupName}</span>
             </div>
           )}
           {profile.role === 'teacher' && (
-            <div className="flex items-center justify-between py-2">
+            <div className="flex items-center justify-between py-2" style={{ borderBottom: '1px solid var(--border)' }}>
               <span className="text-sm" style={{ color: 'var(--t-secondary)' }}>ФИО</span>
               <span className="text-sm font-bold" style={{ color: 'var(--cyan)' }}>{profile.teacherName}</span>
+            </div>
+          )}
+          {/* Кнопки для студентов */}
+          {profile.role === 'student' && authToken && (
+            <div className="flex gap-2 mt-3">
+              <button onClick={() => setShowZachetka(true)}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold tap-scale transition-all hover:opacity-80"
+                style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--t-primary)' }}>
+                <Table2 size={13} style={{ color: 'var(--accent)' }} />
+                Зачётная книжка
+              </button>
+              <button onClick={() => setShowStats(true)}
+                className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-xl text-xs font-semibold tap-scale transition-all hover:opacity-80"
+                style={{ background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--t-primary)' }}>
+                <BarChart2 size={13} style={{ color: 'var(--accent)' }} />
+                Статистика
+              </button>
             </div>
           )}
         </div>
       )}
 
+      {/* Модальные окна */}
+      {showZachetka && ecampusData && (
+        <ZachetkaModal data={ecampusData} onClose={() => setShowZachetka(false)} />
+      )}
+      {showStats && ecampusData && (
+        <StatsModal data={ecampusData} onClose={() => setShowStats(false)} />
+      )}
+
       {/* Квота */}
       <QuotaSection token={authToken} />
-      <ECampusSection token={authToken} />
+      <ECampusSection token={authToken} tgAuthReady={tgAuthReady} />
 
       {/* Настройки */}
       <SettingsSection />
@@ -494,7 +539,7 @@ function ProfilePageInner() {
           </div>
 
           <QuotaSection token={authToken} />
-      <ECampusSection token={authToken} />
+      <ECampusSection token={authToken} tgAuthReady={tgAuthReady} />
           <SettingsSection />
 
           <div className="card px-5 py-5 mb-4">

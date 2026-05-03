@@ -15,6 +15,7 @@ import {
 import { PageHeader } from '@/components/layout/PageHeader'
 import { TeacherDashboard } from '@/components/schedule/TeacherDashboard'
 import { useScheduleStore } from '@/lib/store'
+import { useGestures } from '@/hooks/useGestures'
 import { api } from '@/lib/api'
 import type { Lesson } from '@/lib/types'
 
@@ -208,6 +209,15 @@ export default function TeacherPage() {
   const nextLesson = todayLessons.find(l => parseTime(l.time_start) > nowMins)
   const activePair = curLesson || nextLesson
 
+  // Жесты: свайп вверх = обновить все данные преподавателя
+  const teacherGestures = useGestures({
+    onSwipeUp: () => {
+      if (!tId) return
+      window.dispatchEvent(new CustomEvent('teacher:refresh', { detail: { tId } }))
+    },
+    swipeThreshold: 80,
+  })
+
   if (!tId) {
     return (
       <div className="px-4 lg:px-0">
@@ -226,7 +236,7 @@ export default function TeacherPage() {
   }
 
   return (
-    <div className="px-4 lg:px-0 pb-8">
+    <div className="px-4 lg:px-0 pb-8 page-enter" {...teacherGestures}>
       <PageHeader title="Мои занятия" />
 
       {/* ── Текущая / ближайшая пара ──────────────────────────────────── */}

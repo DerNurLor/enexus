@@ -32,6 +32,17 @@ const AUTH_BASE    = (process.env.NEXT_PUBLIC_API_URL || '') + '/auth'
 const MINIAPP_BASE = (process.env.NEXT_PUBLIC_API_URL || '') + '/miniapp'
 const REFRESH_KEY  = 'ncfu_refresh_token'
 
+/** fetch с таймаутом — не висит на плохой сети */
+async function fetchWithTimeout(url: string, opts: RequestInit = {}, ms = 8000): Promise<Response> {
+  const ctrl = new AbortController()
+  const id   = setTimeout(() => ctrl.abort(), ms)
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal })
+  } finally {
+    clearTimeout(id)
+  }
+}
+
 // ── In-memory access token ────────────────────────────────────────────────────
 let _token: string | null = null
 
@@ -168,47 +179,46 @@ async function _silentRefresh(): Promise<string | null> {
   return _refreshInProgress
 }
 
-async function _doSilentRefresh(): Promise<string | null> {
+async function _doSilentRefresh(attempt = 0): Promise<string | null> {
   if (typeof window === 'undefined') return null
   const refresh = localStorage.getItem(REFRESH_KEY)
   if (!refresh) return null
 
   try {
-    const res = await fetch(`${AUTH_BASE}/refresh`, {
+    const res = await fetchWithTimeout(`${AUTH_BASE}/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refresh_token: refresh }),
-    })
+    }, 8000)
 
     if (!res.ok) {
-      // [F1] При 401/403 токен отозван или пользователь заблокирован — удаляем.
-      // При 5xx (ошибка сервера) токен НЕ удаляем — сервер может быть временно недоступен.
       if (res.status === 401 || res.status === 403) {
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem(REFRESH_KEY)
-        }
+        localStorage.removeItem(REFRESH_KEY)
       }
       return null
     }
-
     const { access_token, refresh_token } = await res.json()
     _token = access_token
     if (refresh_token) localStorage.setItem(REFRESH_KEY, refresh_token)
     return access_token
-  } catch {
-    // Сетевая ошибка — не удаляем токен (сервер может быть временно недоступен)
+  } catch (e: any) {
+    // Сетевая ошибка или таймаут — retry один раз с задержкой
+    if (attempt === 0 && (e?.name === 'AbortError' || e?.name === 'TypeError')) {
+      await new Promise(r => setTimeout(r, 1500))
+      return _doSilentRefresh(1)
+    }
+    // Не удаляем токен при сетевых ошибках
     return null
   }
 }
+
 
 // ── Fetch user info ───────────────────────────────────────────────────────────
 
 export async function fetchMe(): Promise<TgUserInfo | null> {
   if (!_token) return null
   try {
-    const res = await fetch(`${AUTH_BASE}/me`, {
-      headers: getAuthHeader(),
-    })
+    const res = await fetchWithTimeout(`${AUTH_BASE}/me`, { headers: getAuthHeader() }, 6000)
     if (!res.ok) return null
     return res.json()
   } catch {
@@ -217,13 +227,14 @@ export async function fetchMe(): Promise<TgUserInfo | null> {
 }
 
 export async function fetchSettings(): Promise<ServerSettings> {
-  const res = await fetch(`${MINIAPP_BASE}/api/settings`, {
-    headers: getAuthHeader(),
-  })
-  if (!res.ok) return {}
-  const data = await res.json()
-  // Сервер возвращает { settings: {...} } — unwrap
-  return (data?.settings ?? data) as ServerSettings
+  try {
+    const res = await fetchWithTimeout(`${MINIAPP_BASE}/api/settings`, { headers: getAuthHeader() }, 6000)
+    if (!res.ok) return {}
+    const data = await res.json()
+    return (data?.settings ?? data) as ServerSettings
+  } catch {
+    return {}
+  }
 }
 
 export async function fetchFavorites(): Promise<FavoriteItem[]> {
@@ -292,13 +303,14 @@ export async function initAuth(): Promise<AuthResult | null> {
 
   if (!token) return null
 
+  // Загружаем профиль параллельно, но с таймаутом — на плохой сети не блокируем
   const [user, settings, favorites] = await Promise.all([
-    fetchMe(),
-    fetchSettings(),
-    fetchFavorites(),
+    fetchMe().catch(() => null),
+    fetchSettings().catch(() => ({})),
+    fetchFavorites().catch(() => []),
   ])
 
-  return { token, user, settings, favorites }
+  return { token, user: user as any, settings, favorites }
 }
 
 /**

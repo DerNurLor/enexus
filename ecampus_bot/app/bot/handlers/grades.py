@@ -543,15 +543,26 @@ async def _render_stats(
         cur = _current_term_id(all_courses)
         courses = [c for c in all_courses if c.get("term_id") == cur]
         if cur:
-            info = TERM_MAP.get(cur)
-            title_suffix = f" · {info[0]}к {info[1]}с" if info else f" · сем.{cur}"
+            # Берём реальное название из данных
+            sample = next((c for c in all_courses if c.get("term_id") == cur), None)
+            raw = (sample.get("term_name") or "").strip() if sample else ""
+            if raw:
+                title_suffix = f" · {raw}"
+            else:
+                info = TERM_MAP.get(cur)
+                title_suffix = f" · {info[0]}к {info[1]}с" if info else f" · сем.{cur}"
     else:
         # конкретный term_id
         try:
             tid = int(term_filter)
             courses = [c for c in all_courses if c.get("term_id") == tid]
-            info = TERM_MAP.get(tid)
-            title_suffix = f" · {info[0]}к {info[1]}с" if info else f" · сем.{tid}"
+            sample = next((c for c in courses), None)
+            raw = (sample.get("term_name") or "").strip() if sample else ""
+            if raw:
+                title_suffix = f" · {raw}"
+            else:
+                info = TERM_MAP.get(tid)
+                title_suffix = f" · {info[0]}к {info[1]}с" if info else f" · сем.{tid}"
         except ValueError:
             courses = all_courses
 
@@ -640,26 +651,32 @@ async def _render_stats(
 
 def _build_stats_keyboard(courses: list[dict]) -> InlineKeyboardMarkup:
     """Клавиатура выбора семестра для /stats."""
-    by_term: dict[int, list] = {}
+    by_term: dict[int, str] = {}   # tid → реальное название из term_name
     for c in courses:
         tid = c.get("term_id") or 0
-        if tid: by_term.setdefault(tid, []).append(c)
+        if not tid:
+            continue
+        if tid not in by_term:
+            # Берём term_name из курса ("3 курс 5 семестр") или fallback из TERM_MAP
+            raw = (c.get("term_name") or "").strip()
+            if raw:
+                by_term[tid] = raw
+            else:
+                info = TERM_MAP.get(tid)
+                by_term[tid] = f"{info[0]}к {info[1]}с" if info else f"Сем.{tid}"
 
     buttons = []
     cur = _current_term_id(courses)
-    # Кнопки по семестрам (от нового к старому), по 3 в ряд
     row = []
     for tid in sorted(by_term.keys(), reverse=True):
-        info = TERM_MAP.get(tid)
-        label = f"{info[0]}к {info[1]}с" if info else f"Сем.{tid}"
+        label = by_term[tid]
         if tid == cur:
             label = f"▶ {label}"
         row.append(InlineKeyboardButton(text=label, callback_data=f"stats:{tid}"))
-        if len(row) == 3:
+        if len(row) == 2:          # по 2 в ряд — названия длиннее, иначе не влезают
             buttons.append(row); row = []
     if row:
         buttons.append(row)
-    # Последняя строка — За всё время
     buttons.append([InlineKeyboardButton(text="📊 За всё время", callback_data="stats:all")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 

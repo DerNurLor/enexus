@@ -58,6 +58,7 @@ class ECampusSyncRecord(Document):
     sync_progress:       int = 0
     sync_done_terms:     int = 0
     sync_total_terms:    int = 0
+    sync_loaded_term_ids: list = []  # term_id-ы уже загруженных семестров
     sync_courses_found:  int = 0
     error_msg:           Optional[str] = None
     retry_count:         int = 0          # сколько раз авто-retry после ошибки
@@ -157,7 +158,7 @@ async def _handle_sync_all(task) -> dict:
     if not record:
         raise ValueError(f"Record not found for tg_id={tg_id}")
 
-    await record.set({"sync_status": "running", "sync_progress": 0, "sync_done_terms": 0, "sync_courses_found": 0})
+    await record.set({"sync_status": "running", "sync_progress": 0, "sync_done_terms": 0, "sync_courses_found": 0, "sync_loaded_term_ids": []})
 
     try:
         from app.ecampus.client import ECampusClient
@@ -360,7 +361,8 @@ async def _collect_all_data(client, record: ECampusSyncRecord, viewmodel: dict) 
         if not courses and courses == []:
             done_terms += 1
             pct = 5 + int(done_terms / max(total_terms, 1) * 90)
-            await record.set({"sync_done_terms": done_terms, "sync_progress": pct})
+            await record.set({"sync_done_terms": done_terms, "sync_progress": pct,
+                               "sync_loaded_term_ids": list(record.sync_loaded_term_ids or []) + [term_id]})
             continue
 
         for course in courses:
@@ -415,11 +417,13 @@ async def _collect_all_data(client, record: ECampusSyncRecord, viewmodel: dict) 
 
         done_terms += 1
         pct = 5 + int(done_terms / max(total_terms, 1) * 90)
+        loaded_ids = list(record.sync_loaded_term_ids or []) + [term_id]
         await record.set({
-            "sync_done_terms":    done_terms,
-            "sync_progress":      pct,
-            "sync_courses_found": len(all_courses),
-            "courses":            all_courses,
+            "sync_done_terms":     done_terms,
+            "sync_progress":       pct,
+            "sync_courses_found":  len(all_courses),
+            "courses":             all_courses,
+            "sync_loaded_term_ids": loaded_ids,
         })
 
     # Дедупликация файлов
