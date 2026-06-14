@@ -114,8 +114,8 @@ export default function MapPage() {
       attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/">CARTO</a>',
     },
     light: {
-      url:         'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-      attribution: '© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a>',
+      url:         'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> © <a href="https://carto.com/">CARTO</a>',
     },
   }
 
@@ -222,6 +222,8 @@ export default function MapPage() {
         zoomControl: false,
         attributionControl: true,
       })
+      // Leaflet 1.9.x hardcodes 🇺🇦 #StandWithUkraine into its prefix — strip it.
+      map.attributionControl.setPrefix('<a href="https://leafletjs.com">Leaflet</a>')
 
       const isDark = getIsDark()
       const tiles  = isDark ? TILES.dark : TILES.light

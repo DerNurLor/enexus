@@ -5,7 +5,7 @@
  * StatsModal    — интерактивная статистика с графиками
  */
 import { useState, useMemo } from 'react'
-import { X, ChevronDown, ChevronUp } from 'lucide-react'
+import { X, ChevronDown } from 'lucide-react'
 
 // ── Цвета оценок ─────────────────────────────────────────────────────────────
 const GRADE_COLOR: Record<string, { bg: string; text: string }> = {
@@ -24,14 +24,14 @@ function gradeStyle(mark: string) {
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
     <>
-      {/* Backdrop — только затемнение, без blur */}
-      <div className="fixed inset-0 z-50"
-        style={{ background: 'rgba(0,0,0,0.7)' }}
+      {/* Backdrop — subtle blur, no solid black */}
+      <div className="fixed inset-0 z-50 backdrop-blur-sm"
+        style={{ background: 'rgba(0,0,0,0.35)' }}
         onClick={onClose} />
       {/* Модал */}
       <div className="fixed inset-0 z-50 flex items-end lg:items-center justify-center pointer-events-none">
-        <div className="pointer-events-auto w-full lg:max-w-2xl max-h-[92vh] flex flex-col rounded-t-3xl lg:rounded-2xl overflow-hidden"
-          style={{ background: 'var(--card)', border: '1px solid var(--border)', animation: 'slideInUp 0.28s cubic-bezier(0.34,1.56,0.64,1) forwards' }}>
+        <div className="pointer-events-auto w-full lg:max-w-2xl min-h-[78vh] max-h-[96vh] flex flex-col rounded-t-3xl lg:rounded-2xl overflow-hidden"
+          style={{ background: 'var(--card)', border: '1px solid var(--border)', boxShadow: '0 -16px 48px rgba(0,0,0,0.5), 0 -1px 0 rgba(255,255,255,0.05)', animation: 'slideInUp 0.28s cubic-bezier(0.34,1.56,0.64,1) forwards' }}>
           {/* Handle */}
           <div className="flex justify-center pt-3 pb-1 lg:hidden shrink-0">
             <div className="w-10 h-1 rounded-full" style={{ background: 'var(--border)' }} />
@@ -80,21 +80,20 @@ interface ZachetkaDetail {
 
 export function ZachetkaModal({ data, onClose }: { data: any; onClose: () => void }) {
   const [openYear, setOpenYear] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
 
   const details: ZachetkaDetail[] = data?.zachetka?.education_details ?? []
   const ovz: any[] = data?.zachetka?.ovz ?? []
 
-  // Флатируем все записи в один поиск
-  const [search, setSearch] = useState('')
   const allEntries = useMemo(() => {
-    const rows: Array<ZachetkaEntry & { year: string; term: string; course: string }> = []
+    const rows: Array<ZachetkaEntry & { year: string; term: string }> = []
     for (const detail of details) {
       for (const year of detail.study_years ?? []) {
         for (const term of year.terms ?? []) {
           for (const cat of ['exams', 'zachets', 'other'] as const) {
             for (const entry of (term as any)[cat] ?? []) {
               if (entry.discipline || entry.mark) {
-                rows.push({ ...entry, year: year.name, term: term.name, course: detail.full_name })
+                rows.push({ ...entry, year: year.name, term: term.name })
               }
             }
           }
@@ -108,9 +107,63 @@ export function ZachetkaModal({ data, onClose }: { data: any; onClose: () => voi
     ? allEntries.filter(r => r.discipline?.toLowerCase().includes(search.toLowerCase()))
     : null
 
-  // Авто-открываем последний год
   const allYears = useMemo(() => details.flatMap(d => d.study_years ?? []), [details])
-  const displayYear = openYear ?? allYears[allYears.length - 1]?.name ?? null
+
+  // Grade summary per year for header badge
+  const yearStats = useMemo(() => {
+    const stats: Record<string, { total: number; excellent: number }> = {}
+    for (const year of allYears) {
+      const entries = (year.terms ?? []).flatMap(t =>
+        [...(t.exams ?? []), ...(t.zachets ?? []), ...(t.other ?? [])]
+      )
+      stats[year.name] = {
+        total: entries.length,
+        excellent: entries.filter(e => e.mark?.toLowerCase() === 'отлично').length,
+      }
+    }
+    return stats
+  }, [allYears])
+
+  function EntryCard({ e, index = 0 }: { e: any; index?: number }) {
+    const gs = gradeStyle(e.mark ?? '')
+    const delay = Math.min(index * 18, 200)
+    return (
+      <div className="flex items-start gap-3 px-4 py-3"
+        style={{ borderBottom: '1px solid var(--border)', animation: `fadeUp 0.32s ease ${delay}ms both` }}>
+        <div className="flex-1 min-w-0">
+          <p className="text-[13px] font-medium leading-snug mb-1"
+            style={{ color: 'var(--t-primary)' }}>
+            {e.discipline || '—'}
+          </p>
+          <div className="flex items-center gap-2 flex-wrap">
+            {e.teacher && (
+              <span className="text-[11px]" style={{ color: 'var(--t-muted)' }}>{e.teacher}</span>
+            )}
+            {e.type && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded"
+                style={{ background: 'var(--surface)', color: 'var(--t-muted)' }}>
+                {e.type}
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="shrink-0 flex flex-col items-end gap-1">
+          <span className="text-[11px] font-bold px-2 py-1 rounded-lg"
+            style={{
+              background: gs.bg, color: gs.text, border: `1px solid ${gs.text}30`,
+              animation: `popIn 0.3s cubic-bezier(0.34,1.56,0.64,1) ${delay + 80}ms both`,
+            }}>
+            {e.mark || '—'}
+          </span>
+          {e.date && (
+            <span className="text-[10px]" style={{ color: 'var(--t-muted)', animation: `fadeIn 0.3s ease ${delay + 60}ms both` }}>
+              {e.date}
+            </span>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <Modal title="Зачётная книжка" onClose={onClose}>
@@ -120,131 +173,141 @@ export function ZachetkaModal({ data, onClose }: { data: any; onClose: () => voi
           className="input-search text-sm w-full" />
       </div>
 
-      {/* Поиск */}
+      {/* Результаты поиска */}
       {filtered && (
-        <div className="px-4 py-3">
+        <div className="py-1">
           {filtered.length === 0 ? (
-            <p className="text-sm text-center py-6" style={{ color: 'var(--t-muted)' }}>Ничего не найдено</p>
+            <p className="text-sm text-center py-8 animate-fade-in" style={{ color: 'var(--t-muted)' }}>Ничего не найдено</p>
           ) : (
-            <table className="w-full text-[12px] border-collapse">
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  {['Предмет', 'Оценка', 'Дата', 'Преподаватель'].map(h => (
-                    <th key={h} className="text-left py-2 pr-3 font-semibold text-[10px] uppercase tracking-wider"
-                      style={{ color: 'var(--t-muted)' }}>{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((r, i) => {
-                  const gs = gradeStyle(r.mark ?? '')
-                  return (
-                    <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                      <td className="py-2 pr-3" style={{ color: 'var(--t-primary)', maxWidth: 160, wordBreak: 'break-word' }}>{r.discipline}</td>
-                      <td className="py-2 pr-3">
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold"
-                          style={{ background: gs.bg, color: gs.text }}>{r.mark || '—'}</span>
-                      </td>
-                      <td className="py-2 pr-3 whitespace-nowrap" style={{ color: 'var(--t-muted)' }}>{r.date || '—'}</td>
-                      <td className="py-2 pr-3" style={{ color: 'var(--t-secondary)', maxWidth: 140 }}>{r.teacher || '—'}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+            <>
+              <p className="px-4 py-2 text-[11px] animate-fade-in" style={{ color: 'var(--t-muted)' }}>
+                Найдено: {filtered.length}
+              </p>
+              {filtered.map((r, i) => <EntryCard key={i} e={r} index={i} />)}
+            </>
           )}
         </div>
       )}
 
-      {/* По годам */}
+      {/* По учебным годам */}
       {!filtered && (
-        <div className="py-2">
-          {allYears.map(year => {
+        <div className="py-1">
+          {allYears.map((year, yearIdx) => {
             const isOpen = openYear ? openYear === year.name : year.name === allYears[allYears.length - 1]?.name
-            const allTermEntries = (year.terms ?? []).flatMap(term =>
-              [...(term.exams ?? []), ...(term.zachets ?? []), ...(term.other ?? [])]
-            )
+            const stats = yearStats[year.name] ?? { total: 0, excellent: 0 }
+            const pct = stats.total > 0 ? (stats.excellent / stats.total) * 100 : 0
             return (
-              <div key={year.name}>
-                <button onClick={() => setOpenYear(isOpen ? '' : year.name)}
-                  className="w-full flex items-center justify-between px-5 py-3 hover:bg-white/3 transition-colors"
+              <div key={year.name}
+                className="fade-up-item"
+                style={{ animationDelay: `${yearIdx * 55}ms` }}>
+                <button
+                  onClick={() => setOpenYear(isOpen ? '' : year.name)}
+                  className="w-full flex items-center justify-between px-4 py-3.5 transition-colors hover:bg-white/3"
                   style={{ borderBottom: '1px solid var(--border)' }}>
-                  <div className="flex items-center gap-2">
-                    <span className="text-sm font-semibold" style={{ color: 'var(--t-primary)' }}>{year.name}</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full"
-                      style={{ background: 'var(--surface)', color: 'var(--t-muted)' }}>
-                      {allTermEntries.length} записей
+                  <div className="flex flex-col items-start">
+                    <span className="text-sm font-semibold" style={{ color: 'var(--t-primary)' }}>
+                      {year.name}
+                    </span>
+                    <span className="text-[11px] mt-0.5" style={{ color: 'var(--t-muted)' }}>
+                      {stats.total} дисциплин
+                      {stats.excellent > 0 && (
+                        <span style={{ color: '#a6e3a1' }}> · {stats.excellent} отл.</span>
+                      )}
                     </span>
                   </div>
-                  {isOpen ? <ChevronUp size={14} style={{ color: 'var(--t-muted)' }} />
-                          : <ChevronDown size={14} style={{ color: 'var(--t-muted)' }} />}
-                </button>
-                {isOpen && (
-                  <div className="px-4 pb-4 expand-down">
-                    {(year.terms ?? []).map(term => {
-                      const entries = [...(term.exams ?? []), ...(term.zachets ?? []), ...(term.other ?? [])]
-                      if (!entries.length) return null
-                      return (
-                        <div key={term.name} className="mt-3">
-                          <p className="text-[10px] font-semibold uppercase tracking-wider mb-2"
-                            style={{ color: 'var(--t-muted)' }}>{term.name}</p>
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-[12px] border-collapse" style={{ minWidth: 480 }}>
-                              <thead>
-                                <tr>
-                                  {['Предмет', 'Оценка', 'Дата', 'Преподаватель', 'Тип'].map(h => (
-                                    <th key={h} className="text-left py-1.5 pr-3 font-semibold text-[10px] uppercase tracking-wider"
-                                      style={{ color: 'var(--t-muted)', borderBottom: '1px solid var(--border)' }}>{h}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {entries.map((e, i) => {
-                                  const gs = gradeStyle(e.mark ?? '')
-                                  return (
-                                    <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                                      <td className="py-2 pr-3" style={{ color: 'var(--t-primary)' }}>{e.discipline || '—'}</td>
-                                      <td className="py-2 pr-3">
-                                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold"
-                                          style={{ background: gs.bg, color: gs.text }}>{e.mark || '—'}</span>
-                                      </td>
-                                      <td className="py-2 pr-3 whitespace-nowrap text-[11px]" style={{ color: 'var(--t-muted)' }}>{e.date || '—'}</td>
-                                      <td className="py-2 pr-3 text-[11px]" style={{ color: 'var(--t-secondary)', maxWidth: 140 }}>{e.teacher || '—'}</td>
-                                      <td className="py-2 pr-3 text-[10px]" style={{ color: 'var(--t-muted)' }}>{e.type || '—'}</td>
-                                    </tr>
-                                  )
-                                })}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      )
-                    })}
+                  <div className="flex items-center gap-2.5">
+                    {/* Мини-прогресс */}
+                    {pct > 0 && (
+                      <div className="hidden sm:block w-16 h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
+                        <div className="h-full rounded-full" style={{
+                          width: `${pct}%`,
+                          background: '#a6e3a1',
+                          transformOrigin: 'left',
+                          animation: `scaleX 0.7s ease ${yearIdx * 55 + 200}ms both`,
+                        }} />
+                      </div>
+                    )}
+                    {/* Единая иконка с вращением */}
+                    <ChevronDown size={14} style={{
+                      color: 'var(--t-muted)',
+                      transition: 'transform 0.25s cubic-bezier(0.34,1.56,0.64,1)',
+                      transform: isOpen ? 'rotate(180deg)' : 'rotate(0deg)',
+                    }} />
                   </div>
-                )}
+                </button>
+
+                {/* Always mounted — grid-template-rows animates height without layout thrash */}
+                <div style={{
+                  display: 'grid',
+                  gridTemplateRows: isOpen ? '1fr' : '0fr',
+                  transition: 'grid-template-rows 0.32s cubic-bezier(0.4,0,0.2,1)',
+                }}>
+                  <div style={{ overflow: 'hidden', minHeight: 0 }}>
+                    {/* Re-keyed on open so card stagger re-fires each time */}
+                    <div key={isOpen ? 1 : 0} className="pb-2" style={{
+                      opacity: isOpen ? 1 : 0,
+                      transition: 'opacity 0.22s ease',
+                    }}>
+                      {(year.terms ?? []).map((term, termIdx) => {
+                        const entries = [
+                          ...(term.exams ?? []),
+                          ...(term.zachets ?? []),
+                          ...(term.other ?? []),
+                        ]
+                        if (!entries.length) return null
+                        let cardIdx = 0
+                        return (
+                          <div key={term.name}>
+                            <div className="px-4 pt-3 pb-1.5 flex items-center gap-2"
+                              style={{ borderBottom: '1px solid var(--border)', animation: `fadeIn 0.2s ease ${termIdx * 35}ms both` }}>
+                              <span className="text-[10px] font-bold uppercase tracking-widest"
+                                style={{ color: 'var(--accent)' }}>
+                                {term.name}
+                              </span>
+                              <span className="text-[10px]" style={{ color: 'var(--t-muted)' }}>
+                                {entries.length} дисц.
+                              </span>
+                            </div>
+                            {entries.map((e, i) => <EntryCard key={i} e={e} index={cardIdx++} />)}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+                </div>
               </div>
             )
           })}
 
-          {/* ОВЗ / курсовые */}
+          {/* Курсовые работы */}
           {ovz.length > 0 && (
-            <div className="px-4 pt-3 pb-4">
-              <p className="text-[10px] font-semibold uppercase tracking-wider mb-2" style={{ color: 'var(--t-muted)' }}>
-                Курсовые работы
-              </p>
+            <div className="fade-up-item" style={{ animationDelay: `${allYears.length * 55}ms` }}>
+              <div className="px-4 pt-3 pb-1.5" style={{ borderBottom: '1px solid var(--border)' }}>
+                <span className="text-[10px] font-bold uppercase tracking-widest"
+                  style={{ color: 'var(--accent)' }}>
+                  Курсовые работы
+                </span>
+              </div>
               {ovz.map((o, i) => {
                 const gs = gradeStyle(o.mark ?? '')
                 return (
-                  <div key={i} className="flex items-center justify-between py-2"
-                    style={{ borderBottom: i < ovz.length - 1 ? '1px solid var(--border)' : 'none' }}>
-                    <div className="min-w-0 mr-3">
-                      <p className="text-[12px] font-medium truncate" style={{ color: 'var(--t-primary)' }}>{o.name}</p>
+                  <div key={i} className="flex items-start gap-3 px-4 py-3"
+                    style={{ borderBottom: i < ovz.length - 1 ? '1px solid var(--border)' : 'none', animation: `fadeUp 0.3s ease ${i * 28}ms both` }}>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-medium leading-snug mb-1" style={{ color: 'var(--t-primary)' }}>
+                        {o.name}
+                      </p>
                       <p className="text-[11px]" style={{ color: 'var(--t-muted)' }}>
                         {o.kurs} курс · {o.sem} сем · {o.teacher}
                       </p>
                     </div>
-                    <span className="shrink-0 text-[10px] font-bold px-2 py-0.5 rounded"
-                      style={{ background: gs.bg, color: gs.text }}>{o.mark || '—'}</span>
+                    <span className="shrink-0 text-[11px] font-bold px-2 py-1 rounded-lg"
+                      style={{
+                        background: gs.bg, color: gs.text, border: `1px solid ${gs.text}30`,
+                        animation: `popIn 0.28s cubic-bezier(0.34,1.56,0.64,1) ${i * 28 + 80}ms both`,
+                      }}>
+                      {o.mark || '—'}
+                    </span>
                   </div>
                 )
               })}

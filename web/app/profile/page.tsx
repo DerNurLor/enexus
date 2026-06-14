@@ -16,6 +16,7 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { loginWithBotToken } from '@/lib/auth'
 import { TelegramAuthSection } from '@/components/auth/TelegramAuthSection'
 import { ECampusSection } from '@/components/ecampus/ECampusSection'
+import { ECampusAdminSection } from '@/components/ecampus/ECampusAdminSection'
 import { ZachetkaModal, StatsModal } from '@/components/ecampus/ProfileModals'
 
 type OnboardStep = 'choose-mode' | 'choose-role' | 'choose-group' | 'choose-teacher' | 'done'
@@ -205,7 +206,6 @@ function ProfileDone({ onReset }: { onReset: () => void }) {
       return res.json()
     },
     enabled: !!authToken,
-    staleTime: 300_000,
   })
 
   // ФИО из зачётной книжки
@@ -229,12 +229,12 @@ function ProfileDone({ onReset }: { onReset: () => void }) {
   const subName = tgUser?.username ? `@${tgUser.username}` : (tgUser ? `tg:${tgUser.tg_id}` : null)
 
   return (
-    <div className="animate-fade-up">
+    <div>
       {/* Авторизация для браузера */}
       {!tgUser && <TelegramAuthSection user={null} token={null} />}
       {/* TG-профиль */}
       {tgUser && (
-        <div className="card px-5 py-5 mb-4">
+        <div className="card px-5 py-5 mb-4 fade-up-item" style={{ animationDelay: '0ms' }}>
           <div className="flex items-center gap-4">
             {/* Аватар */}
             <div className="relative shrink-0">
@@ -271,7 +271,7 @@ function ProfileDone({ onReset }: { onReset: () => void }) {
 
       {/* Профиль расписания */}
       {profile && (
-        <div className="card px-5 py-4 mb-4">
+        <div className="card px-5 py-4 mb-4 fade-up-item" style={{ animationDelay: '70ms' }}>
           <p className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: 'var(--t-muted)' }}>
             Мои данные
           </p>
@@ -331,14 +331,23 @@ function ProfileDone({ onReset }: { onReset: () => void }) {
       )}
 
       {/* Квота */}
-      <QuotaSection token={authToken} />
-      <ECampusSection token={authToken} tgAuthReady={tgAuthReady} />
+      <div className="fade-up-item" style={{ animationDelay: '140ms' }}>
+        <QuotaSection token={authToken} />
+      </div>
+      <div className="fade-up-item" style={{ animationDelay: '200ms' }}>
+        <ECampusSection token={authToken} tgAuthReady={tgAuthReady} />
+      </div>
+      {tgUser?.roles?.includes('admin:full') && (
+        <ECampusAdminSection token={authToken} />
+      )}
 
       {/* Настройки */}
-      <SettingsSection />
+      <div className="fade-up-item" style={{ animationDelay: '260ms' }}>
+        <SettingsSection />
+      </div>
 
       {/* Действия */}
-      <div className="flex flex-col gap-3 mb-4">
+      <div className="flex flex-col gap-3 mb-4 fade-up-item" style={{ animationDelay: '320ms' }}>
         {profile && (
           <button onClick={goToSchedule}
             className="w-full h-12 rounded-2xl flex items-center justify-center gap-2 text-sm font-semibold text-black transition-opacity hover:opacity-90"
@@ -539,7 +548,10 @@ function ProfilePageInner() {
           </div>
 
           <QuotaSection token={authToken} />
-      <ECampusSection token={authToken} tgAuthReady={tgAuthReady} />
+          <ECampusSection token={authToken} tgAuthReady={tgAuthReady} />
+          {tgUser?.roles?.includes('admin:full') && (
+            <ECampusAdminSection token={authToken} />
+          )}
           <SettingsSection />
 
           <div className="card px-5 py-5 mb-4">

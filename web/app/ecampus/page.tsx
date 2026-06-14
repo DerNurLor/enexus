@@ -580,6 +580,9 @@ export default function ECampusPage() {
     refetchInterval: (q) => q.state.data?.sync_status === 'running' ? 2000 : 30000,
   })
 
+  const syncInitiated  = useRef(false)
+  const syncWasRunning = useRef(false)
+
   const syncMutation = useMutation({
     onMutate: () => {
       qc.setQueryData(['ecampus-status'], (old: any) =>
@@ -589,8 +592,7 @@ export default function ECampusPage() {
     mutationFn: () => authedFetch('/sync', { method: 'POST' }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ecampus-status'] })
-      qc.invalidateQueries({ queryKey: ['ecampus-data'] })
-      // КД 60 секунд после успешного обновления
+      syncInitiated.current = true
       setSyncCooldown(true)
       setTimeout(() => setSyncCooldown(false), 60_000)
     },
@@ -608,6 +610,20 @@ export default function ECampusPage() {
     placeholderData: (prev: any) => prev,
     refetchInterval: (status?.sync_status === 'running' || syncMutation.isPending) ? 2000 : false,
   })
+
+  // Detect server-confirmed running→ok to trigger a final data refresh.
+  useEffect(() => {
+    const s = status?.sync_status
+    if (!s) return
+    if (syncInitiated.current && s === 'running') {
+      syncWasRunning.current = true
+    }
+    if (syncWasRunning.current && s !== 'running') {
+      syncWasRunning.current = false
+      syncInitiated.current  = false
+      qc.invalidateQueries({ queryKey: ['ecampus-data'] })
+    }
+  }, [status?.sync_status, qc]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Обновляем снапшот оценок при получении новых данных — вычисляем бейдж
   useEffect(() => {

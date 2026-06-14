@@ -28,7 +28,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from loguru import logger
 
-from app.auth.dependencies import get_current_user
+from app.auth.dependencies import get_current_user, require_permission
 from app.ecampus.captcha_solver import solve_math_captcha
 from app.auth.models import AuthUser
 
@@ -444,6 +444,8 @@ async def manual_sync(
     session_ok = await _check_session(record)
 
     if session_ok:
+        await record.set({"sync_status": "running", "sync_progress": 0,
+                          "sync_done_terms": 0, "sync_courses_found": 0, "sync_loaded_term_ids": []})
         background_tasks.add_task(_background_sync, current_user.tg_id)
         return {"ok": True, "message": "Синхронизация запущена."}
 
@@ -452,6 +454,8 @@ async def manual_sync(
     if _2captcha_key:
         reauth_ok = await _silent_reauth(record, _2captcha_key)
         if reauth_ok:
+            await record.set({"sync_status": "running", "sync_progress": 0,
+                              "sync_done_terms": 0, "sync_courses_found": 0, "sync_loaded_term_ids": []})
             background_tasks.add_task(_background_sync, current_user.tg_id)
             return {"ok": True, "message": "Сессия обновлена, синхронизация запущена."}
 
@@ -730,14 +734,6 @@ async def _fetch_fresh_captcha(tg_id: int) -> dict:
 
     img_b64 = base64.b64encode(captcha_resp.content).decode()
     return {"image": img_b64}
-    task = ECampusTask(
-        task_type="sync_all",
-        tg_id=tg_id,
-        priority=Priority.LOW,
-        payload={},
-    )
-    await queue.enqueue(task)
-    logger.info(f"Background sync enqueued for tg_id={tg_id}")
 
 
 @router.get("/course/{course_id}/lessons")
@@ -1027,6 +1023,44 @@ async def reconfirm_group(
 
     background_tasks.add_task(_quick_fetch_group, current_user.tg_id, cookies)
     return {"ok": True, "message": "Группа будет подтверждена в течение нескольких секунд"}
+
+
+# ── Admin endpoints ───────────────────────────────────────────────────────────
+
+@router.get("/admin/users")
+async def admin_list_ecampus_users(
+    _: AuthUser = Depends(require_permission("admin:full")),
+):
+    """List all users who have connected eCampus, with sync status."""
+    from app.ecampus.sync_service import ECampusSyncRecord
+    records = await ECampusSyncRecord.find_all().to_list()
+    result = []
+    for rec in records:
+        user = await AuthUser.find_one(AuthUser.tg_id == rec.tg_id)
+        result.append({
+            "tg_id":         rec.tg_id,
+            "username":      user.username if user else None,
+            "first_name":    user.first_name if user else None,
+            "last_name":     user.last_name if user else None,
+            "sync_status":   rec.sync_status,
+            "last_sync":     rec.last_sync.isoformat() if rec.last_sync else None,
+            "courses_count": len(rec.courses or []),
+            "error_msg":     rec.error_msg,
+        })
+    return {"users": result, "total": len(result)}
+
+
+@router.post("/admin/sync-all")
+async def admin_sync_all_users(
+    background_tasks: BackgroundTasks,
+    _: AuthUser = Depends(require_permission("admin:full")),
+):
+    """Enqueue a LOW-priority sync for every connected ecampus user."""
+    from app.ecampus.sync_service import ECampusSyncRecord
+    records = await ECampusSyncRecord.find_all().to_list()
+    for rec in records:
+        background_tasks.add_task(_background_sync, rec.tg_id)
+    return {"ok": True, "queued": len(records)}
 
 
 # ── Фоновые задачи ────────────────────────────────────────────────────────────
