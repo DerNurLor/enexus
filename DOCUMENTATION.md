@@ -13,8 +13,7 @@
    - [Backend (API + Scraper)](#41-backend---api--scraper)
    - [Bot (Telegram AI Bot)](#42-bot---telegram-ai-bot)
    - [MiniApp (Telegram Mini App)](#43-miniapp---telegram-mini-app)
-   - [Dashboard (Admin Panel)](#44-dashboard---admin-panel)
-   - [Web (PWA Student Portal)](#45-web---pwa-student-portal)
+   - [Web (PWA Student Portal)](#44-web---pwa-student-portal)
 5. [Infrastructure](#5-infrastructure)
    - [MongoDB](#51-mongodb)
    - [Redis](#52-redis)
@@ -50,17 +49,17 @@ The platform solves a fundamental problem: NCFU's official eCampus portal is slo
                               │  Single entry point — routes by path     │
                               └────────────────────┬────────────────────┘
                                                    │
-              ┌────────────────┬──────────────────┼──────────────────┬─────────────────┐
-              │                │                  │                  │                 │
-       /:port 8000      :8001 bot          :8002 miniapp     :8003 dashboard    :3000 web
-              │                │                  │                  │                 │
-     ┌────────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-     │    Backend     │ │   Bot        │ │  MiniApp     │ │  Dashboard   │ │  Next.js PWA │
-     │  FastAPI       │ │  aiogram     │ │  FastAPI     │ │  FastAPI     │ │  React/TW    │
-     │  REST + GQL    │ │  + OpenAI    │ │  + React SPA │ │  + React SPA │ │  Student UI  │
-     └────────┬───────┘ └──────┬───────┘ └──────┬───────┘ └──────┬───────┘ └──────┬───────┘
-              │                │                  │                  │                 │
-              └────────────────┴──────────────────┴──────────────────┴─────────────────┘
+              ┌────────────────┬──────────────────┬──────────────────┐
+              │                │                  │                  │
+       /:port 8000      :8001 bot          :8002 miniapp       :3000 web
+              │                │                  │                  │
+     ┌────────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+     │    Backend     │ │   Bot        │ │  MiniApp     │ │  Next.js PWA │
+     │  FastAPI       │ │  aiogram     │ │  FastAPI     │ │  React/TW    │
+     │  REST + GQL    │ │  + OpenAI    │ │  + React SPA │ │  Student UI  │
+     └────────┬───────┘ └──────┬───────┘ └──────┬───────┘ └──────┬───────┘
+              │                │                  │                  │
+              └────────────────┴──────────────────┴──────────────────┘
                                                    │
                            ┌───────────────────────┼───────────────────────┐
                            │                       │                       │
@@ -75,7 +74,7 @@ The platform solves a fundamental problem: NCFU's official eCampus portal is slo
 
 | Decision | Why |
 |---|---|
-| Separate services (backend/bot/miniapp/dashboard) | Independent scaling, failure isolation, clear responsibility boundaries |
+| Separate services (backend/bot/miniapp) | Independent scaling, failure isolation, clear responsibility boundaries |
 | Shared MongoDB | Services communicate via DB, no internal RPC needed for schedule data |
 | Redis | Sub-millisecond cache + rate limiting shared across services |
 | GraphQL + REST dual API | GraphQL for bots/external consumers, REST for web PWA (simpler, faster) |
@@ -96,7 +95,6 @@ The platform solves a fundamental problem: NCFU's official eCampus portal is slo
 │       ├── auth/               # JWT auth, Telegram login, API keys
 │       ├── cache/              # Redis client wrapper
 │       ├── db/                 # MongoDB connection (schedule data)
-│       ├── dashboard/          # Admin dashboard backend + SPA files
 │       ├── ecampus/            # eCampus client, sync, queue, captcha
 │       ├── graphql/            # Strawberry GraphQL schema, resolvers, types
 │       ├── models/             # Schedule domain models (beanie Documents)
@@ -130,13 +128,6 @@ The platform solves a fundamental problem: NCFU's official eCampus portal is slo
 │           ├── App.tsx         # Root component + bottom nav
 │           ├── pages/          # SchedulePage, RoomsPage, FavoritesPage, ProfilePage
 │           └── utils/api.ts    # API client
-│
-├── dashboard/                  # Admin dashboard service (FastAPI, port 8003)
-│   └── app/
-│       ├── main.py             # FastAPI app
-│       └── dashboard/          # Conversations, media, broadcast API
-│   └── react/                  # React 18 + Vite admin SPA source
-│       └── src/pages/          # Analytics, Chats, Users, Logs, Broadcast, Settings
 │
 ├── web/                        # Student PWA portal (Next.js 14, port 3000)
 │   ├── app/                    # Next.js App Router pages
@@ -189,7 +180,6 @@ The core service. It does four things:
 1. Serves the REST API for schedule data
 2. Serves the GraphQL API
 3. Runs the scraper pipeline on a schedule
-4. Hosts the admin dashboard SPA
 
 #### Startup sequence (`lifespan`):
 ```python
@@ -397,42 +387,7 @@ Built with Vite, deployed as static files embedded in the Python package.
 
 ---
 
-### 4.4 Dashboard — Admin Panel
-
-**File**: `dashboard/app/main.py`  
-**Port**: `8003`  
-**Tech**: FastAPI + React 18 + Vite
-
-Internal admin SPA. Accessible only via the secret `ADMIN_PATH` prefix in Nginx (e.g. `/edY5N875HC99/dashboard/admin`).
-
-#### Backend API (`dashboard/app/dashboard/`):
-
-| File | Purpose |
-|---|---|
-| `router.py` | SPA catch-all, serves `index.html` |
-| `api.py` | Stats overview, user management, broadcast, scrape control |
-| `api_chats.py` | Chat history viewer, support tickets |
-| `conversations.py` | Conversation retrieval per user |
-| `media_service.py` | On-demand media file fetching from Telegram |
-| `message_utils.py` | Message formatting utilities |
-
-#### React Admin SPA (`dashboard/react/`):
-
-**Pages**:
-- **Overview** — system stats, scrape status, uptime
-- **Analytics** — charts: message volume, user growth, lesson stats
-- **Users** — list/search/block users, role management
-- **Chats** — conversation viewer per user (text + media preview)
-- **Logs** — activity log viewer, error log viewer
-- **Broadcast** — send messages to all/active/role users
-- **Support** — support tickets (open/answered/closed)
-- **Settings** — chat settings, rate limits
-- **Mongo** — basic DB stats
-- **Roles** — role/permission management
-
----
-
-### 4.5 Web — PWA Student Portal
+### 4.4 Web — PWA Student Portal
 
 **File**: `web/`  
 **Port**: `3000`  
@@ -583,7 +538,6 @@ Acts as the single entry point (port 8080). Routes by URL path:
 | Path | Upstream | Rate limit |
 |---|---|---|
 | `/webhook/telegram` | `bot:8001` | 100 req/s (webhook zone) |
-| `/{ADMIN_PATH}/dashboard/*` | `dashboard:8003` | 60 req/min |
 | `/auth/*` | `miniapp:8002` | 10 req/min |
 | `/miniapp/*` | `miniapp:8002` | — |
 | `/graphql` | `backend:8000` | 30 req/min |
@@ -594,8 +548,6 @@ Second server block handles `app.<DOMAIN>` → Next.js PWA:
 - `/_next/static/` → 1 year cache
 - `/api/` → proxied to backend
 - `/*` → Next.js
-
-Dashboard is hidden behind `ADMIN_PATH` — a random secret path set in `.env`. Direct access to `/dashboard/*` returns 403.
 
 Security headers applied globally:
 - `X-Content-Type-Options: nosniff`
@@ -889,7 +841,6 @@ REDIS_URL=redis://:password@redis:6379/0
 
 # Security
 JWT_SECRET=<64-char hex>        # Must be ≥32 chars in production
-DASHBOARD_SECRET=<random>       # Admin dashboard password
 GRAPHQL_SECRET=<random>         # GraphQL IDE access token
 BOT_API_SECRET=<random>         # Internal bot→API auth
 TELEGRAM_WEBHOOK_SECRET=<random> # Telegram webhook HMAC key
@@ -908,7 +859,6 @@ ECAMPUS_ENCRYPTION_KEY=<64-hex> # AES-256 key for credential encryption
 # Features
 OPENAI_API_KEY=sk-...           # Optional (bot AI disabled without it)
 SENTRY_DSN=https://...          # Optional error tracking
-ADMIN_PATH=<random-string>      # Secret URL prefix for dashboard
 APP_ENV=production              # or development
 
 # Rate limiting
@@ -948,9 +898,6 @@ docker compose up -d
 
 # 4. Check health
 curl http://localhost:8080/health
-
-# 5. Check dashboard
-# Navigate to https://yourdomain.com/<ADMIN_PATH>/dashboard/admin
 ```
 
 ---
@@ -1036,7 +983,7 @@ curl http://localhost:8080/health
 
 | File | Description |
 |---|---|
-| `docker-compose.yml` | Production stack: mongo, redis, backend, bot, miniapp, dashboard, nginx, web |
+| `docker-compose.yml` | Production stack: mongo, redis, backend, bot, miniapp, nginx, web |
 | `docker-compose.dev.yml` | Development overrides (bind mounts, debug ports) |
 | `docker-compose.staging.yml` | Staging configuration |
 | `nginx/nginx.conf.template` | Nginx config with `${NGINX_ADMIN_PATH}` and `${NGINX_DOMAIN}` placeholders |

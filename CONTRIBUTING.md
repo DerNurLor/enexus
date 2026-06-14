@@ -115,7 +115,7 @@ make logs bot n=50
 Какие другие решения рассматривались и почему отброшены.
 
 **Затронутые компоненты**
-bot / backend / miniapp / dashboard / all
+bot / backend / miniapp / all
 ```
 
 ---
@@ -314,7 +314,7 @@ npm run build   # TypeScript compile check
 
 ### Области (scope)
 
-`bot`, `backend`, `miniapp`, `dashboard`, `nginx`, `docs`, `deps`, `infra`
+`bot`, `backend`, `miniapp`, `nginx`, `docs`, `deps`, `infra`
 
 ### Примеры
 

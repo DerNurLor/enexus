@@ -22,9 +22,6 @@
 - **bot**: Команда `/suggest` — подача предложений/идей. Создаёт тикет с `category=suggestion`, уведомляет администратора
 - **bot**: Команда `/about` — информация о боте v2.0, ссылки на Mini App и личный кабинет
 - **bot**: Команда `/roles` — отображение ролей со значками (🔴admin 🟠mod 🟡vip 🔵beta ⚪user), персональный лимит
-- **dashboard**: Поиск по тексту и ERR-ID в списке отзывов (`GET /feedback?search=`)
-- **dashboard**: Навигация между ошибкой и отзывами — кнопка «Найти отзывы с этой ошибкой» и «Перейти к ошибке ERR-XXXXXX»
-- **dashboard2**: Компонент `FeedbackQAList` — вкладка `📋 Q&A Список` для анализа пар вопрос/ответ
 
 ### Fixed
 - **miniapp**: Квота Mini App всегда показывала значение по умолчанию (3) вместо персонального лимита пользователя. Теперь `quota_service.py` корректно читает `AuthUser.daily_requests` из MongoDB
@@ -39,7 +36,7 @@
 > **Breaking Change:** Монолитное приложение разделено на 4 независимых сервиса.
 
 ### Added
-- **architecture**: Микросервисная декомпозиция — `backend`, `bot`, `miniapp`, `dashboard` как отдельные Docker-контейнеры
+- **architecture**: Микросервисная декомпозиция — `backend`, `bot`, `miniapp` как отдельные Docker-контейнеры
 - **backend**: Strawberry GraphQL API с depth limiting (max 5) и token limiting (max 1000)
 - **backend**: GraphQL Subscription `scheduleUpdated` через WebSocket (`graphql-ws`)
 - **backend**: REST `/api/search/*` — 14 эндпоинтов: `now`, `at`, `day`, `week`, `range`, `next`, `free-rooms`, `conflicts`, `teacher-groups` и другие
@@ -111,7 +108,6 @@
 - **bot**: При добавлении бота в группу — автоматическое приветственное сообщение
 - **bot**: Сохранение всех медиа-сообщений (фото, видео, голос, стикеры) в `chat_messages`
 - **backend**: `GET /api/search/teacher-groups` — группы конкретного преподавателя с расписанием
-- **dashboard**: Просмотр истории переписки с каждым пользователем
 
 ### Fixed
 - **bot**: Отредактированные сообщения теперь обновляют запись в MongoDB вместо создания дубля

@@ -86,7 +86,6 @@ OPENAI_API_KEY=sk-proj-...
 
 # JWT (любая длинная строка)
 JWT_SECRET=local_dev_secret_change_in_prod
-DASHBOARD_SECRET=local_dashboard_secret
 GRAPHQL_SECRET=local_graphql_secret
 
 # Опционально
@@ -114,7 +113,6 @@ make health
 #   ✓ backend  :8000 — ok
 #   ✓ bot      :8001 — ok
 #   ✓ miniapp  :8002 — ok
-#   ✓ dashboard:8003 — ok
 ```
 
 ### Шаг 5 — Настроить Telegram webhook (для разработки)
@@ -181,7 +179,6 @@ docker compose --profile dev up -d
 │   │   │   ├── room.py         # Room
 │   │   │   └── institute.py    # Institute
 │   │   ├── auth/               # JWT, RBAC, модели пользователей
-│   │   ├── dashboard/          # Роутер и API старой панели (backend)
 │   │   ├── core/               # Config, logging, observability
 │   │   └── main.py             # FastAPI app factory
 │   ├── Dockerfile
@@ -220,11 +217,6 @@ docker compose --profile dev up -d
 │           └── utils/
 │               ├── api.ts      # API-клиент с auto-reauth
 │               └── helpers.ts
-│
-├── dashboard2/                 # Основная панель администратора
-│   └── app/dashboard/
-│       ├── templates/admin.html  # React SPA (инлайн-сборка)
-│       └── api_chats.py          # API: чаты, отзывы, тикеты
 │
 ├── nginx/
 │   ├── nginx.conf.template    # Шаблон с ${NGINX_ADMIN_PATH}
@@ -756,7 +748,6 @@ make health
 #   ✓ backend   :8000 — ok
 #   ✓ bot       :8001 — ok
 #   ✓ miniapp   :8002 — ok
-#   ✓ dashboard :8003 — ok
 
 # Отдельный сервис:
 curl http://localhost:8000/health
@@ -779,7 +770,7 @@ Flood-события также трекируются через `capture_messa
 
 Когда бот сталкивается с ошибкой, он генерирует уникальный `ERR-XXXXXX` код и сообщает его пользователю. Этот же код пишется в MongoDB (`auth_error_logs.error_id`).
 
-В Dashboard можно найти ошибку по ERR-ID — или перейти от отзыва с ERR-ID напрямую к записи ошибки.
+Ошибки можно найти по ERR-ID в MongoDB (`auth_error_logs.error_id`) или через `make logs`.
 
 ---
 
