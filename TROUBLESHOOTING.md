@@ -15,7 +15,6 @@
 - [AI-запросы не работают](#ai-запросы-не-работают)
 - [Расписание не обновляется](#расписание-не-обновляется)
 - [Mini App проблемы](#mini-app-проблемы)
-- [Панель администратора](#панель-администратора)
 - [Квоты и лимиты](#квоты-и-лимиты)
 - [Проблемы с сертификатами SSL](#проблемы-с-сертификатами-ssl)
 - [Производительность](#производительность)
@@ -52,7 +51,6 @@ ncfu-nginx      Up 2 hours      0.0.0.0:80->80/tcp
 ncfu-backend    Up 2 hours      127.0.0.1:8000->8000/tcp
 ncfu-bot        Up 2 hours      127.0.0.1:8001->8001/tcp
 ncfu-miniapp    Up 2 hours      127.0.0.1:8002->8002/tcp
-ncfu-dashboard  Up 2 hours      127.0.0.1:8003->8003/tcp
 ncfu-mongo      Up 2 hours (healthy)
 ncfu-redis      Up 2 hours (healthy)
 ```
@@ -501,39 +499,6 @@ db.auth_users.findOne({tg_id: 123456789}, {daily_requests: 1, roles: 1})
 
 ---
 
-## Панель администратора
-
-### ❌ 404 при переходе на dashboard URL
-
-Dashboard доступен по динамическому пути `/<ADMIN_PATH>/admin`. Путь задаётся в секретах:
-
-```bash
-sudo grep ADMIN_PATH /etc/ncfu/secrets
-# Например: ADMIN_PATH=secret_admin_path
-
-# Открыть: https://your-domain.com/secret_admin_path/admin
-```
-
-Если `ADMIN_PATH` пустой — dashboard доступен по `/dashboard/admin`.
-
-### ❌ 403 Forbidden при входе в dashboard
-
-Проверьте, что у пользователя есть роль `admin` и право `admin:full`:
-
-```bash
-make mongo
-use ncfu_auth
-db.auth_users.findOne({tg_id: YOUR_TG_ID})
-# Должно быть: roles: ["admin"], extra_permissions: ["admin:full"]
-# или роль "admin" с permission "admin:full" в auth_roles
-
-# Дать права вручную:
-db.auth_users.updateOne(
-  {tg_id: YOUR_TG_ID},
-  {$set: {roles: ["admin", "user"]}}
-)
-```
-
 ---
 
 ## Квоты и лимиты
@@ -566,8 +531,6 @@ db.auth_users.updateOne(
   {tg_id: 123456789},
   {$set: {daily_requests: 20}}
 )
-
-# Или через Dashboard → пользователь → редактировать
 ```
 
 ### ❌ Увеличить лимит для конкретного чата
@@ -653,7 +616,6 @@ docker stats --no-stream
 # backend:   200–400 MB
 # bot:       150–300 MB
 # miniapp:   100–200 MB
-# dashboard: 100–200 MB
 # mongo:     500 MB – 2 GB
 # redis:     50–200 MB
 ```
@@ -738,7 +700,7 @@ make pull   # пересобрать
 
 Это глобальный дефолт (`quota_private=3` в `config.py`). Можно увеличить:
 
-1. **Индивидуально** — в Dashboard → пользователь → `daily_requests`
+1. **Индивидуально** — в MongoDB `auth_users.daily_requests` для конкретного пользователя
 2. **Глобально** — в `/etc/ncfu/secrets` добавить `QUOTA_PRIVATE=10`, затем `make restart`
 3. **На чат** — в MongoDB `chat_settings.bot_quota_cap`
 
@@ -757,9 +719,8 @@ make pull   # пересобрать
 ### ❓ Как узнать Telegram ID группы для настройки квоты?
 
 Способы:
-1. В Dashboard → список чатов — там отображается `chat_id`
-2. Переслать сообщение из группы боту [@userinfobot](https://t.me/userinfobot)
-3. `make mongo` → `db.chat_settings.find({chat_type: "supergroup"}).limit(5)`
+1. Переслать сообщение из группы боту [@userinfobot](https://t.me/userinfobot)
+2. `make mongo` → `db.chat_settings.find({chat_type: "supergroup"}).limit(5)`
 
 ### ❓ Можно ли деплоить без `make fresh` при смене пароля MongoDB?
 
