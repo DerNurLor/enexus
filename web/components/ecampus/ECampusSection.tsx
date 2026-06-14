@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   BookOpen, RefreshCw, Trash2, CheckCircle, AlertCircle,
@@ -116,6 +116,25 @@ export function ECampusSection({ token, tgAuthReady = true }: Props) {
     if (showForm && !autoCaptcha && !captchaImg) loadCaptcha()
   }, [showForm, autoCaptcha]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Detect server-confirmed running→ok transition to refresh grades data.
+  // syncInitiated is set only AFTER POST /sync returns (not during optimistic update),
+  // so we avoid the race where the immediate invalidateQueries call returns 'ok'
+  // before the worker even picks up the task.
+  const syncInitiated  = useRef(false)
+  const syncWasRunning = useRef(false)
+  useEffect(() => {
+    const s = status?.sync_status
+    if (!s) return
+    if (syncInitiated.current && s === 'running') {
+      syncWasRunning.current = true
+    }
+    if (syncWasRunning.current && s !== 'running') {
+      syncWasRunning.current = false
+      syncInitiated.current  = false
+      qc.invalidateQueries({ queryKey: ['ecampus-data'] })
+    }
+  }, [status?.sync_status, qc])
+
   const disconnectMutation = useMutation({
     mutationFn: () => authedFetch('/disconnect', { method: 'DELETE' }),
     onSuccess: () => {
@@ -177,6 +196,7 @@ export function ECampusSection({ token, tgAuthReady = true }: Props) {
       if (result.ok) {
         setReauthState('idle')
         qc.invalidateQueries({ queryKey: ['ecampus-status'] })
+        syncInitiated.current = true
         authedFetch('/reconfirm', { method: 'POST' }).catch(() => {})
         // КД 60 секунд
         setSyncCooldown(true)

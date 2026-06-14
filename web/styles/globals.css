@@ -202,6 +202,10 @@ button, a {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
+@keyframes scaleX {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
 @keyframes pulse {
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.4; }
@@ -379,12 +383,25 @@ button, a {
 .stagger-spring > *:nth-child(7)  { animation-delay: 300ms; }
 .stagger-spring > *:nth-child(8)  { animation-delay: 350ms; }
 
-/* Expand — раскрытие контента (для аккордеонов) */
+/* Expand — opacity/slide only; height is handled by grid-template-rows CSS transition */
 @keyframes expandDown {
-  from { opacity: 0; max-height: 0; transform: translateY(-6px); }
-  to   { opacity: 1; max-height: 800px; transform: translateY(0); }
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
-.expand-down { animation: expandDown 0.3s var(--snap) forwards; overflow: hidden; }
+.expand-down { animation: expandDown 0.28s ease forwards; }
+
+/* Pop — появление с пружиной (для бейджей оценок) */
+@keyframes popIn {
+  0%   { opacity: 0; transform: scale(0.4); }
+  60%  { transform: scale(1.18); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/* Stagger helper — fill-mode both чтобы элемент был скрыт до начала анимации */
+.fade-up-item {
+  opacity: 0;
+  animation: fadeUp 0.38s ease both;
+}
 
 /* Hover lift — карточки поднимаются */
 .card-lift {
