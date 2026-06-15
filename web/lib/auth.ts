@@ -1,31 +1,9 @@
 /**
- * auth.ts — Telegram авторизация для web-портала.
- *
- * Два потока авторизации:
- *
- * 1. Telegram Mini App (внутри Telegram):
- *    window.Telegram.WebApp.initData → POST /auth/telegram/login → JWT
- *
- * 2. Обычный браузер (Telegram Login Widget):
- *    Пользователь нажимает кнопку → Telegram popup → callback с данными
- *    → POST /auth/telegram/widget → JWT
- *
- * 3. Тихий рефреш (повторный визит):
- *    localStorage(refresh_token) → POST /auth/refresh → новый access token
- *
  * Безопасность:
  *  - access token  — только в памяти (не переживает reload)
  *  - refresh token — localStorage (переживает reload, используется для тихого входа)
- *  - Вся проверка подписи — на сервере
- *
- * ИСПРАВЛЕНИЯ:
- *  [F1] Refresh token теперь удаляется при получении 401/403 от /auth/refresh.
- *       Ранее токен не удалялся «на случай временной ошибки», что приводило к
- *       бесконечным попыткам использовать отозванный или заблокированный токен.
- *       Сетевые ошибки (fetch exception) по-прежнему не удаляют токен.
- *  [F2] Убраны console.log с чувствительной информацией (наличие токена).
- *  [F3] loginWithBotToken: при ошибке токен явно очищается только если это 401/403,
- *       а не любая ошибка (например, 500 не должен сбрасывать токен).
+ *  [F1] Refresh token удаляется при 401/403 от /auth/refresh, но не при сетевых ошибках.
+ *  [F3] loginWithBotToken: токен очищается только при 401/403, не при 5xx.
  */
 
 const AUTH_BASE    = (process.env.NEXT_PUBLIC_API_URL || '') + '/auth'
@@ -43,7 +21,6 @@ async function fetchWithTimeout(url: string, opts: RequestInit = {}, ms = 8000):
   }
 }
 
-// ── In-memory access token ────────────────────────────────────────────────────
 let _token: string | null = null
 
 export function getToken(): string | null { return _token }
@@ -56,7 +33,6 @@ export function getAuthHeader(): Record<string, string> {
   return _token ? { Authorization: `Bearer ${_token}` } : {}
 }
 
-// ── Telegram detection ────────────────────────────────────────────────────────
 export function isTelegramWebApp(): boolean {
   if (typeof window === 'undefined') return false
   const tg = (window as any).Telegram?.WebApp
@@ -72,7 +48,6 @@ export function getTelegramUser() {
   catch { return null }
 }
 
-// ── Types ─────────────────────────────────────────────────────────────────────
 export interface TgUserInfo {
   id:          string
   tg_id:       number
@@ -128,11 +103,6 @@ export interface FavoriteItem {
   name:  string
 }
 
-// ── Auth flows ────────────────────────────────────────────────────────────────
-
-/**
- * Авторизация через Telegram Mini App initData.
- */
 export async function loginWithInitData(initData: string): Promise<{
   access_token: string
   refresh_token: string
@@ -149,9 +119,6 @@ export async function loginWithInitData(initData: string): Promise<{
   return res.json()
 }
 
-/**
- * Авторизация через Telegram Login Widget (обычный браузер).
- */
 export async function loginWithWidget(data: TelegramWidgetData): Promise<{
   access_token: string
   refresh_token: string
@@ -168,7 +135,6 @@ export async function loginWithWidget(data: TelegramWidgetData): Promise<{
   return res.json()
 }
 
-/** Тихий рефреш — пробуем обновить токены по saved refresh_token */
 let _refreshInProgress: Promise<string | null> | null = null
 
 async function _silentRefresh(): Promise<string | null> {
@@ -212,8 +178,6 @@ async function _doSilentRefresh(attempt = 0): Promise<string | null> {
   }
 }
 
-
-// ── Fetch user info ───────────────────────────────────────────────────────────
 
 export async function fetchMe(): Promise<TgUserInfo | null> {
   if (!_token) return null
@@ -265,8 +229,6 @@ export async function fetchQuota(): Promise<QuotaStatus | null> {
   }
 }
 
-// ── Главная функция инициализации ─────────────────────────────────────────────
-
 export interface AuthResult {
   token:     string
   user:      TgUserInfo | null
@@ -274,10 +236,6 @@ export interface AuthResult {
   favorites: FavoriteItem[]
 }
 
-/**
- * Инициализация авторизации при загрузке приложения.
- * Автоматически определяет контекст (Mini App или браузер).
- */
 export async function initAuth(): Promise<AuthResult | null> {
   let token: string | null = null
 
@@ -313,9 +271,6 @@ export async function initAuth(): Promise<AuthResult | null> {
   return { token, user: user as any, settings, favorites }
 }
 
-/**
- * Полная авторизация через Telegram Login Widget.
- */
 export async function loginWithWidgetAndInit(
   data: TelegramWidgetData
 ): Promise<AuthResult> {

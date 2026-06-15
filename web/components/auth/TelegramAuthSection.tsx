@@ -1,19 +1,4 @@
 'use client'
-/**
- * TelegramAuthSection.tsx — авторизация через 6-значный код.
- *
- * Новый поток:
- *  1. Нажать «Войти» → POST /auth/code/request → получить code + session_id
- *  2. Показать пользователю код
- *  3. Пользователь открывает бота и отправляет код
- *  4. Бот спрашивает «Подтвердить?» → пользователь жмёт «Да»
- *  5. Фронт polling-ом GET /auth/code/poll/{session_id} получает JWT
- *  6. Страница обновляется — пользователь вошёл
- *
- * Никаких редиректов. Никакого копирования ссылок.
- * Работает из нативного приложения, мобильного Telegram, десктопа.
- */
-
 import { useState, useCallback, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { LogOut, Shield, Copy, Check, RefreshCw } from 'lucide-react'

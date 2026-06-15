@@ -1,11 +1,3 @@
-/**
- * api.ts — HTTP-клиент для backend API.
- *
- * BASE = NEXT_PUBLIC_API_URL + /api
- * Все запросы к расписанию анонимны (backend не требует JWT).
- * Auth-методы (quota, settings, favorites) идут через auth.ts напрямую.
- */
-
 import { getAuthHeader } from './auth'
 
 const BASE = (process.env.NEXT_PUBLIC_API_URL || '') + '/api'
@@ -23,7 +15,6 @@ async function get<T>(path: string, params?: Record<string, string | number>): P
   return res.json()
 }
 
-/** Запрос с auth-заголовком (для эндпоинтов miniapp) */
 async function authedGet<T>(path: string, params?: Record<string, string | number>): Promise<T> {
   const base = process.env.NEXT_PUBLIC_API_URL || ''
   const url = new URL(
@@ -42,7 +33,6 @@ async function authedGet<T>(path: string, params?: Record<string, string | numbe
 }
 
 export const api = {
-  // ── Search ────────────────────────────────────────────────────────────────
   searchGroups: (q: string) =>
     get<{ total: number; groups: import('./types').GroupMeta[] }>('/search/groups', { q, limit: 20 }),
 
@@ -52,7 +42,6 @@ export const api = {
   searchRooms: (q: string) =>
     get<{ total: number; rooms: import('./types').RoomMeta[] }>('/search/rooms', { q, limit: 20 }),
 
-  // ── Day schedules ─────────────────────────────────────────────────────────
   getGroupDay: (groupId: number, date: string) =>
     get<import('./types').DayResponse>(`/schedules/group/${groupId}/day`, { day: date }),
 
@@ -62,7 +51,6 @@ export const api = {
   getRoomDay: (roomId: number, date: string) =>
     get<import('./types').DayResponse>(`/schedules/room/${roomId}/day`, { day: date }),
 
-  // ── Week schedules ────────────────────────────────────────────────────────
   getGroupWeek: (groupId: number, week: number) =>
     get<import('./types').WeekResponse>(`/schedules/group/${groupId}/week`, { week }),
 
@@ -72,7 +60,6 @@ export const api = {
   getRoomWeek: (roomId: number, week: number) =>
     get<import('./types').WeekResponse>(`/rooms/${roomId}/week`, { week }),
 
-  // ── Free rooms ────────────────────────────────────────────────────────────
   getFreeRooms: (at: string, duration?: number, building?: string, instituteId?: number) => {
     const params: Record<string, string | number> = { at, duration: duration ?? 90 }
     if (building)    params.building     = building
@@ -80,14 +67,12 @@ export const api = {
     return get<import('./types').FreeRoomsResponse>('/rooms/free', params)
   },
 
-  // ── Institutes ────────────────────────────────────────────────────────────
   getInstitutesWithBuildings: () =>
     get<{ institutes: import('./types').InstituteMeta[]; all_buildings: string[] }>('/institutes/with-buildings'),
 
   getBuildings: () =>
     get<{ buildings: string[] }>('/rooms/buildings-list'),
 
-  // ── Teacher-specific ─────────────────────────────────────────────────────
   getTeacher: (teacherId: number) =>
     get<import('./types').TeacherFull>(`/teachers/${teacherId}`),
 
@@ -100,7 +85,6 @@ export const api = {
   getTeacherGroups: (teacherId: number) =>
     get<{ teacher_id: number; full_name: string; group_count: number; groups: import('./types').GroupMeta[] }>(`/search/teacher-groups`, { teacher_id: teacherId }),
 
-  // ── Quota (требует JWT) ───────────────────────────────────────────────────
   getQuotaStatus: () =>
     authedGet<import('./auth').QuotaStatus>('/miniapp/api/profile/limits'),
 }

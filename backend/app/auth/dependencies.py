@@ -1,11 +1,3 @@
-"""
-RBAC (Role-Based Access Control) FastAPI dependencies — HARDENED.
-
-Security changes:
-  [S1] DPoP JTI decoded from verified payload, not raw JWT re-parse
-  [S2] Blocked user check uses Redis marker for fast invalidation
-  [S3] Rate limit gracefully handles Redis failures
-"""
 from __future__ import annotations
 
 import secrets

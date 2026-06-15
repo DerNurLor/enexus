@@ -1,13 +1,3 @@
-/**
- * useGestures.ts — универсальный хук для мобильных жестов.
- *
- * Жесты:
- *   swipeLeft / swipeRight / swipeUp / swipeDown  — свайп в сторону
- *   longPress                                      — долгое нажатие (500ms)
- *   pinchIn / pinchOut                             — щипок двумя пальцами
- *   doubleTap                                      — двойной тап
- *   edgeSwipeLeft / edgeSwipeRight                 — свайп от края экрана
- */
 import { useRef, useCallback } from 'react'
 
 interface GestureConfig {
@@ -97,7 +87,6 @@ export function useGestures(config: GestureConfig) {
     const vy = Math.abs(dy) / dt
     const adx = Math.abs(dx), ady = Math.abs(dy)
 
-    // Pinch (2 fingers)
     if (touches0.current === 2) {
       const scale = pinchDist(e.changedTouches) / (dist0.current || 1)
       if (scale < 0.8 && config.onPinchIn)  config.onPinchIn(scale)
@@ -105,7 +94,6 @@ export function useGestures(config: GestureConfig) {
       return
     }
 
-    // Double tap
     if (config.onDoubleTap && adx < 20 && ady < 20) {
       const now = Date.now()
       if (now - lastTap.current < 300) {
@@ -115,7 +103,6 @@ export function useGestures(config: GestureConfig) {
       lastTap.current = now
     }
 
-    // Edge swipes
     if (x0Edge.current < edgeZone && dx > swipeThreshold && config.onEdgeSwipeRight) {
       if ('vibrate' in navigator) navigator.vibrate(8)
       config.onEdgeSwipeRight(); return
@@ -125,7 +112,6 @@ export function useGestures(config: GestureConfig) {
       config.onEdgeSwipeLeft(); return
     }
 
-    // Directional swipe
     if (adx > ady) {
       if (adx >= swipeThreshold && vx >= velocityThreshold) {
         if (dx < 0 && config.onSwipeLeft)  { if ('vibrate' in navigator) navigator.vibrate(6); config.onSwipeLeft(vx) }

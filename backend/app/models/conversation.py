@@ -21,8 +21,6 @@ from pydantic import BaseModel, Field
 from pymongo import ASCENDING, DESCENDING, IndexModel
 
 
-# ── Media sub-document ────────────────────────────────────────────────────────
-
 MediaKind = Literal[
 "photo", "video", "animation", "sticker",
 "voice", "video_note", "audio", "document",
@@ -34,36 +32,28 @@ class MediaMeta(BaseModel):
 
     kind: MediaKind
 
-    # Core Telegram identifiers — always present for any media
     file_id: str
     file_unique_id: str
 
-    # Optional common fields
     file_size: Optional[int] = None
     mime_type: Optional[str] = None
 
-    # Visual dimensions (photo / video / animation / sticker / video_note)
     width:  Optional[int] = None
     height: Optional[int] = None
 
-    # Temporal (video / animation / voice / video_note / audio)
     duration: Optional[int] = None  # seconds
 
-    # Document / audio extras
     file_name: Optional[str] = None
-    title:     Optional[str] = None   # audio title
-    performer: Optional[str] = None   # audio performer
+    title:     Optional[str] = None
+    performer: Optional[str] = None
 
-    # Sticker extras
     sticker_emoji:     Optional[str]  = None
-    sticker_type:      Optional[str]  = None  # "regular" | "animated" | "video"
+    sticker_type:      Optional[str]  = None
     sticker_set_name:  Optional[str]  = None
 
-    # Thumbnail — available for video / animation / document / audio
     thumbnail_file_id: Optional[str] = None
 
 
-# ── Forward origin sub-document ───────────────────────────────────────────────
 
 class ForwardOrigin(BaseModel):
     """Parsed forward_origin — we store only display-relevant fields."""
@@ -73,7 +63,6 @@ class ForwardOrigin(BaseModel):
     date:      Optional[datetime] = None
 
 
-# ── Main document ─────────────────────────────────────────────────────────────
 
 class Message(Document):
     """
@@ -86,45 +75,36 @@ class Message(Document):
       - admin search by text                          → $text index on `text`
     """
 
-    # ── Who & when ────────────────────────────────────────────────────────────
     chat_id: Indexed(int)
     chat_key: Indexed(str)
     chat_type: str = 'private'
     thread_id: Optional[int] = None
 
-    tg_id:      Indexed(int)   # type: ignore[valid-type]  — user's Telegram ID
-    message_id: int            # Telegram message_id (unique within a chat)
+    tg_id:      Indexed(int)   # type: ignore[valid-type]
+    message_id: int
     edited_at: Optional[datetime] = None
 
-    username: Optional[str] = None     # НОВОЕ
-    first_name: Optional[str] = None   # НОВОЕ
-    last_name: Optional[str] = None    # НОВОЕ
-
+    username: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
 
     # "user" = incoming, "bot" = outgoing reply, "admin" = sent from dashboard
     role: str = 'user'
     message_type: str = 'text'
     timestamp: datetime = Field(default_factory=datetime.utcnow)
 
-    # ── Text content ──────────────────────────────────────────────────────────
     text:      Optional[str] = ""
     # HTML-formatted version (bold/italic/code etc. preserved as HTML tags)
     html_text: Optional[str] = ""
-    # Raw aiogram entity list serialised to dicts for the frontend
     entities:  list[dict] = Field(default_factory=list)
 
-    # ── Media attachment (None for text-only messages) ────────────────────────
     media: Optional[MediaMeta] = None
 
-    # ── Forward info ──────────────────────────────────────────────────────────
     forward: Optional[ForwardOrigin] = None
 
-    # ── Reply-to info ─────────────────────────────────────────────────────────
     reply_to_message_id: Optional[int] = None
     reply_to_text:       Optional[str] = None   # short preview of replied msg
 
-    # ── Extra structured content (poll, location, contact, venue) ────────────
-    # Free-form dict so new types need no schema migration.
     extra: Optional[dict] = None
 
     class Settings:

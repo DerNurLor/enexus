@@ -8,7 +8,7 @@ from pydantic import Field
 class Room(Document):
     room_id:    int
     name:       str
-    source_url: str = "https://ecampus.ncfu.ru"   # portal this room belongs to
+    source_url: str = "https://ecampus.ncfu.ru"
     building:   Optional[str] = None
     capacity:   Optional[int] = None  # manual seed
 

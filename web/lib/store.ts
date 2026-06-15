@@ -1,26 +1,3 @@
-/**
- * store.ts — глобальное состояние приложения.
- *
- * Хранит:
- *  - Параметры поиска расписания (mode/group/teacher/room)
- *  - Профиль пользователя (роль + группа/преподаватель)
- *  - TG-пользователь (tg_id, username, first_name, last_name, photo_url, roles)
- *  - JWT-токен (в памяти, не персистится)
- *  - Флаг готовности TG-авторизации
- *  - Избранное (favorites)
- *  - UI-настройки (theme, compact, time24h, weekFromMonday)
- *
- * Персистируется в localStorage (ключ 'ncfu-schedule'):
- *   - profile, profileComplete
- *   - tgUser (кешируем для быстрого рендера до ответа сервера)
- *   - settings (UI-настройки)
- *   - favorites
- *
- * НЕ персистируется:
- *   - authToken (безопасность)
- *   - tgAuthReady
- */
-
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { TgUserInfo, FavoriteItem, ServerSettings } from './auth'
@@ -53,7 +30,6 @@ const DEFAULT_SETTINGS: UiSettings = {
 }
 
 interface ScheduleStore {
-  // ── Search state ────────────────────────────────────────────────────────
   mode:        SearchMode
   groupId:     number | null
   groupName:   string | null
@@ -62,64 +38,45 @@ interface ScheduleStore {
   roomId:      number | null
   roomName:    string | null
 
-  // ── User profile (расписание) ────────────────────────────────────────────
   profile:         UserProfile | null
   profileComplete: boolean
 
-  // ── TG auth ──────────────────────────────────────────────────────────────
   tgUser:      TgUserInfo | null
   authToken:   string | null    // in-memory, НЕ персистируется
   tgAuthReady: boolean          // true когда init завершён (с TG или без)
-  isAuthenticated: boolean      // true если есть валидный JWT
+  isAuthenticated: boolean
 
-  // ── Избранное ────────────────────────────────────────────────────────────
   favorites: FavoriteItem[]
-
-  // ── UI-настройки ──────────────────────────────────────────────────────────
   settings: UiSettings
 
-  // ── Actions: search ──────────────────────────────────────────────────────
   setMode:    (m: SearchMode) => void
   setGroup:   (id: number, name: string) => void
   setTeacher: (id: number, name: string) => void
   setRoom:    (id: number, name: string) => void
   clear:      () => void
 
-  // ── Actions: profile ─────────────────────────────────────────────────────
   setProfile:   (p: UserProfile) => void
   clearProfile: () => void
 
-  // ── Actions: auth ────────────────────────────────────────────────────────
   setTgUser:     (u: TgUserInfo | null) => void
   setAuthToken:  (t: string | null) => void
   setTgAuthReady:(v: boolean) => void
 
-  // ── Actions: settings ────────────────────────────────────────────────────
   updateSettings: (patch: Partial<UiSettings>) => void
 
-  // ── Group confirmed by eCampus
   groupConfirmed: boolean
 
-  // ── eCampus grade badge ───────────────────────────────────────────────────
   // Число новых оценок с последнего визита на страницу предметов.
   // Хранится в localStorage через partialize. Сбрасывается при открытии страницы.
   newGradesCount: number
 
-  // ── Actions: favorites ───────────────────────────────────────────────────
   setFavorites: (favs: FavoriteItem[]) => void
 
-  // ── Actions: grade badge ─────────────────────────────────────────────────
-  /**
-   * Вызывается при получении свежих данных eCampus (после sync/poll).
-   * Сравнивает оценки с снапшотом в localStorage и обновляет newGradesCount.
-   */
   updateGradeSnapshot: (courses: any[]) => void
-  /** Вызывается при открытии страницы предметов — сбрасывает счётчик. */
   clearNewGrades: () => void
 
   /**
-   * applyServerSettings — вызывается после успешной TG-авторизации.
-   * Мержит серверные настройки поверх локальных (сервер имеет приоритет).
+   * applyServerSettings — мержит серверные настройки поверх локальных (сервер имеет приоритет).
    * Также восстанавливает profile если он сохранён в server settings.
    */
   applyServerSettings: (s: ServerSettings) => void
@@ -128,7 +85,6 @@ interface ScheduleStore {
 export const useScheduleStore = create<ScheduleStore>()(
   persist(
     (set, get) => ({
-      // ── Search ──────────────────────────────────────────────────────────
       mode:        'group',
       groupId:     null,
       groupName:   null,
@@ -137,26 +93,21 @@ export const useScheduleStore = create<ScheduleStore>()(
       roomId:      null,
       roomName:    null,
 
-      // ── Profile ─────────────────────────────────────────────────────────
       profile:         null,
       profileComplete: false,
 
-      // ── Auth ─────────────────────────────────────────────────────────────
       tgUser:          null,
       authToken:       null,
       tgAuthReady:     false,
       isAuthenticated: false,
 
-      // ── Favorites / Settings ─────────────────────────────────────────────
       favorites: [],
       settings:  DEFAULT_SETTINGS,
 
       groupConfirmed: false,
 
-      // ── Grade badge ───────────────────────────────────────────────────────
       newGradesCount: 0,
 
-      // ── Search actions ───────────────────────────────────────────────────
       setMode:    (mode)              => set({ mode }),
       setGroup:   (groupId, groupName)   => set({ groupId, groupName }),
       setTeacher: (teacherId, teacherName) => set({ teacherId, teacherName }),
@@ -167,7 +118,6 @@ export const useScheduleStore = create<ScheduleStore>()(
         roomId: null, roomName: null,
       }),
 
-      // ── Profile actions ──────────────────────────────────────────────────
       setProfile: (profile) => set({
         profile,
         profileComplete: true,
@@ -184,7 +134,6 @@ export const useScheduleStore = create<ScheduleStore>()(
       }),
       clearProfile: () => set({ profile: null, profileComplete: false }),
 
-      // ── Auth actions ─────────────────────────────────────────────────────
       setTgUser: (tgUser) => set({ tgUser }),
       setAuthToken: (authToken) => set({
         authToken,
@@ -192,21 +141,15 @@ export const useScheduleStore = create<ScheduleStore>()(
       }),
       setTgAuthReady: (tgAuthReady) => set({ tgAuthReady }),
 
-      // ── Settings actions ─────────────────────────────────────────────────
       updateSettings: (patch) => set((state) => ({
         settings: { ...state.settings, ...patch },
       })),
 
-      // ── Favorites actions ─────────────────────────────────────────────────
       setFavorites: (favorites) => set({ favorites }),
 
-      // groupConfirmed: false,
-
-      // ── Grade badge actions ───────────────────────────────────────────────
       updateGradeSnapshot: (courses) => {
         if (typeof window === 'undefined') return
         const SNAP_KEY = 'ncfu_grade_snapshot'
-        // Строим плоский словарь: { "lessonTypeId_lessonId": gradeText }
         const buildSnapshot = (cs: any[]): Record<string, string> => {
           const snap: Record<string, string> = {}
           for (const course of cs) {
@@ -226,7 +169,6 @@ export const useScheduleStore = create<ScheduleStore>()(
           prevSnap = JSON.parse(localStorage.getItem(SNAP_KEY) || '{}')
         } catch { /* */ }
 
-        // Считаем новые оценки — те чьего ключа не было в старом снапшоте
         let newCount = 0
         for (const key of Object.keys(newSnap)) {
           if (!prevSnap[key]) newCount++
@@ -238,14 +180,7 @@ export const useScheduleStore = create<ScheduleStore>()(
 
       clearNewGrades: () => set({ newGradesCount: 0 }),
 
-      // ── Apply server settings ─────────────────────────────────────────────
       applyServerSettings: (s) => {
-        // DEBUG: убрать после подтверждения работы
-        console.log('[store] applyServerSettings received:', {
-          profile_group_confirmed: (s as any).profile_group_confirmed,
-          profile_group_name: (s as any).profile_group_name,
-          profile_role: (s as any).profile_role,
-        })
         const current = get()
         const newSettings: Partial<UiSettings> = {}
 
@@ -255,7 +190,6 @@ export const useScheduleStore = create<ScheduleStore>()(
         if (s.theme           !== undefined) newSettings.theme           = String(s.theme)
         if (s.accent_color    !== undefined) newSettings.accent_color    = String(s.accent_color)
 
-        // Восстанавливаем profile из server settings (если не установлен локально)
         let profileUpdate: Partial<ScheduleStore> = {}
         if (!current.profileComplete && s.profile_role) {
           const role = s.profile_role as UserRole
@@ -266,7 +200,6 @@ export const useScheduleStore = create<ScheduleStore>()(
             teacherId:   (s.profile_teacher_id  as number  | null) ?? null,
             teacherName: (s.profile_teacher_name as string | null) ?? null,
           }
-          // setProfile логика
           profileUpdate = {
             profile:         restoredProfile,
             profileComplete: true,
@@ -286,8 +219,7 @@ export const useScheduleStore = create<ScheduleStore>()(
         set((state) => ({
           settings: { ...state.settings, ...newSettings },
           // groupConfirmed: confirmed если сервер явно сказал true
-          // ИЛИ если есть profile_group_name но нет явного false
-          // (покрывает старые записи где флаг ещё не был записан)
+          // ИЛИ если есть profile_group_name но нет явного false (покрывает старые записи где флаг ещё не был записан)
           groupConfirmed: (s as any).profile_group_confirmed === true
             || ((s as any).profile_group_confirmed !== false && !!(s as any).profile_group_name),
           ...profileUpdate,
@@ -310,7 +242,7 @@ export const useScheduleStore = create<ScheduleStore>()(
         tgUser:          state.tgUser,   // кешируем для быстрого рендера
         favorites:       state.favorites,
         settings:        state.settings,
-        // groupConfirmed НЕ персистируем — всегда читается с сервера при initAuth
+        // groupConfirmed НЕ персистируем — всегда читается с сервера
       }),
     }
   )

@@ -1,12 +1,3 @@
-"""
-Auth REST API router — HARDENED.
-
-Security changes:
-  [S1] Refresh token rotation — old token invalidated on use
-  [S2] TOTP enforcement — when user has totp_enabled, 2FA is required
-  [S3] Role validation on admin user update — prevents privilege escalation
-  [S4] Refresh token revocation on user block
-"""
 from __future__ import annotations
 
 import secrets
@@ -33,19 +24,17 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _utcnow = lambda: datetime.now(timezone.utc)  # noqa: E731
 
 
-# ── Request / Response schemas ────────────────────────────────────────────────
-
 class TelegramLoginRequest(BaseModel):
     init_data: str
     dpop_jwk: Optional[dict] = None
-    totp_code: Optional[str] = None  # [S2] TOTP code for 2FA
+    totp_code: Optional[str] = None
 
 
 class TokenResponse(BaseModel):
     access_token: str
     refresh_token: str
     token_type: str = "Bearer"
-    expires_in: int = 3600  # 1 hour
+    expires_in: int = 3600
     totp_required: bool = False
 
 
@@ -89,8 +78,6 @@ class AdminUpdateUserRequest(BaseModel):
     block_reason: Optional[str] = Field(default=None, max_length=500)
 
 
-# ── Activity log helper ───────────────────────────────────────────────────────
-
 async def _log(
     action: str,
     user: Optional[AuthUser] = None,
@@ -112,10 +99,7 @@ async def _log(
         logger.warning(f"Activity log insert failed: {exc}")
 
 
-# ── [S1] Refresh token tracking ──────────────────────────────────────────────
-
 async def _store_refresh_jti(user_id: str, jti: str) -> None:
-    """Store refresh token JTI in Redis for revocation tracking."""
     try:
         from app.cache.redis import get_redis
         r = get_redis()
@@ -128,7 +112,6 @@ async def _store_refresh_jti(user_id: str, jti: str) -> None:
 
 
 async def _validate_refresh_jti(jti: str, user_id: str) -> bool:
-    """Check if a refresh token JTI is still valid (not revoked/rotated)."""
     try:
         from app.cache.redis import get_redis
         r = get_redis()
@@ -142,7 +125,6 @@ async def _validate_refresh_jti(jti: str, user_id: str) -> bool:
 
 
 async def _invalidate_refresh_jti(jti: str) -> None:
-    """Invalidate a used refresh token (rotation)."""
     try:
         from app.cache.redis import get_redis
         r = get_redis()
@@ -150,8 +132,6 @@ async def _invalidate_refresh_jti(jti: str) -> None:
     except Exception:
         pass
 
-
-# ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/telegram/login", response_model=TokenResponse)
 async def telegram_login(
@@ -190,7 +170,6 @@ async def telegram_login(
     if user.is_blocked:
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"Account blocked: {user.block_reason}")
 
-    # [S2] TOTP check
     if user.totp_enabled and user.totp_secret:
         if not body.totp_code:
             return TokenResponse(
@@ -199,7 +178,6 @@ async def telegram_login(
                 totp_required=True,
                 expires_in=0,
             )
-        # Validate TOTP
         try:
             import pyotp
             totp = pyotp.TOTP(user.totp_secret)
@@ -213,7 +191,6 @@ async def telegram_login(
 
     background.add_task(_download_and_save_avatar, user)
 
-    # DPoP key thumbprint
     jkt: Optional[str] = None
     if body.dpop_jwk:
         from app.auth.security import _jwk_thumbprint
@@ -225,7 +202,6 @@ async def telegram_login(
     access  = create_access_token(str(user.id), tg_id, user.roles, jkt=jkt)
     refresh = create_refresh_token(str(user.id), tg_id)
 
-    # [S1] Store refresh token JTI for rotation tracking
     try:
         import jwt as _jwt2
         refresh_payload = _jwt2.decode(refresh, options={"verify_signature": False})
@@ -249,7 +225,6 @@ async def _download_and_save_avatar(user: AuthUser) -> None:
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(body: RefreshRequest):
-    """[S1] Refresh with rotation — old token invalidated."""
     try:
         payload = decode_access_token(body.refresh_token)
     except Exception:
@@ -261,7 +236,6 @@ async def refresh_token(body: RefreshRequest):
     user_id = payload.get("sub")
     old_jti = payload.get("jti", "")
 
-    # [S1] Validate the refresh token JTI hasn't been revoked
     if old_jti and not await _validate_refresh_jti(old_jti, user_id):
         logger.warning(f"Refresh token reuse detected for user {user_id}")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Refresh token has been revoked")
@@ -273,7 +247,6 @@ async def refresh_token(body: RefreshRequest):
     access  = create_access_token(str(user.id), user.tg_id, user.roles)
     refresh = create_refresh_token(str(user.id), user.tg_id)
 
-    # [S1] Invalidate old refresh token and store new one
     if old_jti:
         await _invalidate_refresh_jti(old_jti)
     try:
@@ -308,8 +281,6 @@ async def get_me(user: AuthUser = Depends(get_current_user)):
         created_at=user.created_at,
     )
 
-
-# ── API Keys ──────────────────────────────────────────────────────────────────
 
 @router.post("/keys", response_model=ApiKeyResponse)
 async def create_api_key(
@@ -377,8 +348,6 @@ async def revoke_api_key(
     background.add_task(_log, "api_key_revoked", user, request, {"key_id": key_id})
 
 
-# ── Admin endpoints ───────────────────────────────────────────────────────────
-
 @router.get("/admin/users", response_model=list[UserResponse])
 async def admin_users(
     q: Optional[str] = None,
@@ -416,7 +385,6 @@ async def admin_update_user(
 
     changes: dict = {}
 
-    # [S3] Role validation
     if body.roles is not None:
         admin_perms = await _user_permissions(admin)
         if str(admin.id) == user_id:
@@ -431,7 +399,6 @@ async def admin_update_user(
     if body.is_blocked is not None:
         user.is_blocked = body.is_blocked
         changes["is_blocked"] = body.is_blocked
-        # [S4] Revoke tokens on block
         if body.is_blocked:
             try:
                 from app.cache.redis import get_redis

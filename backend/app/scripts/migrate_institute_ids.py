@@ -1,23 +1,11 @@
 #!/usr/bin/env python3
+#!/usr/bin/env python3
 """
-migrate_institute_ids.py
-────────────────────────
-Backfills `institute_ids` and `institute_names` on:
-  - rooms      (Room collection)
-  - teachers   (Teacher collection)
-
-Стратегия получения данных (два источника, combined):
-  1. LessonDoc.institute_id/institute_name — наиболее точно, но может быть NULL
-     у старых записей.
-  2. Фоллбек через Group — Group.group_id → Group.institute_id/name.
-     Если LessonDoc.institute_id = NULL, используем institute_id группы из lesson.
+Backfills institute_ids/institute_names on rooms and teachers from LessonDoc.
+Falls back to Group.institute_id when LessonDoc.institute_id is NULL.
 
 Usage:
-    cd backend
-    python scripts/migrate_institute_ids.py            # применить
-    python scripts/migrate_institute_ids.py --dry-run  # проверить без записи
-
-Requires MONGO_URL env var (or .env file at project root).
+    python scripts/migrate_institute_ids.py [--dry-run]
 """
 import asyncio
 import argparse
@@ -26,7 +14,6 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-# ── path setup ────────────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from dotenv import load_dotenv
@@ -76,19 +63,17 @@ async def build_institute_maps(
     async for lesson in LessonDoc.find_all():
         total += 1
 
-        # Определяем institute_id/name: прямо или через группу
         iid   = lesson.institute_id
         iname = lesson.institute_name
 
         if not iid or not iname:
-            # Фоллбек: берём из group
             fb = group_inst_map.get(lesson.group_id)
             if fb:
                 iid, iname = fb
                 fallback_used += 1
 
         if not iid or not iname:
-            continue  # нет данных ни там, ни там
+            continue
 
         if lesson.room_id:
             room_inst[lesson.room_id][iid] = iname
@@ -116,7 +101,6 @@ async def migrate_rooms(room_inst: dict[int, dict[int, str]], dry_run: bool):
         new_ids   = sorted(mapping.keys())
         new_names = [mapping[i] for i in new_ids]
 
-        # Пропускаем если уже актуально
         if sorted(room.institute_ids) == new_ids and sorted(room.institute_names) == sorted(new_names):
             skipped += 1
             continue
@@ -211,14 +195,11 @@ async def main(dry_run: bool):
         document_models=[Room, Teacher, Group, LessonDoc],
     )
 
-    # Шаг 0: бекфилл source_url на teacher'ов (новое поле)
     await migrate_teacher_source_url(client[db_name], dry_run)
 
-    # Шаг 1: строим маппинги
     group_inst_map = await build_group_institute_map()
     room_inst, teacher_inst = await build_institute_maps(group_inst_map)
 
-    # Шаг 2: обновляем коллекции
     await migrate_rooms(room_inst, dry_run)
     await migrate_teachers(teacher_inst, dry_run)
 

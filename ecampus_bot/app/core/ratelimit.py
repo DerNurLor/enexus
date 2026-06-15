@@ -1,10 +1,3 @@
-"""
-Redis-based rate limiting — HARDENED.
-
-Security changes:
-  [S1] X-Forwarded-For validation — only trust from known proxies
-  [S2] Graceful Redis failure handling
-"""
 from __future__ import annotations
 
 from typing import Literal, Optional
@@ -17,7 +10,6 @@ from app.core.config import settings
 
 RateLimitKind = Literal["user", "anon", "bot"]
 
-# ── Role-based RPM override cache (refreshed every 60 s) ─────────────────────
 import time as _time
 _rpm_cache: dict[str, Optional[int]] = {}
 _rpm_cache_ts: float = 0.0
@@ -49,8 +41,6 @@ async def _get_user_rpm(roles: list[str]) -> int:
     return best
 
 
-# ── Core check ───────────────────────────────────────────────────────────────
-
 async def check_rate_limit(
     redis_key: str,
     rpm: int,
@@ -70,11 +60,8 @@ async def check_rate_limit(
     except HTTPException:
         raise
     except Exception as exc:
-        # [S2] Never let Redis errors block requests
         logger.warning(f"Rate limit check failed (key={redis_key}): {exc}")
 
-
-# ── FastAPI dependency factories ──────────────────────────────────────────────
 
 def rate_limit_user():
     async def dep(request: Request) -> None:
@@ -95,8 +82,6 @@ def rate_limit_anon():
     return dep
 
 
-# ── Bot rate limiting ──────────────────────────────────────────────────────────
-
 async def check_bot_rate_limit(tg_id: int) -> bool:
     r = get_redis()
     key = f"rl:bot:{tg_id}:{_bucket()}"
@@ -110,14 +95,11 @@ async def check_bot_rate_limit(tg_id: int) -> bool:
         return True
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
 def _bucket() -> str:
     import datetime
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M")
 
 
-# [S1] Trusted proxy IPs for X-Forwarded-For
 _TRUSTED_PROXIES = {
     "127.0.0.1", "::1",
     # Docker default bridge network
@@ -126,7 +108,6 @@ _TRUSTED_PROXIES = {
 
 
 def _is_trusted_proxy(ip: str) -> bool:
-    """Check if IP is a known proxy/container IP."""
     import ipaddress
     try:
         addr = ipaddress.ip_address(ip)
@@ -143,23 +124,15 @@ def _is_trusted_proxy(ip: str) -> bool:
 
 
 def _get_ip(request: Request) -> str:
-    """
-    [S1] Extract client IP with proxy trust validation.
-    Only trusts X-Forwarded-For from known proxy IPs.
-    """
     client_ip = request.client.host if request.client else "unknown"
 
-    # Only trust XFF if the direct connection is from a known proxy
     if _is_trusted_proxy(client_ip):
         forwarded = request.headers.get("X-Forwarded-For")
         if forwarded:
-            # Take the leftmost (client) IP
             return forwarded.split(",")[0].strip()
 
     return client_ip
 
-
-# ── Flush the RPM cache ──────────────────────────────────────────────────────
 
 def flush_rpm_cache() -> None:
     global _rpm_cache_ts

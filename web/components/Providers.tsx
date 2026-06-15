@@ -38,7 +38,6 @@ function TgAuthInit() {
   } = useScheduleStore()
 
   useEffect(() => {
-    // Таймаут 10 сек — если сеть совсем плохая, не блокируем рендер
     const timeout = setTimeout(() => setTgAuthReady(true), 10000)
 
     async function tryAuth(attempt = 0): Promise<void> {
@@ -55,7 +54,6 @@ function TgAuthInit() {
         setTgAuthReady(true)
       } catch {
         if (attempt === 0) {
-          // Плохая сеть — ждём 2 сек и пробуем ещё раз
           setTimeout(() => tryAuth(1), 2000)
         } else {
           clearTimeout(timeout)

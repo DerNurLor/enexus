@@ -10,14 +10,12 @@ ROUTER_PATH = "/opt/ncfu/backend/app/ecampus/router.py"
 with open(ROUTER_PATH, "r") as f:
     content = f.read()
 
-# 1. Добавляем импорт solver
 if "captcha_solver" not in content:
     content = content.replace(
         "from app.auth.dependencies import get_current_user",
         "from app.auth.dependencies import get_current_user\nfrom app.ecampus.captcha_solver import solve_math_captcha"
     )
 
-# 2. Добавляем эндпоинт /captcha/solve после /captcha
 SOLVE_ENDPOINT = '''
 
 @router.get("/captcha/solve")
@@ -36,7 +34,6 @@ async def solve_captcha_auto(current_user: AuthUser = Depends(get_current_user))
     ecampus_base = "https://ecampus.ncfu.ru"
 
     async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-        # Получаем страницу логина для csrf + captcha cookie
         login_page = await client.get(f"{ecampus_base}/account/login")
         csrf_token = ""
         from bs4 import BeautifulSoup
@@ -45,13 +42,11 @@ async def solve_captcha_auto(current_user: AuthUser = Depends(get_current_user))
         if csrf_el:
             csrf_token = csrf_el.get("value", "")
 
-        # Получаем картинку капчи
         captcha_resp = await client.get(f"{ecampus_base}/Captcha/Captcha")
         if not captcha_resp.is_success:
             raise HTTPException(status_code=502, detail="Не удалось получить капчу с eCampus.")
 
         image_bytes = captcha_resp.content
-        # Сохраняем captcha cookie
         captcha_cookie = dict(client.cookies).get("captcha", "")
 
     # Решаем через 2captcha
@@ -66,13 +61,10 @@ async def solve_captcha_auto(current_user: AuthUser = Depends(get_current_user))
     }
 '''
 
-# Вставляем после существующего get_captcha эндпоинта
 if "/captcha/solve" not in content:
-    # Ищем конец get_captcha функции
     insert_after = "@router.get(\"/captcha\")"
     idx = content.find(insert_after)
     if idx > 0:
-        # Находим следующий @router после get_captcha
         next_router = content.find("\n@router.", idx + len(insert_after))
         if next_router > 0:
             content = content[:next_router] + SOLVE_ENDPOINT + content[next_router:]

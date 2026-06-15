@@ -36,14 +36,10 @@ class AuthUser(Document):
     last_active: datetime = Field(default_factory=datetime.utcnow)
     miniapp_favorites: list[dict] = Field(default_factory=list)
     miniapp_settings:  dict       = Field(default_factory=dict)
-    # TOTP 2FA
-    totp_secret:    Optional[str] = None   # base32 secret (set when 2FA is enabled)
+    totp_secret:    Optional[str] = None
     totp_enabled:   bool = False
-    # Per-user direct permissions (added on top of role permissions)
     extra_permissions: list[str] = Field(default_factory=list)
-    # UI preferences
-    accent_color: str = "#7c6eff"   # hex color for dashboard/miniapp theming
-    # Per-user limits (None = use global default from settings)
+    accent_color: str = "#7c6eff"
     daily_requests:       Optional[int] = None
     monthly_ai_tokens:    Optional[int] = None
     ai_tokens_used_today: int = 0

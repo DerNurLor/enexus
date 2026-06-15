@@ -7,11 +7,9 @@ with open(CONFIG_PATH, "r") as f:
     content = f.read()
 
 if "twocaptcha_api_key" not in content:
-    # Добавляем после ecampus_encryption_key или любого похожего поля
     for search in ["ecampus_encryption_key", "jwt_secret", "telegram_bot_token"]:
         idx = content.find(search)
         if idx > 0:
-            # Находим конец строки
             end = content.find("\n", idx)
             content = content[:end+1] + '    twocaptcha_api_key: str = ""\n' + content[end+1:]
             print(f"Added twocaptcha_api_key after {search}")
