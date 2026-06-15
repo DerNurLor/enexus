@@ -1,14 +1,3 @@
-"""
-ecampus_bot/app/main.py
-
-Telegram bot service — receives webhook updates, processes AI intents,
-serves schedule info to users via Telegram.
-
-Depends on:
-  - BACKEND_URL (GraphQL API for schedule queries)
-  - Shared MongoDB (ncfu_auth) for users, feedback, conversations
-  - Shared Redis for caching and rate limiting
-"""
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
 from loguru import logger
@@ -54,14 +43,12 @@ def create_app() -> FastAPI:
         redoc_url=None,
     )
 
-    # ── Webhook endpoint ──────────────────────────────────────────────────────
     @app.post("/webhook/telegram", include_in_schema=False)
     async def telegram_webhook(request: Request) -> Response:
         import hmac, hashlib
         from aiogram import Bot
         from app.bot import get_bot, get_dp
 
-        # [V3] HMAC verification
         secret = settings.get_telegram_webhook_secret()
         if secret:
             token_header = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
@@ -83,7 +70,6 @@ def create_app() -> FastAPI:
         await dp.feed_update(bot, update)
         return Response(status_code=200)
 
-    # ── Ops ───────────────────────────────────────────────────────────────────
     @app.get("/health", tags=["ops"])
     async def health():
         return {"status": "ok", "env": settings.app_env, "service": "bot"}

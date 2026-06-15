@@ -1,10 +1,3 @@
-"""
-backend/app/models/campus.py
-
-Модель здания/объекта кампуса СКФУ.
-Данные загружаются с https://ncfu.ru/api/campuses/list.php
-и хранятся в MongoDB коллекции `campuses`.
-"""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -42,15 +35,15 @@ class Campus(Document):
     city_title:  str
     en_city_title: str = ""
 
-    title:       str          # короткое (например "1", "6А", "Библиотека")
-    full_title:  str          # полное название
+    title:       str
+    full_title:  str
     en_title:    str = ""
     en_full_title: str = ""
 
     address:     str
     en_address:  str = ""
 
-    photo:       str = ""     # URL фото
+    photo:       str = ""
     lat:         Optional[float] = None
     lon:         Optional[float] = None
 
@@ -66,6 +59,5 @@ class Campus(Document):
             IndexModel([("city_id",   ASCENDING)]),
             IndexModel([("type.id",   ASCENDING)]),
             IndexModel([("lat", ASCENDING), ("lon", ASCENDING)]),
-            # Составной — быстрый запрос «все корпуса города»
             IndexModel([("city_id", ASCENDING), ("type.id", ASCENDING)]),
         ]

@@ -1,14 +1,3 @@
-"""
-Auth database models — stored in a SEPARATE database (ncfu_auth).
-
-ИСПРАВЛЕНИЯ:
-  [F1] Все datetime.utcnow() заменены на datetime.now(timezone.utc) —
-       utcnow() deprecated в Python 3.12 и создаёт naive datetime, что ломает
-       сравнения с timezone-aware объектами из security.py.
-  [F2] has_permission() реализован — ранее всегда возвращал False.
-  [F3] Опечатка в аннотации tg_id: Indexed(int, unique=True)  # type: ignore[/valid-type]
-       — исправлена на valid-type.
-"""
 from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -17,7 +6,6 @@ from pydantic import Field
 from pymongo import ASCENDING, DESCENDING, IndexModel
 
 
-# [F1] Заменяем устаревший utcnow на timezone-aware версию
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -27,7 +15,7 @@ class AuthRole(Document):
     description: str = ""
     permissions: list[str] = Field(default_factory=list)
     rate_limit_rpm: Optional[int] = None
-    created_at: datetime = Field(default_factory=_utcnow)  # [F1]
+    created_at: datetime = Field(default_factory=_utcnow)
 
     class Settings:
         name = "auth_roles"
@@ -35,7 +23,7 @@ class AuthRole(Document):
 
 
 class AuthUser(Document):
-    tg_id: Indexed(int, unique=True)  # type: ignore[valid-type]  [F3] исправлена опечатка /valid-type
+    tg_id: Indexed(int, unique=True)  # type: ignore[valid-type]
     username: Optional[str] = None
     first_name: str = ""
     last_name: Optional[str] = None
@@ -45,18 +33,13 @@ class AuthUser(Document):
     roles: list[str] = Field(default_factory=lambda: ["user"])
     is_blocked: bool = False
     block_reason: Optional[str] = None
-    created_at: datetime = Field(default_factory=_utcnow)     # [F1]
-    last_active: datetime = Field(default_factory=_utcnow)    # [F1]
-    miniapp_favorites: list[dict] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=_utcnow)       last_active: datetime = Field(default_factory=_utcnow)      miniapp_favorites: list[dict] = Field(default_factory=list)
     miniapp_settings:  dict       = Field(default_factory=dict)
-    # TOTP 2FA
     totp_secret:    Optional[str] = None
     totp_enabled:   bool = False
     # Per-user direct permissions (added on top of role permissions)
     extra_permissions: list[str] = Field(default_factory=list)
-    # UI preferences
     accent_color: str = "#7c6eff"
-    # Per-user limits
     daily_requests:       Optional[int] = None
     monthly_ai_tokens:    Optional[int] = None
     ai_tokens_used_today: int = 0
@@ -71,11 +54,8 @@ class AuthUser(Document):
             IndexModel([("is_blocked", ASCENDING)]),
         ]
 
-    # [F2] Реализован метод — ранее всегда возвращал False
     def has_permission(self, permission: str) -> bool:
-        """Синхронная проверка прямых (extra) прав пользователя.
-        Для проверки прав через роли используй _user_permissions() из dependencies.py.
-        """
+        """Checks direct extra_permissions only; use _user_permissions() from dependencies for role-based checks."""
         return permission in self.extra_permissions
 
 
@@ -88,8 +68,7 @@ class AuthApiKey(Document):
     rate_limit_rpm: int = 60
     expires_at: Optional[datetime] = None
     is_revoked: bool = False
-    created_at: datetime = Field(default_factory=_utcnow)  # [F1]
-    last_used_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=_utcnow)    last_used_at: Optional[datetime] = None
     use_count: int = 0
 
     class Settings:
@@ -110,8 +89,7 @@ class AuthActivityLog(Document):
     ip: Optional[str] = None
     user_agent: Optional[str] = None
     details: dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=_utcnow)  # [F1]
-
+    timestamp: datetime = Field(default_factory=_utcnow)
     class Settings:
         name = "auth_activity_log"
         indexes = [
@@ -131,8 +109,7 @@ class AuthErrorLog(Document):
     request_id: Optional[str] = None
     path: Optional[str] = None
     details: dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=_utcnow)  # [F1]
-    error_id: Optional[str] = None
+    timestamp: datetime = Field(default_factory=_utcnow)    error_id: Optional[str] = None
     tg_id: Optional[int] = None
     tg_chat_id: Optional[int] = None
     user_text: Optional[str] = None
@@ -153,8 +130,7 @@ class AuthErrorLog(Document):
 class BotConversation(Document):
     tg_id: Indexed(int, unique=True)  # type: ignore[valid-type]
     messages: list[dict] = Field(default_factory=list)
-    updated_at: datetime = Field(default_factory=_utcnow)  # [F1]
-
+    updated_at: datetime = Field(default_factory=_utcnow)
     class Settings:
         name = "bot_conversations"
         indexes = [
@@ -167,8 +143,7 @@ class ChatMessage(Document):
     tg_id:      Indexed(int)   # type: ignore[valid-type]
     message_id: int
     role:       str
-    timestamp:  datetime = Field(default_factory=_utcnow)  # [F1]
-
+    timestamp:  datetime = Field(default_factory=_utcnow)
     text:      str  = ""
     html_text: str  = ""
 
@@ -221,8 +196,7 @@ class SupportTicket(Document):
     close_reason: Optional[str] = None
     close_reason_hidden: bool = False
     closed_by: Optional[str] = None
-    created_at: datetime = Field(default_factory=_utcnow)  # [F1]
-
+    created_at: datetime = Field(default_factory=_utcnow)
     @property
     def short_id(self) -> str:
         return str(self.id)[:8] if self.id else "?"
@@ -246,8 +220,7 @@ class BroadcastJob(Document):
     sent_count: int = 0
     total_count: int = 0
     created_by: Optional[str] = None
-    created_at: datetime = Field(default_factory=_utcnow)  # [F1]
-    started_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=_utcnow)    started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
 
     class Settings:
@@ -260,8 +233,7 @@ class BroadcastJob(Document):
 
 class AuthDPoPNonce(Document):
     nonce: Indexed(str, unique=True)  # type: ignore[valid-type]
-    issued_at: datetime = Field(default_factory=_utcnow)  # [F1]
-    used: bool = False
+    issued_at: datetime = Field(default_factory=_utcnow)    used: bool = False
 
     class Settings:
         name = "auth_dpop_nonces"
@@ -282,9 +254,7 @@ class BotFeedback(Document):
     rating: Optional[str] = None
     status: str = "pending"
 
-    created_at: datetime = Field(default_factory=_utcnow)  # [F1]
-    updated_at: datetime = Field(default_factory=_utcnow)  # [F1]
-
+    created_at: datetime = Field(default_factory=_utcnow)    updated_at: datetime = Field(default_factory=_utcnow)
     class Settings:
         name = "bot_feedback"
         indexes = [

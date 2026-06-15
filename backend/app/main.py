@@ -1,11 +1,3 @@
-"""
-backend/app/main.py
-
-Pure API service — GraphQL schedule API, REST routes, Dashboard, Scraper/Scheduler.
-Bot and MiniApp have been extracted to their own services (ecampus_bot, miniapp).
-
-Services communicate via shared MongoDB + Redis.
-"""
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -33,7 +25,6 @@ async def lifespan(app: FastAPI):
     from app.scheduler.scheduler import start_ecampus_worker
     await start_ecampus_worker()
 
-    # Загружаем данные кампусов при старте если коллекция пуста
     try:
         from app.scraper.campus_scraper import ensure_campuses_loaded
         await ensure_campuses_loaded()
@@ -131,13 +122,10 @@ def create_app() -> FastAPI:
     for route in [groups, institutes, overview, rooms, schedules, scrape, search, teachers]:
         app.include_router(route.router)
 
-    # ── Campuses API ────────────────────────────────────────────────────────
     from app.api.routes.campuses import router as campuses_router
     app.include_router(campuses_router)
 
-    # ── /api/v1/ — версионированный алиас (обратно совместим, не ломает старые клиенты)
-    # Nginx rewrite снимает /api/ prefix → backend получает /schedules/*, /overview/* и т.д.
-    # Новые клиенты могут явно указывать /api/v1/ — маршруты те же самые.
+    # /api/v1/ alias: nginx strips /api/ prefix before forwarding; new clients can use /api/v1/ explicitly.
     from fastapi import APIRouter as _ARv1
     _v1 = _ARv1(prefix="/api/v1", tags=["v1"])
     for route in [groups, institutes, overview, rooms, schedules, scrape, search, teachers]:

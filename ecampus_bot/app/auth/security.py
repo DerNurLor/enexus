@@ -1,11 +1,3 @@
-"""
-JWT (short-lived, 1h) + DPoP (RFC 9449) token binding — HARDENED.
-
-Security changes:
-  [S1] Fernet KDF uses PBKDF2 with proper salt instead of raw SHA-256
-  [S2] Token creation uses timezone-aware datetimes
-  [S3] Added token JTI generation for refresh token tracking
-"""
 from __future__ import annotations
 
 import base64
@@ -32,15 +24,12 @@ from app.core.config import settings
 _utcnow = lambda: datetime.now(timezone.utc)  # noqa: E731
 
 
-# ── JWT access tokens ─────────────────────────────────────────────────────────
-
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS   = 30
 ALGORITHM                   = "HS256"
 
 
 def _get_jwt_secret() -> str:
-    """Unwrap SecretStr safely."""
     secret = settings.jwt_secret
     if hasattr(secret, "get_secret_value"):
         return secret.get_secret_value()
@@ -84,8 +73,6 @@ def create_refresh_token(user_id: str, tg_id: int) -> str:
 def decode_access_token(token: str) -> dict[str, Any]:
     return _jwt.decode(token, _get_jwt_secret(), algorithms=[ALGORITHM])
 
-
-# ── DPoP helpers (RFC 9449) ───────────────────────────────────────────────────
 
 def _b64url_decode(s: str) -> bytes:
     s += "=" * (-len(s) % 4)
@@ -172,8 +159,6 @@ def issue_dpop_nonce() -> str:
     return secrets.token_urlsafe(32)
 
 
-# ── Telegram initData validation ──────────────────────────────────────────────
-
 import hmac
 import urllib.parse
 
@@ -210,8 +195,6 @@ def validate_telegram_init_data(init_data: str, bot_token: str) -> Optional[dict
         return None
 
 
-# ── API key helpers ───────────────────────────────────────────────────────────
-
 import bcrypt
 
 
@@ -229,10 +212,7 @@ def verify_api_key(raw_key: str, key_hash: str) -> bool:
         return False
 
 
-# ── [S1] Fernet encryption with proper KDF ──────────────────────────────────
-
 def _get_fernet():
-    """Return a Fernet instance using PBKDF2-derived key from JWT secret."""
     try:
         from cryptography.fernet import Fernet
         from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
@@ -242,8 +222,7 @@ def _get_fernet():
         if not jwt_secret:
             return None
 
-        # Use a fixed salt derived from the secret itself (deterministic)
-        # This allows decryption across restarts without storing the salt separately
+        # Fixed salt derived from the secret itself (deterministic) — allows decryption across restarts without storing the salt separately
         salt = hashlib.sha256(b"ncfu-fernet-salt:" + jwt_secret[:8].encode()).digest()[:16]
 
         kdf = PBKDF2HMAC(

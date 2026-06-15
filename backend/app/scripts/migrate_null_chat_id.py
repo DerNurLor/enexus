@@ -50,7 +50,6 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from dotenv import load_dotenv
 
 
-# ── Config ────────────────────────────────────────────────────────────────────
 
 load_dotenv()
 
@@ -59,8 +58,6 @@ AUTH_MONGO_DB = os.getenv("AUTH_MONGO_DB", "ncfu_auth")
 COLLECTION    = "conversations"
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%H:%M:%S")
 
@@ -68,13 +65,11 @@ def log(msg: str) -> None:
     print(f"[{_now()}] {msg}")
 
 
-# ── Main migration ─────────────────────────────────────────────────────────────
 
 async def run(dry_run: bool, delete_orphans: bool) -> None:
     client = AsyncIOMotorClient(MONGO_URI)
     col    = client[AUTH_MONGO_DB][COLLECTION]
 
-    # -- Count scope ----------------------------------------------------------
     total_null = await col.count_documents({"chat_id": None})
     log(f"Documents with chat_id=null: {total_null}")
     if total_null == 0:
@@ -82,7 +77,6 @@ async def run(dry_run: bool, delete_orphans: bool) -> None:
         client.close()
         return
 
-    # -- Separate fixable from orphaned ---------------------------------------
     fixable  = await col.count_documents({"chat_id": None, "tg_id": {"$ne": None}})
     orphaned = await col.count_documents({"chat_id": None, "tg_id": None})
     log(f"  Fixable  (have tg_id): {fixable}")
@@ -91,15 +85,12 @@ async def run(dry_run: bool, delete_orphans: bool) -> None:
     if dry_run:
         log("DRY RUN — no writes will be performed.")
 
-    # -- Fix: set chat_id = tg_id for private-chat messages -------------------
-    # For Telegram private chats, chat.id == user.id, so this is semantically
-    # correct.  We also set chat_type='private' and rebuild chat_key if missing.
+    # For Telegram private chats, chat.id == user.id, so this is semantically correct.
     log("Fixing documents: chat_id ← tg_id, chat_type ← 'private' ...")
 
     fixed = 0
     if not dry_run:
-        # Use updateMany with an aggregation pipeline so we can reference
-        # another field in the same document ($tg_id) in the $set expression.
+        # Use updateMany with an aggregation pipeline so we can reference another field ($tg_id).
         result = await col.update_many(
             {"chat_id": None, "tg_id": {"$ne": None}},
             [
@@ -118,7 +109,6 @@ async def run(dry_run: bool, delete_orphans: bool) -> None:
     else:
         log(f"  Would update {fixable} documents.")
 
-    # -- Handle orphans -------------------------------------------------------
     if orphaned > 0:
         if delete_orphans:
             log(f"Deleting {orphaned} orphaned documents (no chat_id, no tg_id) ...")
@@ -144,7 +134,6 @@ async def run(dry_run: bool, delete_orphans: bool) -> None:
     client.close()
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Fix null chat_id in conversations collection.")

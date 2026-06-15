@@ -1,4 +1,3 @@
-// ── Lesson ────────────────────────────────────────────────────────────────────
 export interface Lesson {
   subject:      string
   lesson_type:  string | null
@@ -18,14 +17,12 @@ export interface Lesson {
   note:         string | null
 }
 
-// ── Day ───────────────────────────────────────────────────────────────────────
 export interface DaySchedule {
   weekday_name: string
   week_number:  number
   lessons:      Lesson[]
 }
 
-// ── Group ─────────────────────────────────────────────────────────────────────
 export interface GroupMeta {
   group_id:        number
   name:            string
@@ -65,7 +62,6 @@ export interface WeekResponse {
   days:  Array<{ date: string; weekday_name: string; week_number: number; lessons: Lesson[] }>
 }
 
-// ── Search ────────────────────────────────────────────────────────────────────
 export interface SearchResults {
   query: string
   results: {
@@ -91,21 +87,18 @@ export interface RoomMeta {
   subjects: string[]
 }
 
-// ── Free Rooms ────────────────────────────────────────────────────────────────
 export interface FreeRoomsResponse {
   rooms: Array<{ roomId: number; name: string; building?: string; capacity?: number }>
   by_building: Record<string, Array<{ name: string; capacity?: number; room_id?: number }>>
   total: number
 }
 
-// ── Institutes ────────────────────────────────────────────────────────────────
 export interface InstituteMeta {
   institute_id: number
   short_name:   string
   name:         string
   buildings:    string[]
 }
-// ── Teacher extended types ────────────────────────────────────────────────────
 export interface TeacherFull extends TeacherMeta {
   lesson_types:  string[]
   group_ids:     number[]

@@ -12,7 +12,6 @@ _redis: Optional[Redis] = None
 
 
 def _orjson_default(obj: Any) -> Any:
-    """Handle types orjson doesn't know: ObjectId, date, datetime, sets."""
     # bson ObjectId — just stringify it
     if hasattr(obj, "__str__") and type(obj).__name__ == "ObjectId":
         return str(obj)

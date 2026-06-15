@@ -35,6 +35,5 @@ async def close_db() -> None:
 
 
 def get_motor_db() -> AsyncIOMotorDatabase:
-    """Возвращает объект базы данных Motor для прямых запросов через коллекции."""
     assert _client is not None, "Database not connected. Call connect_db() first."
     return _client.get_database(settings.mongo_db)

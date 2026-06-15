@@ -1,20 +1,3 @@
-"""
-Activity logging helpers.
-
-All user-visible actions should be logged via log_activity().
-Error events are logged via log_error() (also caught by the global exception handler).
-
-Logging is fire-and-forget (background task) so it never adds latency to
-the request path.
-
-Supported action namespaces:
-  auth.*        login, logout, token_refresh, api_key_created, api_key_revoked
-  bot.*         message, command, rate_limited
-  miniapp.*     search, free_rooms, favorites_add, favorites_remove, settings_update
-  api.*         graphql_query, rest_call
-  admin.*       user_blocked, user_unblocked, role_created, role_updated, role_deleted
-                keys_revoked
-"""
 from __future__ import annotations
 
 import traceback
@@ -26,8 +9,6 @@ from fastapi import BackgroundTasks, Request
 
 log = structlog.get_logger(__name__)
 
-
-# ── Core writer ───────────────────────────────────────────────────────────────
 
 async def _write_activity(
     action: str,
@@ -77,8 +58,6 @@ async def _write_error(
         log.warning("error_log_write_failed", error=str(exc))
 
 
-# ── Public API ────────────────────────────────────────────────────────────────
-
 def log_activity(
     action: str,
     *,
@@ -88,13 +67,7 @@ def log_activity(
     background: Optional[BackgroundTasks] = None,
     details:    Optional[dict]  = None,
 ) -> None:
-    """
-    Fire-and-forget activity log.
-
-    If background tasks are available (FastAPI endpoint), the write is
-    deferred.  Otherwise it's a bare asyncio.ensure_future (bot handlers,
-    cron jobs).
-    """
+    """Fire-and-forget: deferred via BackgroundTasks if available, else asyncio.ensure_future."""
     request_id = None
     ip         = None
     user_agent = None
@@ -139,7 +112,6 @@ def log_bot_message(
     intent: Optional[str] = None,
     user_id: Optional[str] = None,
 ) -> None:
-    """Convenience: log a bot message event."""
     log_activity(
         "bot.message",
         tg_id=tg_id,
@@ -168,7 +140,6 @@ async def log_error_async(
     request:    Optional[Request] = None,
     level:      str = "ERROR",
 ) -> None:
-    """Async version — called from exception handlers."""
     request_id = None
     path       = None
     if request is not None:
@@ -188,14 +159,7 @@ async def log_error_async(
     )
 
 
-# ── Request logging middleware ────────────────────────────────────────────────
-
 class ActivityLoggingMiddleware:
-    """
-    ASGI middleware that logs every HTTP request as a structured event.
-    Attaches request_id, method, path, status, duration.
-    Does NOT log /health or /metrics (too noisy).
-    """
     _SKIP = frozenset(["/health", "/metrics", "/favicon.ico"])
 
     def __init__(self, app):
@@ -230,7 +194,7 @@ class ActivityLoggingMiddleware:
             if isinstance(scope.get("state"), dict):
                 request_id = scope["state"].get("request_id", request_id)
 
-            # Structured log (not stored in Mongo — just stdout)
+            # Not stored in Mongo — stdout only
             log.info(
                 "http.request",
                 method=request.method,
@@ -240,8 +204,6 @@ class ActivityLoggingMiddleware:
                 request_id=request_id,
             )
 
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _get_ip(request: Request) -> str:
     forwarded = request.headers.get("X-Forwarded-For")

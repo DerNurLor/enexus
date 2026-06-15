@@ -1,13 +1,3 @@
-"""
-observability.py — hardened.
-
-Security changes:
-  [V12] SensitiveDataScrubber processor strips tokens, secrets, API keys, and
-        PII from every structured log event before it is emitted.
-  [V14] settings.sentry_dsn accessed via .get_secret_value() — never logged raw.
-        sentry_sdk.init receives the plain string but the value never appears in
-        application logs.
-"""
 from __future__ import annotations
 
 import re
@@ -21,9 +11,6 @@ from loguru import logger
 from app.core.config import settings
 
 
-# ── [V12] Sensitive field scrubber ───────────────────────────────────────────
-
-# Field names whose values are always redacted regardless of content.
 _SENSITIVE_KEYS: frozenset[str] = frozenset({
     "token", "secret", "password", "passwd", "api_key", "apikey",
     "authorization", "auth", "jwt", "access_token", "refresh_token",
@@ -32,7 +19,6 @@ _SENSITIVE_KEYS: frozenset[str] = frozenset({
     "openai_api_key", "mongo_uri", "redis_url",
 })
 
-# Regex patterns that match secret-like values anywhere in a string.
 _SECRET_PATTERNS: list[re.Pattern] = [
     re.compile(r"\d{9,10}:AA[0-9A-Za-z_-]{33}"),          # Telegram bot token
     re.compile(r"sk-[A-Za-z0-9]{32,}"),                    # OpenAI key
@@ -46,7 +32,6 @@ _REDACTED = "**REDACTED**"
 
 
 def _scrub_value(v: Any) -> Any:
-    """Recursively scrub a value if it matches a secret pattern."""
     if isinstance(v, str):
         for pattern in _SECRET_PATTERNS:
             if pattern.search(v):
@@ -62,17 +47,10 @@ def _scrub_value(v: Any) -> Any:
 def _sensitive_data_scrubber(
     logger_: Any, method: str, event_dict: dict[str, Any]
 ) -> dict[str, Any]:
-    """
-    structlog processor: sanitise every key/value in the event dict.
-
-    Applied before the renderer so secrets never reach any sink
-    (stderr, file, Loki, Datadog, etc.).
-    """
+    """Sanitises every key/value before any sink receives it."""
     return {k: _REDACTED if k.lower() in _SENSITIVE_KEYS else _scrub_value(v)
             for k, v in event_dict.items()}
 
-
-# ── App context processor ─────────────────────────────────────────────────────
 
 def _add_app_context(
     logger_: Any, method: str, event_dict: dict[str, Any]
@@ -81,8 +59,6 @@ def _add_app_context(
     event_dict["version"] = "2.0.0"
     return event_dict
 
-
-# ── structlog setup ───────────────────────────────────────────────────────────
 
 def _setup_structlog(level: str) -> None:
     is_dev = settings.app_env in ("development", "dev", "local")
@@ -93,7 +69,7 @@ def _setup_structlog(level: str) -> None:
         structlog.processors.TimeStamper(fmt="iso", utc=True),
         structlog.processors.StackInfoRenderer(),
         _add_app_context,
-        _sensitive_data_scrubber,  # [V12] always last before renderer
+        _sensitive_data_scrubber,  # always last before renderer
     ]
 
     if is_dev:
@@ -120,8 +96,6 @@ def _setup_structlog(level: str) -> None:
     )
 
 
-# ── loguru setup ──────────────────────────────────────────────────────────────
-
 def _setup_loguru(level: str) -> None:
     logger.remove()
     logger.add(
@@ -137,10 +111,7 @@ def _setup_loguru(level: str) -> None:
     )
 
 
-# ── Sentry setup ──────────────────────────────────────────────────────────────
-
 def _setup_sentry() -> None:
-    # [V14] Use get_secret_value() — the raw DSN string never touches a log call.
     dsn = settings.get_sentry_dsn()
     if not dsn:
         return
@@ -167,7 +138,6 @@ def _setup_sentry() -> None:
             before_send=_sentry_filter,
             send_default_pii=False,
         )
-        # [V12/V14] Log only that Sentry is on — never log the DSN itself.
         logger.info("Sentry initialised [environment={}]", settings.app_env)
     except ImportError:
         logger.warning("sentry-sdk not installed — Sentry disabled")
@@ -176,7 +146,6 @@ def _setup_sentry() -> None:
 
 
 def _sentry_filter(event: dict, hint: dict) -> dict | None:
-    """Drop noisy low-value events from Sentry."""
     request = event.get("request", {})
     url = request.get("url", "")
     if url.endswith("/health") or url.endswith("/metrics"):
@@ -187,8 +156,6 @@ def _sentry_filter(event: dict, hint: dict) -> dict | None:
             return None
     return event
 
-
-# ── Public entry point ────────────────────────────────────────────────────────
 
 def setup_observability(level: str = "INFO") -> None:
     """Idempotent — call once at startup."""

@@ -9,7 +9,7 @@ class Teacher(Document):
     teacher_id:      int
     full_name:       str
     short_name:      Optional[str] = None  # derived: Иванов И.И.
-    source_url:      str = "https://ecampus.ncfu.ru"   # portal this teacher belongs to
+    source_url:      str = "https://ecampus.ncfu.ru"
 
     institute_ids:   List[int] = Field(default_factory=list)
     institute_names: List[str] = Field(default_factory=list)

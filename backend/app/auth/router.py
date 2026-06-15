@@ -1,15 +1,3 @@
-"""
-Auth REST API router — HARDENED.
-
-ИСПРАВЛЕНИЯ:
-  [F1] admin_users: переменная q затирала параметр запроса q (query string).
-       Переименована в query / user_query для ясности.
-  [F2] refresh_token: JTI теперь берётся из decode_access_token() (с проверкой подписи),
-       а НЕ через options={"verify_signature": False} — это было уязвимостью.
-  [F3] telegram_login: TOTP-ответ с пустыми токенами заменён на явный 202 статус,
-       чтобы фронтенд не путал пустые токены с реальными.
-  [F4] Добавлен limit на admin_activity_logs (был без ограничения по умолчанию).
-"""
 from __future__ import annotations
 
 import secrets
@@ -35,8 +23,6 @@ from app.core.config import settings
 router = APIRouter(prefix="/auth", tags=["auth"])
 _utcnow = lambda: datetime.now(timezone.utc)  # noqa: E731
 
-
-# ── Request / Response schemas ────────────────────────────────────────────────
 
 class TelegramLoginRequest(BaseModel):
     init_data: str
@@ -92,8 +78,6 @@ class AdminUpdateUserRequest(BaseModel):
     block_reason: Optional[str] = Field(default=None, max_length=500)
 
 
-# ── Activity log helper ───────────────────────────────────────────────────────
-
 async def _log(
     action: str,
     user: Optional[AuthUser] = None,
@@ -114,8 +98,6 @@ async def _log(
     except Exception as exc:
         logger.warning(f"Activity log insert failed: {exc}")
 
-
-# ── Refresh token tracking ────────────────────────────────────────────────────
 
 async def _store_refresh_jti(user_id: str, jti: str) -> None:
     try:
@@ -148,8 +130,6 @@ async def _invalidate_refresh_jti(jti: str) -> None:
     except Exception:
         pass
 
-
-# ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/telegram/login", response_model=TokenResponse)
 async def telegram_login(
@@ -188,10 +168,8 @@ async def telegram_login(
     if user.is_blocked:
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"Account blocked: {user.block_reason}")
 
-    # [F3] TOTP check — возвращаем 202 чтобы фронт знал что нужен 2FA код
     if user.totp_enabled and user.totp_secret:
         if not body.totp_code:
-            # Возвращаем специальный ответ без токенов
             return TokenResponse(
                 access_token="",
                 refresh_token="",
@@ -222,7 +200,6 @@ async def telegram_login(
     access  = create_access_token(str(user.id), tg_id, user.roles, jkt=jkt)
     refresh = create_refresh_token(str(user.id), tg_id)
 
-    # [F2] Извлекаем JTI через decode_access_token (с проверкой подписи)
     try:
         refresh_payload = decode_access_token(refresh)
         await _store_refresh_jti(str(user.id), refresh_payload.get("jti", ""))
@@ -245,7 +222,7 @@ async def _download_and_save_avatar(user: AuthUser) -> None:
 
 @router.post("/refresh", response_model=TokenResponse)
 async def refresh_token(body: RefreshRequest):
-    """Refresh с ротацией — старый токен инвалидируется."""
+    """Refresh with rotation — old token is invalidated."""
     try:
         payload = decode_access_token(body.refresh_token)
     except Exception:
@@ -271,7 +248,6 @@ async def refresh_token(body: RefreshRequest):
     if old_jti:
         await _invalidate_refresh_jti(old_jti)
 
-    # [F2] Используем decode_access_token с проверкой подписи
     try:
         new_payload = decode_access_token(refresh)
         await _store_refresh_jti(str(user.id), new_payload.get("jti", ""))
@@ -303,8 +279,6 @@ async def get_me(user: AuthUser = Depends(get_current_user)):
         created_at=user.created_at,
     )
 
-
-# ── API Keys ──────────────────────────────────────────────────────────────────
 
 @router.post("/keys", response_model=ApiKeyResponse)
 async def create_api_key(
@@ -372,23 +346,18 @@ async def revoke_api_key(
     background.add_task(_log, "api_key_revoked", user, request, {"key_id": key_id})
 
 
-# ── Admin endpoints ───────────────────────────────────────────────────────────
-
 @router.get("/admin/users", response_model=list[UserResponse])
 async def admin_users(
-    # [F1] Переименовали параметр с `q` на `search`, чтобы не затирать переменную query-builder
     search: Optional[str] = Query(None, alias="q"),
     blocked_only: bool = False,
     skip: int = 0,
     limit: int = Query(50, ge=1, le=200),
     _: AuthUser = Depends(require_permission("users:read")),
 ):
-    # [F1] Строим запрос в отдельной переменной user_query (было q — конфликт с параметром)
     user_query = AuthUser.find()
     if blocked_only:
         user_query = AuthUser.find(AuthUser.is_blocked == True)  # noqa: E712
     if search:
-        # Фильтр по username/first_name если нужно
         pass
     users = await user_query.skip(skip).limit(limit).sort("-last_active").to_list()
     return [
@@ -451,7 +420,7 @@ async def admin_activity_logs(
     user_id: Optional[str] = None,
     action: Optional[str] = None,
     skip: int = 0,
-    limit: int = Query(100, ge=1, le=500),  # [F4] добавлен максимум
+    limit: int = Query(100, ge=1, le=500),
     _: AuthUser = Depends(require_permission("logs:read")),
 ):
     filters = []
