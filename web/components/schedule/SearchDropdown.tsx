@@ -61,6 +61,7 @@ export function SearchDropdown({ mode, data, query, onClose, onSelect }: Props) 
           {mode === 'group' && groups.map((g) => (
             <li key={g.group_id}>
               <button className="w-full text-left px-4 py-3 transition-colors hover:bg-white/5 flex items-center justify-between gap-3"
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => { setGroup(g.group_id, g.name); onSelect?.(g.name); onClose() }}>
                 <div>
                   <div className="text-sm font-medium" style={{ color: 'var(--t-primary)' }}>
@@ -81,6 +82,7 @@ export function SearchDropdown({ mode, data, query, onClose, onSelect }: Props) 
           {mode === 'teacher' && teachers.map((t) => (
             <li key={t.teacher_id}>
               <button className="w-full text-left px-4 py-3 transition-colors hover:bg-white/5"
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => { setTeacher(t.teacher_id, t.full_name); onSelect?.(t.full_name); onClose() }}>
                 <div className="text-sm font-medium" style={{ color: 'var(--t-primary)' }}>
                   <Highlight text={t.full_name} query={query} />
@@ -97,6 +99,7 @@ export function SearchDropdown({ mode, data, query, onClose, onSelect }: Props) 
           {mode === 'room' && rooms.map((r) => (
             <li key={r.room_id}>
               <button className="w-full text-left px-4 py-3 transition-colors hover:bg-white/5 flex items-center gap-3"
+                onMouseDown={(e) => e.preventDefault()}
                 onClick={() => { setRoom(r.room_id, r.name); onSelect?.(r.name); onClose() }}>
                 <div>
                   <div className="text-sm font-medium" style={{ color: 'var(--t-primary)' }}>

@@ -12,12 +12,14 @@ import { useScheduleStore } from '@/lib/store'
 import type { UserRole } from '@/lib/store'
 import { api } from '@/lib/api'
 import { saveSettingsToServer, fetchQuota } from '@/lib/auth'
+import { fetchEcampusOverview } from '@/lib/ecampus'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { loginWithBotToken } from '@/lib/auth'
 import { TelegramAuthSection } from '@/components/auth/TelegramAuthSection'
 import { ECampusSection } from '@/components/ecampus/ECampusSection'
 import { ECampusAdminSection } from '@/components/ecampus/ECampusAdminSection'
 import { ZachetkaModal, StatsModal } from '@/components/ecampus/ProfileModals'
+import { useT, SUPPORTED_LANGUAGES, LANGUAGE_NAMES } from '@/lib/i18n'
 
 type OnboardStep = 'choose-mode' | 'choose-role' | 'choose-group' | 'choose-teacher' | 'done'
 
@@ -52,17 +54,19 @@ function RoleBadge({ role }: { role: string }) {
 
 // ── Quota bar ─────────────────────────────────────────────────────────────────
 function QuotaSection({ token }: { token: string | null }) {
-  const { data: quota, isLoading } = useQuery({
+  const { data: quota, isLoading, isError } = useQuery({
     queryKey: ['quota', token],
     queryFn:  fetchQuota,
     enabled:  !!token,
     staleTime: 30_000,
     refetchInterval: 60_000,
+    retry: 1,
   })
 
   if (!token) return null
 
-  const pct = quota && quota.cap > 0 ? Math.min(quota.used / quota.cap * 100, 100) : 0
+  const hasQuota = quota && quota.cap > 0
+  const pct = hasQuota ? Math.min(quota.used / quota.cap * 100, 100) : 0
   const barColor = pct >= 100 ? '#ef4444' : pct >= 70 ? '#f97316' : 'var(--cyan)'
 
   return (
@@ -71,7 +75,7 @@ function QuotaSection({ token }: { token: string | null }) {
         <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--t-muted)' }}>
           Лимит запросов к ИИ
         </p>
-        {quota && (
+        {hasQuota && (
           <span className="text-xs font-mono font-bold" style={{ color: barColor }}>
             {quota.used} / {quota.cap}
           </span>
@@ -79,14 +83,22 @@ function QuotaSection({ token }: { token: string | null }) {
       </div>
       {isLoading ? (
         <div className="h-2 rounded-full animate-pulse" style={{ background: 'var(--border)' }} />
-      ) : quota ? (
+      ) : !hasQuota ? (
+        <p className="text-xs" style={{ color: 'var(--t-muted)' }}>
+          {isError || !quota ? 'Недоступно' : 'Не настроен'}
+        </p>
+      ) : (
         <>
           <div className="relative h-2 rounded-full overflow-hidden mb-2" style={{ background: 'var(--border)' }}>
             <div className="absolute inset-y-0 left-0 rounded-full transition-all duration-500"
               style={{ width: `${pct}%`, background: barColor }} />
           </div>
           <div className="flex justify-between text-[10px]" style={{ color: 'var(--t-muted)' }}>
-            <span>{pct >= 100 ? `🔴 Лимит исчерпан` : `Осталось: ${quota.cap - quota.used}`}</span>
+            <span>
+              {pct >= 100
+                ? '🔴 Лимит исчерпан'
+                : `Осталось: ${quota.cap - quota.used}`}
+            </span>
             <span>
               {quota.ttl_secs > 0
                 ? `Сброс через ${Math.floor(quota.ttl_secs / 3600)}ч ${Math.floor((quota.ttl_secs % 3600) / 60)}м`
@@ -94,8 +106,6 @@ function QuotaSection({ token }: { token: string | null }) {
             </span>
           </div>
         </>
-      ) : (
-        <p className="text-xs" style={{ color: 'var(--t-muted)' }}>Не удалось загрузить данные</p>
       )}
     </div>
   )
@@ -128,6 +138,7 @@ type ThemeValue = 'auto' | 'light' | 'dark'
 
 function SettingsSection() {
   const { settings, updateSettings, isAuthenticated } = useScheduleStore()
+  const { t } = useT()
 
   // debounce сохранения на сервер
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -147,38 +158,53 @@ function SettingsSection() {
   return (
     <div className="card px-5 py-4 mb-4">
       <p className="text-xs font-semibold uppercase tracking-wider mb-1" style={{ color: 'var(--t-muted)' }}>
-        Настройки
+        {t('settings.title')}
       </p>
 
       <ToggleRow
-        label="24-часовой формат"
+        label={t('settings.format_24h')}
         checked={settings.time24h !== false}
         onChange={v => set('time24h', v)}
       />
 
       {/* Theme */}
       <div className="flex items-center justify-between py-3">
-        <p className="text-sm" style={{ color: 'var(--t-primary)' }}>Тема оформления</p>
+        <p className="text-sm" style={{ color: 'var(--t-primary)' }}>{t('settings.theme')}</p>
         <div className="flex gap-2">
-          {(['auto', 'light', 'dark'] as ThemeValue[]).map(t => (
-            <button key={t}
-              onClick={() => set('theme', t)}
+          {(['auto', 'light', 'dark'] as ThemeValue[]).map(th => (
+            <button key={th}
+              onClick={() => set('theme', th)}
               className="w-8 h-8 rounded-lg flex items-center justify-center transition-all"
               style={{
-                background: settings.theme === t ? 'var(--cyan-dim)' : 'var(--border)',
-                border: settings.theme === t ? '1.5px solid var(--cyan)' : '1.5px solid transparent',
+                background: settings.theme === th ? 'var(--cyan-dim)' : 'var(--border)',
+                border: settings.theme === th ? '1.5px solid var(--cyan)' : '1.5px solid transparent',
               }}>
-              {t === 'auto' ? <SunMoon size={14} style={{ color: settings.theme === t ? 'var(--cyan)' : 'var(--t-muted)' }} />
-                : t === 'light' ? <Sun size={14} style={{ color: settings.theme === t ? 'var(--cyan)' : 'var(--t-muted)' }} />
-                : <Moon size={14} style={{ color: settings.theme === t ? 'var(--cyan)' : 'var(--t-muted)' }} />}
+              {th === 'auto' ? <SunMoon size={14} style={{ color: settings.theme === th ? 'var(--cyan)' : 'var(--t-muted)' }} />
+                : th === 'light' ? <Sun size={14} style={{ color: settings.theme === th ? 'var(--cyan)' : 'var(--t-muted)' }} />
+                : <Moon size={14} style={{ color: settings.theme === th ? 'var(--cyan)' : 'var(--t-muted)' }} />}
             </button>
           ))}
         </div>
       </div>
 
+      {/* Language */}
+      <div className="flex items-center justify-between py-3">
+        <p className="text-sm" style={{ color: 'var(--t-primary)' }}>{t('settings.language')}</p>
+        <select
+          value={settings.language || 'ru'}
+          onChange={e => set('language', e.target.value)}
+          className="text-sm rounded-lg px-2 py-1"
+          style={{ background: 'var(--border)', color: 'var(--t-primary)', border: '1.5px solid transparent', maxWidth: 140 }}
+        >
+          {SUPPORTED_LANGUAGES.map(code => (
+            <option key={code} value={code}>{LANGUAGE_NAMES[code]}</option>
+          ))}
+        </select>
+      </div>
+
       {!isAuthenticated && (
         <p className="text-[10px] mt-1" style={{ color: 'var(--t-muted)' }}>
-          Настройки сохраняются локально. Войдите через Telegram для синхронизации.
+          {t('settings.local_only_note')}
         </p>
       )}
     </div>
@@ -192,19 +218,10 @@ function ProfileDone({ onReset }: { onReset: () => void }) {
   const [showZachetka, setShowZachetka]   = useState(false)
   const [showStats,    setShowStats]      = useState(false)
 
-  // Загружаем ecampus данные для ФИО, зачётки и статистики
+  // Загружаем ecampus данные для ФИО, зачётки и статистики (через GraphQL — быстро, без сырых занятий)
   const { data: ecampusData } = useQuery({
     queryKey: ['ecampus-data'],
-    queryFn:  async () => {
-      const { getToken } = await import('@/lib/auth')
-      const token = getToken()
-      if (!token) return null
-      const res = await fetch((process.env.NEXT_PUBLIC_API_URL || '') + '/api/ecampus/data', {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!res.ok) return null
-      return res.json()
-    },
+    queryFn:  fetchEcampusOverview,
     enabled: !!authToken,
   })
 

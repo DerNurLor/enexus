@@ -8,6 +8,7 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, W
 from loguru import logger
 
 from app.core.config import settings
+from app.i18n import t, get_user_lang, DEFAULT_LANG
 
 
 async def _get_or_create_user(tg_user) -> tuple:
@@ -89,6 +90,7 @@ async def cmd_roles(message: Message) -> None:
     if not tg_user:
         return
     user, _ = await _get_or_create_user(tg_user)
+    lang = await get_user_lang(tg_user.id)
 
     role_docs = await AuthRole.find(
         {"name": {"$in": user.roles}}
@@ -105,11 +107,11 @@ async def cmd_roles(message: Message) -> None:
 
     # ── Role badges ──────────────────────────────────────────────────────────
     ROLE_META: dict[str, tuple[str, str]] = {
-        "admin":    ("🔴", "Администратор"),
-        "moderator":("🟠", "Модератор"),
-        "vip":      ("🟡", "VIP"),
-        "beta":     ("🔵", "Бета-тестер"),
-        "user":     ("⚪", "Пользователь"),
+        "admin":    ("🔴", t("roles.role.admin", lang)),
+        "moderator":("🟠", t("roles.role.moderator", lang)),
+        "vip":      ("🟡", t("roles.role.vip", lang)),
+        "beta":     ("🔵", t("roles.role.beta", lang)),
+        "user":     ("⚪", t("roles.role.user", lang)),
     }
 
     role_lines: list[str] = []
@@ -122,34 +124,28 @@ async def cmd_roles(message: Message) -> None:
     # ── Privilege highlights ─────────────────────────────────────────────────
     extras: list[str] = []
     if "admin:full" in all_perms:
-        extras.append(
-            f"⚙️ <b>Панель управления</b> → "
-            f"<a href=\"{settings.webhook_base_url}/dashboard/admin\">открыть</a>"
-        )
+        extras.append(t("roles.priv_admin_panel", lang, url=f"{settings.webhook_base_url}/dashboard/admin"))
     if "beta_access" in all_perms:
-        extras.append("🧪 <b>Бета-доступ</b> — расширенные фильтры расписания")
+        extras.append(t("roles.priv_beta", lang))
     if "floorplan:edit" in all_perms:
-        extras.append("🗺 <b>Редактирование</b> планов этажей")
+        extras.append(t("roles.priv_floorplan_edit", lang))
     elif "floorplan:view" in all_perms:
-        extras.append("🗺 <b>Просмотр</b> планов этажей")
+        extras.append(t("roles.priv_floorplan_view", lang))
     if user.daily_requests is not None and user.daily_requests > 0:
-        extras.append(f"📊 <b>Персональный лимит</b>: {user.daily_requests} запросов / период")
+        extras.append(t("roles.priv_personal_limit", lang, limit=user.daily_requests))
 
     # ── Build message ────────────────────────────────────────────────────────
     lines = [
-        f"👤 <b>{name}</b>  ·  <i>{uname}</i>\n",
-        "🎭 <b>Роли:</b>",
+        t("roles.header", lang, name=name, uname=uname),
+        t("roles.roles_label", lang),
     ]
     lines += role_lines
 
     if extras:
-        lines.append("\n🔓 <b>Привилегии:</b>")
+        lines.append(t("roles.privileges_label", lang))
         lines += [f"  {e}" for e in extras]
 
-    lines.append(
-        f"\n💼 <b>Личный кабинет:</b> "
-        f"<a href=\"{settings.webhook_base_url}/dashboard/me\">открыть</a>"
-    )
+    lines.append(t("roles.profile_link", lang, url=f"{settings.webhook_base_url}/dashboard/me"))
 
     await message.answer("\n".join(lines), parse_mode="HTML", disable_web_page_preview=True)
 
@@ -163,19 +159,13 @@ async def cmd_suggest(message: Message) -> None:
     if not tg_user:
         return
 
+    lang = await get_user_lang(tg_user.id)
     text = message.text or ""
     parts = text.split(maxsplit=1)
     idea_text = parts[1].strip() if len(parts) > 1 else ""
 
     if not idea_text:
-        await message.answer(
-            "💡 <b>Предложения и идеи</b>\n\n"
-                "Есть идея, как улучшить бот или расписание?\n"
-                "Напишите её после команды:\n\n"
-                "<code>/suggest Ваша идея здесь</code>\n\n"
-                "<i>Например: /suggest Добавить уведомление за 10 минут до пары</i>",
-            parse_mode="HTML",
-        )
+        await message.answer(t("suggest.prompt", lang), parse_mode="HTML")
         return
 
     user, _ = await _get_or_create_user(tg_user)
@@ -219,9 +209,7 @@ async def cmd_suggest(message: Message) -> None:
             logger.warning(f"suggest notify failed: {exc}")
 
     await message.answer(
-        "✅ <b>Предложение принято!</b>\n\n"
-            "Спасибо, ваша идея поможет сделать бот лучше.\n"
-            f"Номер: <code>{str(ticket.id)[:8]}</code>\n",
+        t("suggest.accepted", lang, ticket_id=str(ticket.id)[:8]),
         parse_mode="HTML",
     )
 
@@ -230,20 +218,10 @@ async def cmd_suggest(message: Message) -> None:
 
 async def cmd_about(message: Message) -> None:
     """Show information about the bot, version, and links."""
+    lang = await get_user_lang(message.from_user.id) if message.from_user else DEFAULT_LANG
     miniapp_url = f"{settings.webhook_base_url}"
     await message.answer(
-        "🎓 <b>Бот расписания СКФУ</b>\n\n"
-            "Умный помощник для студентов и преподавателей "
-            "Северо-Кавказского федерального университета.\n\n"
-            "📌 <b>Возможности:</b>\n"
-            "  • Расписание групп, преподавателей, аудиторий\n"
-            "  • Свободные аудитории в реальном времени\n"
-            "  • Поиск по группам и преподавателям\n"
-            "  • Mini App с полным расписанием 📅\n\n"
-            "🔗 <b>Ссылки:</b>\n"
-            f"  • <a href=\"{miniapp_url}\">Mini App расписания</a>\n"
-            "🛠 <b>Версия:</b> 2.0\n"
-            "💬 Вопросы и предложения: /support · /suggest",
+        t("about.text", lang, miniapp_url=miniapp_url),
         parse_mode="HTML",
         disable_web_page_preview=True,
     )
@@ -256,21 +234,17 @@ async def cmd_miniapp(message: Message) -> None:
     tg_user = message.from_user
     if not tg_user:
         return
+    lang = await get_user_lang(tg_user.id)
 
     miniapp_url = f"{settings.webhook_base_url}/miniapp"
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
-            text="📅 Открыть расписание",
+            text=t("common.open_schedule_button", lang),
             web_app=WebAppInfo(url=miniapp_url),
         )
     ]])
     await message.answer(
-        "🎓 <b>NCFU Schedule</b> — полное расписание в приложении\n\n"
-            "• Гибкий поиск по группе, преподавателю, аудитории\n"
-            "• Свободные аудитории в реальном времени\n"
-            "• Планы этажей корпусов\n"
-            "• Избранное и персональные настройки\n\n"
-            "Нажмите кнопку ниже 👇",
+        t("miniapp.text", lang),
         parse_mode="HTML",
         reply_markup=kb,
     )
@@ -284,6 +258,7 @@ async def cmd_support(message: Message) -> None:
     tg_user = message.from_user
     if not tg_user:
         return
+    lang = await get_user_lang(tg_user.id)
 
     # The message after /support is the ticket text
     text = message.text or ""
@@ -291,12 +266,7 @@ async def cmd_support(message: Message) -> None:
     ticket_text = parts[1].strip() if len(parts) > 1 else ""
 
     if not ticket_text:
-        await message.answer(
-            "📬 <b>Поддержка</b>\n\n"
-                "Напишите ваш вопрос после команды:\n"
-                "<code>/support Ваш вопрос здесь</code>",
-            parse_mode="HTML",
-        )
+        await message.answer(t("support.prompt", lang), parse_mode="HTML")
         return
 
     ticket = SupportTicket(
@@ -337,9 +307,7 @@ async def cmd_support(message: Message) -> None:
             logger.warning(f"support notify failed: {exc}")
 
     await message.answer(
-        "✅ <b>Обращение принято</b>\n\n"
-            "Мы ответим вам как можно скорее.\n"
-            f"Номер обращения: <code>{str(ticket.id)[:8]}</code>",
+        t("support.accepted", lang, ticket_id=str(ticket.id)[:8]),
         parse_mode="HTML",
     )
 
@@ -351,6 +319,7 @@ async def cmd_limit(message: Message) -> None:
     tg_user = message.from_user
     if not tg_user:
         return
+    lang = await get_user_lang(tg_user.id)
 
     chat      = message.chat
     chat_type = chat.type   # "private" | "group" | "supergroup" | "channel"
@@ -376,25 +345,23 @@ async def cmd_limit(message: Message) -> None:
 
     if ttl_secs > 0:
         reset_str = f"{ttl_h}ч {ttl_m}м" if ttl_h else f"{ttl_m}м"
-        reset_line = f"🔄 Сброс через: <b>{reset_str}</b>"
+        reset_line = t("limit.reset_in", lang, reset_str=reset_str)
     else:
-        reset_line = "🔄 Лимит уже сброшен — можно использовать снова"
+        reset_line = t("limit.reset_done", lang)
 
-    scope = "личных запросов" if chat_type == "private" else "запросов в этом чате"
+    scope = t("limit.scope_private", lang) if chat_type == "private" else t("limit.scope_chat", lang)
 
     status_icon = "🔴" if exhausted else ("🟡" if remaining <= 1 else "🟢")
 
+    note = t("limit.exhausted_note", lang) if exhausted else t("limit.normal_note", lang)
+
     await message.answer(
-        f"📊 <b>Лимит {scope}</b>\n\n"
-            f"{status_icon} <code>[{bar}]</code> {used}/{cap}\n\n"
-            f"✅ Использовано: <b>{used}</b>\n"
-            f"💬 Осталось: <b>{remaining}</b>\n"
-            f"🏁 Максимум: <b>{cap}</b>\n"
-            f"{reset_line}\n\n"
-            + (
-                "<i>Лимит исчерпан. Подождите сброса или обратитесь к администратору.</i>"
-                if exhausted else
-                "<i>Лимит считает запросы к ИИ (расписание, поиск). Команды /start, /help и другие не учитываются.</i>"
-            ),
+        t("limit.header", lang, scope=scope) + "\n\n"
+            + f"{status_icon} <code>[{bar}]</code> {used}/{cap}\n\n"
+            + t("limit.used", lang, used=used) + "\n"
+            + t("limit.remaining", lang, remaining=remaining) + "\n"
+            + t("limit.max", lang, cap=cap) + "\n"
+            + reset_line + "\n\n"
+            + note,
         parse_mode="HTML",
     )

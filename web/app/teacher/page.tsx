@@ -264,7 +264,7 @@ export default function TeacherPage() {
       )}
 
       {/* ── Нагрузка ──────────────────────────────────────────────────── */}
-      <TeacherDashboard teacherId={tId} teacherName={tName} todayLessons={todayLessons} />
+      <TeacherDashboard teacherId={tId} teacherName={tName} todayLessons={todayLessons} selectedDate={new Date()} />
 
       {/* ── Основной блок ─────────────────────────────────────────────── */}
       <div className="card px-4 py-4">

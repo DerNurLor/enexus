@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from 'react'
 import { api } from '../utils/api'
 import { isoToday } from '../utils/helpers'
 import { IconBuilding, IconSearch } from '../components/Icons'
+import { useI18n } from '../i18n'
 
 interface FreeRoomsResponse {
   rooms: Array<{ roomId: number; name: string; building?: string; capacity?: number }>
@@ -25,6 +26,7 @@ interface Props {
 type OffsetChip = 'now' | '60' | '120' | '180'
 
 export function RoomsPage({ toast, onRoomClick, isActive }: Props) {
+  const { t } = useI18n()
   const [date, setDate] = useState(isoToday())
   const [time, setTime] = useState('')
   const [activeChip, setActiveChip] = useState<OffsetChip>('now')
@@ -83,12 +85,12 @@ export function RoomsPage({ toast, onRoomClick, isActive }: Props) {
       setBuildings(inst.buildings)
     } else {
       setBuildings(allBuildings)
-      if (inst) toast(`Для ${inst.name} корпуса не определены`)
+      if (inst) toast(t('rooms.no_buildings_defined', { name: inst.name }))
     }
-  }, [institutes, allBuildings, toast])
+  }, [institutes, allBuildings, toast, t])
 
   const doSearch = useCallback(async () => {
-    if (!date || !time) { toast('Укажите дату и время'); return }
+    if (!date || !time) { toast(t('rooms.specify_datetime')); return }
     window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('medium')
     setLoading(true)
     setResult(null)
@@ -100,32 +102,32 @@ export function RoomsPage({ toast, onRoomClick, isActive }: Props) {
       const data = await api<FreeRoomsResponse>(`/miniapp/api/free-rooms?${params}`)
       setResult(data)
     } catch (e) {
-      toast((e as Error).message ?? 'Ошибка')
+      toast((e as Error).message ?? t('rooms.error'))
     } finally {
       setLoading(false)
     }
-  }, [date, time, selectedBuilding, selectedInstitute, toast])
+  }, [date, time, selectedBuilding, selectedInstitute, toast, t])
 
   return (
     <div id="page-rooms" className={`page${isActive ? " active" : ""}`}>
-      <div className="sec-head">АУДИТОРИИ</div>
-      <div className="sec-subhead">Свободные прямо сейчас</div>
+      <div className="sec-head">{t('rooms.title')}</div>
+      <div className="sec-subhead">{t('rooms.subtitle')}</div>
 
       {/* Date/time */}
       <div className="date-grid" style={{ marginBottom: 10 }}>
         <div>
-          <div className="field-label">Дата</div>
+          <div className="field-label">{t('common.date')}</div>
           <input type="date" value={date} onChange={e => setDate(e.target.value)} />
         </div>
         <div>
-          <div className="field-label">Время</div>
+          <div className="field-label">{t('common.time')}</div>
           <input type="time" value={time} onChange={e => setTime(e.target.value)} />
         </div>
       </div>
 
       {/* Time offset chips */}
       <div className="chip-row">
-        <button className={`chip${activeChip === 'now' ? ' active' : ''}`} onClick={setNow}>Сейчас</button>
+        <button className={`chip${activeChip === 'now' ? ' active' : ''}`} onClick={setNow}>{t('rooms.now')}</button>
         <button className={`chip${activeChip === '60' ? ' active' : ''}`} onClick={() => setOffset(60)}>+1ч</button>
         <button className={`chip${activeChip === '120' ? ' active' : ''}`} onClick={() => setOffset(120)}>+2ч</button>
         <button className={`chip${activeChip === '180' ? ' active' : ''}`} onClick={() => setOffset(180)}>+3ч</button>
@@ -133,14 +135,14 @@ export function RoomsPage({ toast, onRoomClick, isActive }: Props) {
 
       {/* Institute selector */}
       <div style={{ marginTop: 14 }}>
-        <div className="field-label">Институт</div>
+        <div className="field-label">{t('rooms.institute')}</div>
         <div className="input-group" style={{ marginBottom: 8 }}>
           <IconBuilding className="input-icon" size={15} />
           <select
             value={selectedInstitute}
             onChange={e => onInstituteChange(e.target.value)}
           >
-            <option value="">Все институты</option>
+            <option value="">{t('rooms.all_institutes')}</option>
             {institutes.map(inst => (
               <option key={inst.institute_id} value={inst.institute_id}>
                 {inst.name} ({inst.short_name})
@@ -153,12 +155,12 @@ export function RoomsPage({ toast, onRoomClick, isActive }: Props) {
       {/* Building selector */}
       {buildings.length > 0 && (
         <div style={{ marginBottom: 14 }}>
-          <div className="field-label">Корпус</div>
+          <div className="field-label">{t('rooms.building')}</div>
           <select
             value={selectedBuilding}
             onChange={e => setSelectedBuilding(e.target.value)}
           >
-            <option value="">Все корпуса</option>
+            <option value="">{t('rooms.all_buildings')}</option>
             {buildings.map(b => (
               <option key={b} value={b}>{b}</option>
             ))}
@@ -168,7 +170,7 @@ export function RoomsPage({ toast, onRoomClick, isActive }: Props) {
 
       <button className="btn btn-primary" onClick={doSearch} disabled={loading}>
         {loading ? <span className="spinner" /> : <IconSearch size={15} />}
-        {loading ? 'Поиск…' : 'Найти свободные'}
+        {loading ? t('common.searching') : t('rooms.find_button')}
       </button>
 
       {/* Results */}
@@ -193,12 +195,13 @@ function FreeRoomsResult({
   dateTime: string
   onRoomClick: (room: string) => void
 }) {
+  const { t } = useI18n()
   if (!data.total) {
     return (
       <div className="empty-state">
         <div className="empty-icon">🚫</div>
-        <div className="empty-title">НЕТ АУДИТОРИЙ</div>
-        <div className="empty-desc">Свободных аудиторий не найдено</div>
+        <div className="empty-title">{t('rooms.no_rooms_title')}</div>
+        <div className="empty-desc">{t('rooms.no_rooms_desc')}</div>
       </div>
     )
   }
@@ -208,7 +211,7 @@ function FreeRoomsResult({
   return (
     <>
       <div className="text-muted" style={{ marginBottom: 12 }}>
-        Свободно <strong style={{ color: 'var(--text-primary)' }}>{data.total}</strong> аудиторий · {label}
+        {t('rooms.free_count', { count: data.total, label })}
       </div>
       {Object.entries(data.by_building).map(([building, rooms]) => {
         if (!rooms.length) return null
@@ -224,7 +227,7 @@ function FreeRoomsResult({
                   key={r.name}
                   className="room-pill"
                   onClick={() => onRoomClick(r.name)}
-                  title="Посмотреть расписание аудитории"
+                  title={t('rooms.view_schedule_title')}
                 >
                   {r.name}
                 </button>

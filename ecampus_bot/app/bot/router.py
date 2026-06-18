@@ -26,6 +26,7 @@ from app.bot.handlers.bot_login import handle_login_code, handle_login_callback,
 from app.bot.handlers.grades import cmd_grades, cmd_stats, cmd_subjects, cmd_ecampus, cb_stats, _build_stats_keyboard
 from app.bot.handlers.extra_handlers import cmd_classmates, cmd_teacher, cmd_me, cb_teacher, cb_me
 from app.bot.message_store import store_message, store_callback_choice, store_bot_reply, _entities_to_html
+from app.i18n import t, get_user_lang, set_user_lang, DEFAULT_LANG, SUPPORTED_LANGUAGES, LANGUAGE_NAMES
 from datetime import datetime, timezone
 import logging
 
@@ -75,25 +76,14 @@ async def bot_added_to_group(event: ChatMemberUpdated) -> None:
 
         bot_username = (await event.bot.get_me()).username
         miniapp_url  = f"{settings.webhook_base_url}/miniapp"
+        lang = await get_user_lang(inviter.id) if inviter else DEFAULT_LANG
         kb = InlineKeyboardMarkup(inline_keyboard=[[
-            InlineKeyboardButton(text="📅 Открыть расписание", web_app=WebAppInfo(url=miniapp_url))
+            InlineKeyboardButton(text=t("common.open_schedule_button", lang), web_app=WebAppInfo(url=miniapp_url))
         ]])
-        chat_title = chat.title or "эту группу"
+        chat_title = chat.title or t("group_welcome.default_title", lang)
         await event.bot.send_message(
             chat_id=chat.id,
-            text=(
-                f"👋 Привет! Рад присоединиться к <b>{chat_title}</b>!\n\n"
-                "📌 <b>Что я умею:</b>\n"
-                "  • Расписание группы, преподавателя, аудитории\n"
-                "  • Свободные аудитории прямо сейчас\n"
-                "  • Поиск по преподавателям и группам\n\n"
-                "💬 <b>Как обращаться:</b>\n"
-                f"  Упомяните меня: <code>@{bot_username} расписание ИСС-б-о-22-3</code>\n"
-                "  Или используйте команды:\n"
-                "  /help — все возможности\n"
-                "  /miniapp — расписание в приложении 📅\n\n"
-                "🔕 <i>Я не слежу за общим чатом — отвечаю только на упоминания и команды.</i>"
-            ),
+            text=t("group_welcome.text", lang, chat_title=chat_title, bot_username=bot_username),
             parse_mode="HTML",
             reply_markup=kb,
         )
@@ -119,23 +109,8 @@ async def cmd_start(message: TelegramMessage) -> None:
     # Сохраняем входящее сообщение пользователя (/start)
     asyncio.ensure_future(store_message(message, role="user"))
 
-    sent = await message.answer(
-        "👋 Привет! Я бот расписания СКФУ.\n\n"
-            "Спрашивай на естественном русском языке:\n"
-            "  • <i>Расписание ИСС-б-о-22-3 на эту неделю</i>\n"
-            "  • <i>Где пара через 5 минут у Подзолко?</i>\n"
-            "  • <i>Свободные аудитории в корпусе 11</i>\n"
-            "  • <i>Что сейчас у группы АИС-б-о-25-1?</i>\n\n"
-            "📋 <b>Команды:</b>\n"
-            "  /me         — личный кабинет 👤\n"
-            "  /miniapp    — расписание в приложении 📅\n"
-            "  /grades     — мои оценки из eCampus\n"
-            "  /stats      — статистика 📊\n"
-            "  /classmates — одногруппники 👥\n"
-            "  /teacher    — найти преподавателя\n"
-            "  /help       — полная справка",
-        parse_mode="HTML",
-    )
+    lang = await get_user_lang(message.from_user.id) if message.from_user else DEFAULT_LANG
+    sent = await message.answer(t("start.greeting", lang), parse_mode="HTML")
     # Сохраняем ответ бота — Telegram не присылает Update на исходящие сообщения
     asyncio.ensure_future(store_message(sent, role="bot"))
 
@@ -145,31 +120,8 @@ async def cmd_start(message: TelegramMessage) -> None:
 @router.message(Command("help"))
 async def cmd_help(message: TelegramMessage) -> None:
     asyncio.ensure_future(store_message(message, role="user"))
-    sent = await message.answer(
-        "📖 <b>Справка по боту расписания СКФУ</b>\n\n"
-            "Просто напиши запрос на естественном языке:\n\n"
-            "📅 <b>Расписание:</b>\n"
-            "  <i>Расписание ИСС-б-о-22-3</i>\n"
-            "  <i>Что у группы АИС25 завтра?</i>\n\n"
-            "👤 <b>Преподаватель:</b>\n"
-            "  <i>Где Подзолко сейчас?</i>  ·  <i>Расписание Иванова</i>\n\n"
-            "🚪 <b>Аудитории:</b>\n"
-            "  <i>Свободные аудитории прямо сейчас</i>\n\n"
-            "📋 <b>Команды:</b>\n"
-            "  /me          — личный кабинет 👤\n"
-            "  /miniapp     — расписание в приложении 📅\n"
-            "  /grades      — мои оценки из eCampus\n"
-            "  /stats       — статистика успеваемости 📊\n"
-            "  /subjects    — список предметов\n"
-            "  /classmates  — мои одногруппники 👥\n"
-            "  /teacher     — найти преподавателя\n"
-            "  /ecampus     — статус eCampus\n"
-            "  /limit       — лимит запросов\n"
-            "  /support     — поддержка\n"
-            "  /suggest     — предложить идею\n\n"
-            "💡 <i>В группах обращайтесь через упоминание: @botname запрос</i>",
-        parse_mode="HTML",
-    )
+    lang = await get_user_lang(message.from_user.id) if message.from_user else DEFAULT_LANG
+    sent = await message.answer(t("help.full", lang), parse_mode="HTML")
     asyncio.ensure_future(store_message(sent, role="bot"))
 
 
@@ -178,7 +130,8 @@ async def cmd_help(message: TelegramMessage) -> None:
 @router.message(Command("mykey"))
 async def handle_mykey(message: TelegramMessage) -> None:
     # /mykey is disabled
-    await message.answer("Команда /mykey отключена.")
+    lang = await get_user_lang(message.from_user.id) if message.from_user else DEFAULT_LANG
+    await message.answer(t("mykey.disabled", lang))
 
 
 @router.message(Command("roles"))
@@ -218,6 +171,48 @@ async def handle_suggest(message: TelegramMessage) -> None:
 async def handle_about(message: TelegramMessage) -> None:
     asyncio.ensure_future(store_message(message, role="user"))
     await cmd_about(message)
+
+
+@router.message(Command("language"))
+async def handle_language(message: TelegramMessage) -> None:
+    """/language — выбор языка интерфейса (общий для бота, сайта и мини-приложения)."""
+    asyncio.ensure_future(store_message(message, role="user"))
+    lang = await get_user_lang(message.from_user.id) if message.from_user else DEFAULT_LANG
+    buttons = []
+    row = []
+    for code in SUPPORTED_LANGUAGES:
+        prefix = "✅ " if code == lang else ""
+        row.append(InlineKeyboardButton(text=f"{prefix}{LANGUAGE_NAMES[code]}", callback_data=f"lang:{code}"))
+        if len(row) == 2:
+            buttons.append(row)
+            row = []
+    if row:
+        buttons.append(row)
+    kb = InlineKeyboardMarkup(inline_keyboard=buttons)
+    sent = await message.answer(t("language.prompt", lang), parse_mode="HTML", reply_markup=kb)
+    asyncio.ensure_future(store_message(sent, role="bot"))
+
+
+@router.callback_query(F.data.startswith("lang:"))
+async def cb_language(cb: CallbackQuery) -> None:
+    """Пользователь выбрал язык интерфейса в меню /language."""
+    code = cb.data[len("lang:"):]
+    user_id = cb.from_user.id if cb.from_user else 0
+    if code not in SUPPORTED_LANGUAGES:
+        await cb.answer()
+        return
+    ok = await set_user_lang(user_id, code)
+    if not ok:
+        await cb.answer(t("language.save_failed", code), show_alert=True)
+        return
+    await cb.answer()
+    try:
+        await cb.message.edit_text(
+            t("language.saved", code, name=LANGUAGE_NAMES[code]),
+            parse_mode="HTML",
+        )
+    except Exception:
+        pass
 
 
 @router.message(Command("login"))
@@ -337,13 +332,14 @@ async def cb_page_nav(cb: CallbackQuery) -> None:
         return
 
     from app.bot.handlers.ai_handler import _load_pages, _make_nav_kb, _add_feedback_row
+    lang = await get_user_lang(cb.from_user.id) if cb.from_user else DEFAULT_LANG
     pages = await _load_pages(page_key)
     if not pages:
-        await cb.message.edit_text("⏱ Данные устарели. Повторите запрос.", reply_markup=None)
+        await cb.message.edit_text(t("disambig.stale_data", lang), reply_markup=None)
         return
 
     idx = max(0, min(idx, len(pages) - 1))
-    kb  = _make_nav_kb(page_key, idx, len(pages))
+    kb  = _make_nav_kb(page_key, idx, len(pages), lang)
 
     # Re-attach feedback row if it was present before (check existing kb)
     current_kb = cb.message.reply_markup
@@ -354,7 +350,7 @@ async def cb_page_nav(cb: CallbackQuery) -> None:
     if has_feedback:
         kb = _add_feedback_row(kb, cb.message.chat.id, cb.message.message_id)
 
-    text = pages[idx] + f"\n\n<i>День {idx+1} из {len(pages)}</i>"
+    text = pages[idx] + "\n\n" + t("disambig.day_of", lang, idx=idx+1, total=len(pages))
     try:
         await cb.message.edit_text(text, parse_mode="HTML", reply_markup=kb)
     except Exception:
@@ -373,6 +369,7 @@ async def cb_disambig(cb: CallbackQuery) -> None:
     callback_data: "dis:{redis_key}:{item_id}"
     """
     await cb.answer()
+    lang = await get_user_lang(cb.from_user.id) if cb.from_user else DEFAULT_LANG
     try:
         # callback_data: "dis:{redis_key}:{item_id}"
         # redis_key contains colons, so we must split from the RIGHT.
@@ -385,7 +382,7 @@ async def cb_disambig(cb: CallbackQuery) -> None:
         item_id = int(id_str)
     except (ValueError, AttributeError) as _parse_err:
         logger.warning(f"cb_disambig parse error: {_parse_err!r}  data={cb.data!r}")
-        await cb.message.edit_text("⚠️ Устаревшая кнопка. Повторите запрос.")
+        await cb.message.edit_text(t("disambig.stale_button", lang))
         return
 
     from app.bot.handlers.ai_handler import (
@@ -397,7 +394,7 @@ async def cb_disambig(cb: CallbackQuery) -> None:
 
     payload = await _load_disambig(key)
     if payload is None:
-        await cb.message.edit_text("⏱ Время выбора истекло. Повторите запрос.")
+        await cb.message.edit_text(t("disambig.expired", lang))
         return
 
     intent_type = payload["intent_type"]
@@ -418,7 +415,7 @@ async def cb_disambig(cb: CallbackQuery) -> None:
     # Remove the disambiguation keyboard
     await cb.message.edit_reply_markup(reply_markup=None)
     # Show progress
-    progress = await cb.message.answer("⏳ Загружаю расписание…")
+    progress = await cb.message.answer(t("disambig.loading", lang))
 
     try:
         if intent_type == "group_schedule":
@@ -431,8 +428,8 @@ async def cb_disambig(cb: CallbackQuery) -> None:
                 "week": params.get("week"),
             })
             days  = data.get("groupSchedule", [])
-            title = group_name or f"группа #{group_id}"
-            reply = _fmt_days_paged(days, f"Расписание · {title}",
+            title = group_name or t("disambig.group_label", lang, id=group_id)
+            reply = _fmt_days_paged(days, t("disambig.schedule_title", lang, title=title),
                                     show_teacher=True, show_group=False)
 
         elif intent_type == "group_now":
@@ -471,12 +468,12 @@ async def cb_disambig(cb: CallbackQuery) -> None:
                 "from": params.get("from") or _now_moscow().date().isoformat(),
                 "to":   params.get("to"),
             })
-            title = room_name or f"ауд. #{room_id}"
+            title = room_name or t("disambig.room_label", lang, id=room_id)
             days  = data.get("roomSchedule", [])
-            reply = _fmt_days_paged(days, f"Расписание · {title}",
+            reply = _fmt_days_paged(days, t("disambig.schedule_title", lang, title=title),
                                     show_teacher=True, show_group=True)
         else:
-            reply = "❓ Неизвестный тип запроса."
+            reply = t("disambig.unknown_intent", lang)
     except Exception as exc:
         import secrets, string as _str
         eid = "ERR-" + "".join(secrets.choice(_str.ascii_uppercase + _str.digits) for _ in range(6))
@@ -496,7 +493,7 @@ async def cb_disambig(cb: CallbackQuery) -> None:
             ).insert()
         except Exception as _le:
             logger.warning(f"error log failed: {_le}")
-        await progress.edit_text(f"❌ Ошибка при загрузке расписания.\n<code>{eid}</code>", parse_mode="HTML")
+        await progress.edit_text(t("disambig.error", lang, eid=eid), parse_mode="HTML")
         return
     _PAGED_PFX = chr(0) + "PAGED" + chr(0)
     if reply.startswith(_PAGED_PFX):
@@ -506,14 +503,14 @@ async def cb_disambig(cb: CallbackQuery) -> None:
         try:
             pages: list[str] = _json2.loads(raw)
         except Exception:
-            await progress.edit_text("❌ Ошибка обработки расписания.")
+            await progress.edit_text(t("disambig.format_error", lang))
             return
         pk = _page_key(user_tg_id, raw[:40])
         await _store_pages(pk, pages)
-        kb = _make_nav_kb(pk, 0, len(pages))
+        kb = _make_nav_kb(pk, 0, len(pages), lang)
         kb = _add_feedback_row(kb, cb.message.chat.id, progress.message_id)
         sent = await progress.edit_text(
-            pages[0] + f"\n\n<i>День 1 из {len(pages)}</i>",
+            pages[0] + "\n\n" + t("disambig.day_of", lang, idx=1, total=len(pages)),
             parse_mode="HTML", reply_markup=kb,
         )
         asyncio.ensure_future(store_bot_reply(sent or progress, user_tg_id))
@@ -537,6 +534,7 @@ async def cb_disambig_page(cb: CallbackQuery) -> None:
     Renders the next/prev page of group/room candidates.
     """
     await cb.answer()
+    lang = await get_user_lang(cb.from_user.id) if cb.from_user else DEFAULT_LANG
     try:
         # callback_data format: "disp:{redis_key}:{page_idx}"
         # redis_key itself contains colons (e.g. "disambig:USER_ID:HASH"),
@@ -545,7 +543,7 @@ async def cb_disambig_page(cb: CallbackQuery) -> None:
         key, page_str = after_prefix.rsplit(":", 1)
         page_idx = int(page_str)
     except (ValueError, IndexError, AttributeError):
-        await cb.message.edit_text("⚠️ Устаревшая кнопка. Повторите запрос.")
+        await cb.message.edit_text(t("disambig.stale_button", lang))
         return
 
     from app.bot.handlers.ai_handler import (
@@ -556,7 +554,7 @@ async def cb_disambig_page(cb: CallbackQuery) -> None:
 
     payload = await _load_disambig(key)
     if payload is None:
-        await cb.message.edit_text("⏱ Время выбора истекло. Повторите запрос.")
+        await cb.message.edit_text(t("disambig.expired", lang))
         return
 
     candidates  = payload["candidates"]
@@ -591,10 +589,10 @@ async def cb_disambig_page(cb: CallbackQuery) -> None:
     # Navigation row
     nav_row = []
     if page_idx > 0:
-        nav_row.append(InlineKeyboardButton(text="◀ Пред.", callback_data=f"disp:{key}:{page_idx-1}"))
+        nav_row.append(InlineKeyboardButton(text=t("disambig.prev_page", lang), callback_data=f"disp:{key}:{page_idx-1}"))
     nav_row.append(InlineKeyboardButton(text=f"{page_idx+1}/{total_pages}", callback_data="pg_noop"))
     if page_idx < total_pages - 1:
-        nav_row.append(InlineKeyboardButton(text="След. ▶", callback_data=f"disp:{key}:{page_idx+1}"))
+        nav_row.append(InlineKeyboardButton(text=t("disambig.next_page", lang), callback_data=f"disp:{key}:{page_idx+1}"))
     if nav_row:
         buttons.append(nav_row)
 
@@ -614,15 +612,15 @@ async def cb_feedback(cb: CallbackQuery) -> None:
     - Idempotent: rating the same value twice is a no-op (no double-counting).
     """
     from app.auth.models import BotFeedback
+    user_id = cb.from_user.id if cb.from_user else 0
+    lang = await get_user_lang(user_id) if user_id else DEFAULT_LANG
     try:
         _, rating, chat_id_str, msg_id_str = cb.data.split(":", 3)
         chat_id    = int(chat_id_str)
         message_id = int(msg_id_str)
     except (ValueError, AttributeError):
-        await cb.answer("⚠️ Ошибка")
+        await cb.answer(t("feedback.error_toast", lang))
         return
-
-    user_id = cb.from_user.id if cb.from_user else 0
 
     try:
         doc = await BotFeedback.find_one(
@@ -670,7 +668,7 @@ async def cb_feedback(cb: CallbackQuery) -> None:
             await doc.insert()
         elif doc.status == "rated" and doc.rating == rating:
             # Same rating again — no double-counting
-            await cb.answer("Уже оценено ✓")
+            await cb.answer(t("feedback.already_rated_toast", lang))
             return
         else:
             # Doc pre-created (pending) OR user changed their rating
@@ -681,7 +679,7 @@ async def cb_feedback(cb: CallbackQuery) -> None:
             await doc.save()
     except Exception as exc:
         logger.warning(f"feedback save failed: {exc}")
-        await cb.answer("⚠️ Не удалось сохранить оценку")
+        await cb.answer(t("feedback.save_failed_toast", lang))
         return
 
     # Remove the feedback buttons from the message (they've voted)
@@ -704,7 +702,7 @@ async def cb_feedback(cb: CallbackQuery) -> None:
         pass  # message too old to edit — ignore
 
     icon = "👍" if rating == "like" else "👎"
-    await cb.answer(f"{icon} Оценка сохранена, спасибо!")
+    await cb.answer(t("feedback.thanks_toast", lang, icon=icon))
     logger.info(f"Feedback {rating} from user {user_id} on msg {message_id} chat {chat_id}")
 
 
@@ -861,23 +859,31 @@ async def handle_contact(message: TelegramMessage) -> None:
     asyncio.ensure_future(store_message(message))
 
 
-# ── Command menu list (registered on startup) ──────────────────────────────────
+# ── Command menu list (registered on startup, one set per supported language) ──
 
-BOT_COMMANDS = [
-    BotCommand(command="start",       description="Начало работы"),
-    BotCommand(command="me",          description="Личный кабинет 👤"),
-    BotCommand(command="help",        description="Справка"),
-    BotCommand(command="miniapp",     description="Открыть расписание (Mini App) 📅"),
-    BotCommand(command="grades",      description="Мои оценки из eCampus"),
-    BotCommand(command="stats",       description="Статистика успеваемости 📊"),
-    BotCommand(command="subjects",    description="Список предметов"),
-    BotCommand(command="classmates",  description="Мои одногруппники 👥"),
-    BotCommand(command="teacher",     description="Найти преподавателя 👤"),
-    BotCommand(command="ecampus",     description="Статус eCampus"),
-    BotCommand(command="limit",       description="Лимит запросов"),
-    BotCommand(command="login",       description="Войти на сайт"),
-    BotCommand(command="code",        description="Ввести код (/code XXXXXX)"),
-    BotCommand(command="support",     description="Поддержка"),
-    BotCommand(command="suggest",     description="Предложить идею"),
-    BotCommand(command="about",       description="О боте"),
+_COMMAND_KEYS = [
+    ("start",      "cmd.start"),
+    ("me",         "cmd.me"),
+    ("help",       "cmd.help"),
+    ("miniapp",    "cmd.miniapp"),
+    ("grades",     "cmd.grades"),
+    ("stats",      "cmd.stats"),
+    ("subjects",   "cmd.subjects"),
+    ("classmates", "cmd.classmates"),
+    ("teacher",    "cmd.teacher"),
+    ("ecampus",    "cmd.ecampus"),
+    ("limit",      "cmd.limit"),
+    ("language",   "cmd.language"),
+    ("login",      "cmd.login"),
+    ("code",       "cmd.code"),
+    ("support",    "cmd.support"),
+    ("suggest",    "cmd.suggest"),
+    ("about",      "cmd.about"),
 ]
+
+
+def get_bot_commands(lang: str = DEFAULT_LANG) -> list[BotCommand]:
+    return [BotCommand(command=cmd, description=t(key, lang)) for cmd, key in _COMMAND_KEYS]
+
+
+BOT_COMMANDS = get_bot_commands(DEFAULT_LANG)

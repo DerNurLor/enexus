@@ -152,13 +152,32 @@ async def _run_ecampus_sync() -> None:
         logger.error(f"eCampus daily sync error: {exc}")
 
 
+async def _supervise_ecampus_worker() -> None:
+    """
+    [F4] Воркер очереди раньше запускался один раз без перезапуска: любая
+    необработанная ошибка (например, redis.TimeoutError при кратковременной
+    нагрузке на хост) тихо убивала таску навсегда — задачи продолжали
+    enqueue-иться, но никогда не обрабатывались. Супервизор перезапускает
+    воркер, если он завершился неожиданно.
+    """
+    from app.ecampus.queue import get_queue
+    from app.ecampus.sync_service import task_handler
+
+    while True:
+        try:
+            await get_queue().start_worker(task_handler)
+        except Exception as exc:
+            logger.error(f"eCampus queue worker crashed, restarting in 5s: {exc}")
+        else:
+            logger.warning("eCampus queue worker exited unexpectedly, restarting in 5s")
+        await asyncio.sleep(5)
+
+
 async def start_ecampus_worker() -> None:
     """Запускает воркер очереди задач eCampus."""
     # [F3] Убран лишний import asyncio внутри функции — уже импортирован вверху
-    from app.ecampus.queue import get_queue
-    from app.ecampus.sync_service import task_handler
     logger.info("Starting eCampus queue worker...")
-    asyncio.create_task(get_queue().start_worker(task_handler))
+    asyncio.create_task(_supervise_ecampus_worker())
 
 
 async def _retry_failed_ecampus_syncs() -> None:

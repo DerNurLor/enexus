@@ -19,6 +19,7 @@ export interface UiSettings {
   compact:        boolean
   theme:          string   // 'auto' | 'light' | 'dark'
   accent_color:   string
+  language:       string   // см. lib/i18n — общий язык интерфейса (web, miniapp, бот)
 }
 
 const DEFAULT_SETTINGS: UiSettings = {
@@ -27,6 +28,7 @@ const DEFAULT_SETTINGS: UiSettings = {
   compact:        false,
   theme:          'auto',
   accent_color:   '#A78BFA',
+  language:       'ru',
 }
 
 interface ScheduleStore {
@@ -189,6 +191,7 @@ export const useScheduleStore = create<ScheduleStore>()(
         if (s.compact         !== undefined) newSettings.compact         = !!s.compact
         if (s.theme           !== undefined) newSettings.theme           = String(s.theme)
         if (s.accent_color    !== undefined) newSettings.accent_color    = String(s.accent_color)
+        if (s.language        !== undefined) newSettings.language        = String(s.language)
 
         let profileUpdate: Partial<ScheduleStore> = {}
         if (!current.profileComplete && s.profile_role) {

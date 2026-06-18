@@ -11,20 +11,22 @@ import {
   CalendarDays, BookOpen, User, Map,
 } from 'lucide-react'
 import { useScheduleStore } from '@/lib/store'
+import { useT } from '@/lib/i18n'
 
 export function DesktopSidebar() {
   const pathname = usePathname()
   const newGradesCount = useScheduleStore((s) => s.newGradesCount)
   const profile = useScheduleStore((s) => s.profile)
   const isTeacher = profile?.role === 'teacher'
+  const { t } = useT()
 
   const NAV_ITEMS = [
-    { href: '/schedule', label: 'Расписание', icon: CalendarDays },
-    { href: '/map',      label: 'Карта',       icon: Map          },
+    { href: '/schedule', label: t('nav.schedule'), icon: CalendarDays },
+    { href: '/map',      label: t('nav.map'),       icon: Map          },
     isTeacher
-      ? { href: '/teacher', label: 'Мои занятия', icon: BookOpen }
-      : { href: '/ecampus', label: 'Предметы',    icon: BookOpen },
-    { href: '/profile',  label: 'Профиль',     icon: User         },
+      ? { href: '/teacher', label: t('nav.my_lessons'), icon: BookOpen }
+      : { href: '/ecampus', label: t('nav.subjects'),    icon: BookOpen },
+    { href: '/profile',  label: t('nav.profile'),     icon: User         },
   ]
 
   return (
@@ -35,10 +37,10 @@ export function DesktopSidebar() {
       {/* Logo */}
       <div className="px-6 pt-8 pb-6">
         <span className="text-lg font-bold" style={{ color: 'var(--t-primary)' }}>
-          НЦФУ
+          {t('app.brand')}
         </span>
         <p className="text-[11px] mt-0.5" style={{ color: 'var(--t-muted)' }}>
-          Расписание
+          {t('app.tagline')}
         </p>
       </div>
 
@@ -89,7 +91,7 @@ export function DesktopSidebar() {
       {/* Footer */}
       <div className="px-6 pb-6 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
         <p className="text-[10px]" style={{ color: 'var(--t-muted)' }}>
-          v2.0 · СКФУ Расписание
+          {t('app.footer')}
         </p>
       </div>
     </aside>

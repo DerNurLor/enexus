@@ -22,6 +22,7 @@ from aiogram.types import Message, BufferedInputFile, CallbackQuery, InlineKeybo
 from loguru import logger
 
 from app.core.config import settings
+from app.i18n import t, get_user_lang, DEFAULT_LANG
 
 # ── Маппинг типов занятий (совпадает с web/app/ecampus/page.tsx) ──────────────
 LESSON_TYPE_NAMES: dict[int, str] = {
@@ -413,53 +414,40 @@ async def cmd_grades(message: Message) -> None:
     tg_user = message.from_user
     if not tg_user:
         return
+    lang = await get_user_lang(tg_user.id)
 
     text = message.text or ""
     sem_arg = _parse_sem_arg(text.split(maxsplit=1)[1]) if len(text.split()) > 1 else None
 
     rec = await _get_ecampus_record(tg_user.id)
     if not rec:
-        await message.answer(
-            "📚 <b>eCampus не подключён</b>\n\n"
-            "Подключите аккаунт eCampus в разделе <b>Профиль → eCampus</b> на сайте "
-            "или в мини-приложении.",
-            parse_mode="HTML",
-        )
+        await message.answer(t("grades.not_connected", lang), parse_mode="HTML")
         return
 
     if rec.get("sync_status") == "running":
-        await message.answer(
-            "⏳ Синхронизация с eCampus ещё идёт — данные обновляются.\n"
-            "Попробуйте через минуту.",
-            parse_mode="HTML",
-        )
+        await message.answer(t("grades.sync_running", lang), parse_mode="HTML")
         return
 
     courses: list[dict] = rec.get("courses") or []
     if not courses:
-        await message.answer(
-            "📭 Данные eCampus пока пусты.\n"
-            "Нажмите «Обновить» в мини-приложении или подождите автосинхронизации.",
-            parse_mode="HTML",
-        )
+        await message.answer(t("grades.empty", lang), parse_mode="HTML")
         return
 
     # Фильтрация по семестру
     if sem_arg is not None:
         target_terms = _find_term_by_sem(sem_arg)
         filtered_courses = [c for c in courses if c.get("term_id") in target_terms]
-        sem_label = f"Семестр {sem_arg}"
+        sem_label = t("grades.semester_label", lang, n=sem_arg)
     else:
         cur_term = _current_term_id(courses)
         filtered_courses = [c for c in courses if c.get("term_id") == cur_term]
-        sem_label = _term_label(cur_term) if cur_term else "Текущий семестр"
+        sem_label = _term_label(cur_term) if cur_term else t("grades.current_semester_label", lang)
 
     grades = _collect_grades(filtered_courses)
 
     if not grades:
         await message.answer(
-            f"📭 <b>Оценок нет</b> ({sem_label})\n\n"
-            "Оценки появятся после того, как преподаватель их выставит.",
+            t("grades.no_grades", lang, sem_label=sem_label),
             parse_mode="HTML",
         )
         return
@@ -469,7 +457,7 @@ async def cmd_grades(message: Message) -> None:
     for row in grades:
         by_course.setdefault(row["course"], []).append(row)
 
-    lines = [f"📊 <b>Оценки · {sem_label}</b>\n"]
+    lines = [t("grades.header", lang, sem_label=sem_label)]
     for cname, rows in by_course.items():
         short = cname[:40] + "…" if len(cname) > 41 else cname
         lines.append(f"\n<b>{short}</b>")
@@ -486,7 +474,7 @@ async def cmd_grades(message: Message) -> None:
             lines.append(f"  {emoji} {row['lt_name']}: <b>{row['grade']}</b>{score_str}{date_str}")
 
     total_graded = len(grades)
-    lines.append(f"\n<i>Всего оценок: {total_graded}</i>")
+    lines.append(t("grades.total", lang, count=total_graded))
 
     # Разбиваем на чанки ≤4096 символов
     msg = "\n".join(lines)
@@ -504,8 +492,8 @@ async def cmd_grades(message: Message) -> None:
         if chunk:
             chunks.append("\n".join(chunk))
         for i, ch in enumerate(chunks):
-            await message.answer(ch + (f"\n\n<i>({i+1}/{len(chunks)})</i>" if len(chunks) > 1 else ""),
-                                 parse_mode="HTML")
+            suffix = t("grades.page_suffix", lang, page=i+1, total=len(chunks)) if len(chunks) > 1 else ""
+            await message.answer(ch + suffix, parse_mode="HTML")
 
 
 # ── /stats ────────────────────────────────────────────────────────────────────
@@ -516,9 +504,10 @@ async def _render_stats(
     term_filter: str = "all",  # "all" | "current" | "248155" (конкретный term_id)
 ) -> None:
     """Общая функция рендеринга статистики для /stats и callback."""
+    lang = await get_user_lang(tg_id)
     rec = await _get_ecampus_record(tg_id)
     if not rec:
-        text = "📚 <b>eCampus не подключён</b>\n\nПодключите аккаунт в разделе Профиль на сайте."
+        text = t("stats.not_connected_short", lang)
         if hasattr(message_or_query, "answer"):
             await message_or_query.answer(text, parse_mode="HTML")
         else:
@@ -527,7 +516,7 @@ async def _render_stats(
 
     all_courses: list[dict] = rec.get("courses") or []
     if not all_courses:
-        text = "📭 Нет данных eCampus. Обновите синхронизацию."
+        text = t("stats.no_data", lang)
         if hasattr(message_or_query, "answer"):
             await message_or_query.answer(text, parse_mode="HTML")
         else:
@@ -538,7 +527,7 @@ async def _render_stats(
     title_suffix = ""
     if term_filter == "all":
         courses = all_courses
-        title_suffix = " · Всё время"
+        title_suffix = t("stats.all_time_suffix", lang)
     elif term_filter == "current":
         cur = _current_term_id(all_courses)
         courses = [c for c in all_courses if c.get("term_id") == cur]
@@ -550,7 +539,7 @@ async def _render_stats(
                 title_suffix = f" · {raw}"
             else:
                 info = TERM_MAP.get(cur)
-                title_suffix = f" · {info[0]}к {info[1]}с" if info else f" · сем.{cur}"
+                title_suffix = f" · {info[0]}к {info[1]}с" if info else t("stats.term_fallback", lang, id=cur)
     else:
         # конкретный term_id
         try:
@@ -562,12 +551,12 @@ async def _render_stats(
                 title_suffix = f" · {raw}"
             else:
                 info = TERM_MAP.get(tid)
-                title_suffix = f" · {info[0]}к {info[1]}с" if info else f" · сем.{tid}"
+                title_suffix = f" · {info[0]}к {info[1]}с" if info else t("stats.term_fallback", lang, id=tid)
         except ValueError:
             courses = all_courses
 
     if not courses:
-        text = "📭 Нет данных за этот семестр."
+        text = t("stats.no_term_data", lang)
         if hasattr(message_or_query, "answer"):
             await message_or_query.answer(text, parse_mode="HTML")
         elif hasattr(message_or_query, "message"):
@@ -596,20 +585,20 @@ async def _render_stats(
 
     rating_icon = "🟢" if rating_pct >= 70 else ("🟡" if rating_pct >= 50 else "🔴")
     lines = [
-        f"📊 <b>Статистика успеваемости{title_suffix}</b>\n",
-        f"📚 Предметов:   <b>{len(courses)}</b>",
-        f"✏️  Оценок:      <b>{total_grades}</b>",
-        f"🎓 Экзаменов:  <b>{exams_total}</b>",
-        f"📝 Зачётов:    <b>{credits_total}</b>",
+        t("stats.header", lang, suffix=title_suffix),
+        t("stats.subjects_count", lang, count=len(courses)),
+        t("stats.grades_count", lang, count=total_grades),
+        t("stats.exams_count", lang, count=exams_total),
+        t("stats.credits_count", lang, count=credits_total),
     ]
     if avg_rating > 0:
-        lines.append(f"⭐ Рейтинг:    {rating_icon} <b>{avg_rating:.1f}</b> / {max_possible:.1f} ({rating_pct:.0f}%)")
+        lines.append(t("stats.rating", lang, icon=rating_icon, avg=avg_rating, max=max_possible, pct=rating_pct))
 
     last_sync = rec.get("last_sync")
     if last_sync:
         try:
             dt = datetime.fromisoformat(str(last_sync))
-            lines.append(f"\n<i>Обновлено: {dt.strftime('%d.%m.%Y %H:%M')}</i>")
+            lines.append(t("stats.updated_at", lang, dt=dt.strftime('%d.%m.%Y %H:%M')))
         except Exception:
             pass
 
@@ -649,7 +638,7 @@ async def _render_stats(
         )
 
 
-def _build_stats_keyboard(courses: list[dict]) -> InlineKeyboardMarkup:
+def _build_stats_keyboard(courses: list[dict], lang: str = DEFAULT_LANG) -> InlineKeyboardMarkup:
     """Клавиатура выбора семестра для /stats."""
     by_term: dict[int, str] = {}   # tid → реальное название из term_name
     for c in courses:
@@ -677,7 +666,7 @@ def _build_stats_keyboard(courses: list[dict]) -> InlineKeyboardMarkup:
             buttons.append(row); row = []
     if row:
         buttons.append(row)
-    buttons.append([InlineKeyboardButton(text="📊 За всё время", callback_data="stats:all")])
+    buttons.append([InlineKeyboardButton(text=t("stats.all_time_button", lang), callback_data="stats:all")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -686,24 +675,21 @@ async def cmd_stats(message: Message) -> None:
     tg_user = message.from_user
     if not tg_user:
         return
+    lang = await get_user_lang(tg_user.id)
 
     rec = await _get_ecampus_record(tg_user.id)
     if not rec:
-        await message.answer(
-            "📚 <b>eCampus не подключён</b>\n\nПодключите аккаунт в разделе Профиль на сайте.",
-            parse_mode="HTML",
-        )
+        await message.answer(t("stats.not_connected_short", lang), parse_mode="HTML")
         return
 
     courses: list[dict] = rec.get("courses") or []
     if not courses:
-        await message.answer("📭 Нет данных eCampus. Обновите синхронизацию.", parse_mode="HTML")
+        await message.answer(t("stats.no_data", lang), parse_mode="HTML")
         return
 
-    kb = _build_stats_keyboard(courses)
+    kb = _build_stats_keyboard(courses, lang)
     await message.answer(
-        "📊 <b>Статистика успеваемости</b>\n\n"
-        "Выберите период:",
+        t("stats.choose_period", lang),
         parse_mode="HTML",
         reply_markup=kb,
     )
@@ -723,41 +709,38 @@ async def cmd_subjects(message: Message) -> None:
     tg_user = message.from_user
     if not tg_user:
         return
+    lang = await get_user_lang(tg_user.id)
 
     text = message.text or ""
     sem_arg = _parse_sem_arg(text.split(maxsplit=1)[1]) if len(text.split()) > 1 else None
 
     rec = await _get_ecampus_record(tg_user.id)
     if not rec:
-        await message.answer(
-            "📚 <b>eCampus не подключён</b>\n\n"
-            "Подключите аккаунт в разделе Профиль на сайте.",
-            parse_mode="HTML",
-        )
+        await message.answer(t("subjects.not_connected", lang), parse_mode="HTML")
         return
 
     courses: list[dict] = rec.get("courses") or []
     if not courses:
-        await message.answer("📭 Нет данных. Обновите синхронизацию.", parse_mode="HTML")
+        await message.answer(t("subjects.no_data", lang), parse_mode="HTML")
         return
 
     if sem_arg is not None:
         target_terms = _find_term_by_sem(sem_arg)
         filtered = [c for c in courses if c.get("term_id") in target_terms]
-        sem_label = f"Семестр {sem_arg}"
+        sem_label = t("grades.semester_label", lang, n=sem_arg)
     else:
         cur_term = _current_term_id(courses)
         filtered = [c for c in courses if c.get("term_id") == cur_term]
-        sem_label = _term_label(cur_term) if cur_term else "Текущий семестр"
+        sem_label = _term_label(cur_term) if cur_term else t("grades.current_semester_label", lang)
 
     if not filtered:
-        await message.answer(f"📭 Предметы не найдены ({sem_label}).", parse_mode="HTML")
+        await message.answer(t("subjects.none_for_term", lang, sem_label=sem_label), parse_mode="HTML")
         return
 
     # Сортируем: сначала с рейтингом (по убыванию)
     filtered.sort(key=lambda c: -(c.get("CurrentRating") or 0))
 
-    lines = [f"📚 <b>Предметы · {sem_label}</b>  ({len(filtered)} шт.)\n"]
+    lines = [t("subjects.header", lang, sem_label=sem_label, count=len(filtered))]
 
     for c in filtered:
         cname = c.get("Name") or c.get("name") or "?"
@@ -775,7 +758,7 @@ async def cmd_subjects(message: Message) -> None:
             if lt_id in CREDIT_TYPES:
                 has_credit = True
 
-        type_str = ", ".join(lt_list[:4]) if lt_list else "нет данных"
+        type_str = ", ".join(lt_list[:4]) if lt_list else t("subjects.no_type_data", lang)
 
         # Рейтинг
         cur_r = c.get("CurrentRating") or 0
@@ -783,16 +766,16 @@ async def cmd_subjects(message: Message) -> None:
         if max_r > 0:
             pct = cur_r / max_r
             r_icon = "🟢" if pct >= 0.7 else ("🟡" if pct >= 0.5 else "🔴")
-            rating_str = f"\n    {r_icon} Рейтинг: <b>{cur_r:.1f}</b>/{max_r}"
+            rating_str = t("subjects.rating_line", lang, icon=r_icon, cur=cur_r, max=max_r)
         else:
             rating_str = ""
 
         # Итоговый контроль
         control = ""
         if has_exam:
-            control = " 🎓<i>Экзамен</i>"
+            control = t("subjects.exam_tag", lang)
         elif has_credit:
-            control = " 📝<i>Зачёт</i>"
+            control = t("subjects.credit_tag", lang)
 
         lines.append(f"• <b>{short}</b>{control}")
         lines.append(f"  <i>{type_str}</i>{rating_str}")
@@ -812,7 +795,7 @@ async def cmd_subjects(message: Message) -> None:
         if chunk:
             chunks.append("\n".join(chunk))
         for i, ch in enumerate(chunks):
-            suffix = f"\n\n<i>({i+1}/{len(chunks)})</i>" if len(chunks) > 1 else ""
+            suffix = t("grades.page_suffix", lang, page=i+1, total=len(chunks)) if len(chunks) > 1 else ""
             await message.answer(ch + suffix, parse_mode="HTML")
 
 
@@ -823,21 +806,12 @@ async def cmd_ecampus(message: Message) -> None:
     tg_user = message.from_user
     if not tg_user:
         return
+    lang = await get_user_lang(tg_user.id)
 
     rec = await _get_ecampus_record(tg_user.id)
     if not rec:
         await message.answer(
-            "📚 <b>eCampus СКФУ</b>\n\n"
-            "Аккаунт <b>не подключён</b>.\n\n"
-            "Подключите его в разделе <b>Профиль → eCampus</b> на сайте "
-            "или в мини-приложении — и получите:\n"
-            "  • Список предметов и оценок\n"
-            "  • Статистику успеваемости\n"
-            "  • Рейтинги по каждому курсу\n\n"
-            "Команды (после подключения):\n"
-            "  /grades   — мои оценки\n"
-            "  /stats    — статистика успеваемости\n"
-            "  /subjects — список предметов",
+            t("ecampus.not_connected", lang),
             parse_mode="HTML",
         )
         return
@@ -847,10 +821,10 @@ async def cmd_ecampus(message: Message) -> None:
     last_sync   = rec.get("last_sync")
 
     status_map = {
-        "ok":      "✅ Синхронизировано",
-        "running": "⏳ Синхронизация...",
-        "error":   "❌ Ошибка синхронизации",
-        "pending": "🕐 Ожидание синхронизации",
+        "ok":      t("ecampus.status_ok", lang),
+        "running": t("ecampus.status_running", lang),
+        "error":   t("ecampus.status_error", lang),
+        "pending": t("ecampus.status_pending", lang),
     }
     status_str = status_map.get(sync_status, f"❓ {sync_status}")
 
@@ -859,34 +833,28 @@ async def cmd_ecampus(message: Message) -> None:
     cur_courses = [c for c in courses if c.get("term_id") == cur_term]
 
     lines = [
-        "📚 <b>eCampus СКФУ</b>\n",
-        f"🔗 Статус: {status_str}",
-        f"📦 Предметов: <b>{len(courses)}</b>",
-        f"✏️  Оценок: <b>{len(all_grades)}</b>",
+        t("ecampus.header", lang),
+        t("ecampus.status_line", lang, status=status_str),
+        t("ecampus.subjects_count", lang, count=len(courses)),
+        t("ecampus.grades_count", lang, count=len(all_grades)),
     ]
 
     if last_sync:
         try:
             dt = datetime.fromisoformat(str(last_sync))
-            lines.append(f"🕐 Обновлено: <b>{dt.strftime('%d.%m.%Y %H:%M')}</b>")
+            lines.append(t("ecampus.updated_at", lang, dt=dt.strftime('%d.%m.%Y %H:%M')))
         except Exception:
             pass
 
     if cur_term and cur_courses:
-        lines.append(f"\n📅 Текущий семестр: <b>{_term_label(cur_term)}</b>")
-        lines.append(f"   Предметов: <b>{len(cur_courses)}</b>")
+        lines.append(t("ecampus.current_term", lang, term=_term_label(cur_term)))
+        lines.append(t("ecampus.term_subjects", lang, count=len(cur_courses)))
         cur_grades = _collect_grades(cur_courses)
-        lines.append(f"   Оценок: <b>{len(cur_grades)}</b>")
+        lines.append(t("ecampus.term_grades", lang, count=len(cur_grades)))
 
     if rec.get("error_msg") and sync_status == "error":
         lines.append(f"\n⚠️ <i>{rec['error_msg'][:200]}</i>")
 
-    lines += [
-        "\n📋 <b>Команды:</b>",
-        "  /grades   — мои оценки текущего семестра",
-        "  /grades 2 — оценки за 2-й семестр",
-        "  /stats    — полная статистика",
-        "  /subjects — список предметов",
-    ]
+    lines.append(t("ecampus.commands_footer", lang))
 
     await message.answer("\n".join(lines), parse_mode="HTML")

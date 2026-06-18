@@ -24,6 +24,7 @@ from app.cache.redis import get_redis
 from app.bot.conversation import get_history, add_message, build_context_prompt
 from app.bot.message_store import store_message, store_bot_reply
 from app.core.config import settings
+from app.i18n import t, get_user_lang, DEFAULT_LANG
 from app.bot.intents import (
     IntentResponse, TimeRef,
     GroupScheduleIntent, TeacherScheduleIntent,
@@ -954,14 +955,14 @@ async def _load_disambig(key: str) -> dict | None:
 
 # ── Main handler ──────────────────────────────────────────────────────────────
 
-def _make_nav_kb(page_key: str, idx: int, total: int):
+def _make_nav_kb(page_key: str, idx: int, total: int, lang: str = DEFAULT_LANG):
     from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
     buttons = []
     if idx > 0:
-        buttons.append(InlineKeyboardButton(text="◀ Пред.", callback_data=f"pg:{page_key}:{idx-1}:{total}"))
+        buttons.append(InlineKeyboardButton(text=t("disambig.prev_page", lang), callback_data=f"pg:{page_key}:{idx-1}:{total}"))
     buttons.append(InlineKeyboardButton(text=f"{idx+1}/{total}", callback_data="pg_noop"))
     if idx < total - 1:
-        buttons.append(InlineKeyboardButton(text="След. ▶", callback_data=f"pg:{page_key}:{idx+1}:{total}"))
+        buttons.append(InlineKeyboardButton(text=t("disambig.next_page", lang), callback_data=f"pg:{page_key}:{idx+1}:{total}"))
     return InlineKeyboardMarkup(inline_keyboard=[buttons])
 
 
@@ -1281,11 +1282,12 @@ async def handle_message(message: Message) -> Message | None:
         if isinstance(intent, UnknownIntent):
             return f"🤔 {intent.clarification_needed}"
 
-        return "❓ Неизвестный запрос."
+        return t("ai.unknown_request", lang)
 
 
     text = getattr(message, "_text_override", None) or message.text or message.caption or ""
     tg_id = message.from_user.id if message.from_user else 0
+    lang = await get_user_lang(tg_id) if tg_id else DEFAULT_LANG
 
     # Store every incoming message (text, media, forward, reply) immediately
     if tg_id:
@@ -1297,10 +1299,10 @@ async def handle_message(message: Message) -> Message | None:
             _aio.ensure_future(_upsert_user(message.from_user))
 
     if not text.strip():
-        await message.answer("Напишите что-нибудь 🙂")
+        await message.answer(t("ai.empty_message", lang))
         return
 
-    placeholder = await message.answer("⏳ Обрабатываю...")
+    placeholder = await message.answer(t("ai.processing", lang))
 
     # Load conversation history for context
     history = await get_history(tg_id)
@@ -1310,7 +1312,7 @@ async def handle_message(message: Message) -> Message | None:
         intent = intent_resp.result
     except Exception as exc:
         logger.error(f"intent extraction failed: {exc}")
-        await placeholder.edit_text("❌ Не удалось распознать запрос. Попробуйте переформулировать.")
+        await placeholder.edit_text(t("ai.parse_failed", lang))
         return
 
     logger.info(f"intent={intent.intent} user={message.from_user.id if message.from_user else "unknown"}")
@@ -1373,7 +1375,7 @@ async def handle_message(message: Message) -> Message | None:
         eid = _make_error_id()
         logger.error(f"[{eid}] HTTP error: {exc}")
         _aio.ensure_future(_log_bot_error(eid, exc, getattr(intent, "intent", "unknown"), text))
-        reply = f"❌ Ошибка при выполнении запроса.\n<code>{eid}</code>"
+        reply = t("ai.execution_error", lang, eid=eid)
         _is_error_reply = True
         try:
             from app.bot.middlewares.anti_flood import quota_error_flag
@@ -1384,7 +1386,7 @@ async def handle_message(message: Message) -> Message | None:
         eid = _make_error_id()
         logger.error(f"[{eid}] GraphQL error: {exc}")
         _aio.ensure_future(_log_bot_error(eid, exc, getattr(intent, "intent", "unknown"), text))
-        reply = f"❌ Ошибка при выполнении запроса.\n<code>{eid}</code>"
+        reply = t("ai.execution_error", lang, eid=eid)
         _is_error_reply = True
         try:
             from app.bot.middlewares.anti_flood import quota_error_flag
@@ -1395,7 +1397,7 @@ async def handle_message(message: Message) -> Message | None:
         eid = _make_error_id()
         logger.exception(f"[{eid}] dispatch error: {exc}")
         _aio.ensure_future(_log_bot_error(eid, exc, getattr(intent, "intent", "unknown"), text))
-        reply = f"❌ Ошибка при выполнении запроса.\n<code>{eid}</code>"
+        reply = t("ai.execution_error", lang, eid=eid)
         _is_error_reply = True
         try:
             from app.bot.middlewares.anti_flood import quota_error_flag
@@ -1410,7 +1412,7 @@ async def handle_message(message: Message) -> Message | None:
         try:
             payload = _json.loads(payload_str)
         except Exception:
-            await placeholder.edit_text("❌ Ошибка обработки запроса.")
+            await placeholder.edit_text(t("ai.processing_error", lang))
             return
         candidates  = payload["candidates"]
         intent_type = payload.get("intent_type", "group_schedule")
@@ -1456,7 +1458,7 @@ async def handle_message(message: Message) -> Message | None:
             total_pages = (total_cands + _DISAMBIG_PAGE_SIZE - 1) // _DISAMBIG_PAGE_SIZE
             nav_row = [
                 InlineKeyboardButton(text=f"1/{total_pages}", callback_data="pg_noop"),
-                InlineKeyboardButton(text="След. ▶", callback_data=f"disp:{dis_key}:1"),
+                InlineKeyboardButton(text=t("disambig.next_page", lang), callback_data=f"disp:{dis_key}:1"),
             ]
             buttons.append(nav_row)
 
@@ -1504,12 +1506,12 @@ async def handle_message(message: Message) -> Message | None:
             return
         pk = _page_key(tg_id, raw[:40])
         await _store_pages(pk, pages)
-        kb = _make_nav_kb(pk, 0, len(pages))
+        kb = _make_nav_kb(pk, 0, len(pages), lang)
         # Attach feedback row AFTER we know the actual message_id (placeholder.message_id)
         # placeholder is the "⏳" message that gets edited in-place — its id is stable
         kb = _add_feedback_row(kb, message.chat.id, placeholder.message_id)
         sent = await placeholder.edit_text(
-            pages[0] + f"\n\n<i>День 1 из {len(pages)}</i>",
+            pages[0] + "\n\n" + t("disambig.day_of", lang, idx=1, total=len(pages)),
             parse_mode="HTML", reply_markup=kb,
         )
         # Store feedback metadata (question + answer) so dashboard can show it

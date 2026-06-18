@@ -247,3 +247,82 @@ class ScheduleUpdatedEvent:
     changed_dates: List[str]
     data_as_of:    str
 
+
+# ── eCampus (per-student data) ─────────────────────────────────────────────────
+# Курс отдаётся БЕЗ сырых занятий (lessons) — это та самая тяжёлая часть,
+# из-за которой REST GET /ecampus/data грузился 1-2 минуты. Рейтинг считается
+# на сервере (где данные уже лежат в Mongo) и отдаётся готовым числом.
+# gradedLessons — компактный список {id, gradeText} только для занятий с
+# оценкой (нужен фронту для подсчёта "новых оценок" — см. updateGradeSnapshot).
+
+@strawberry.type
+class EcampusLessonTypeRefType:
+    id:          int
+    name:        str
+    # int, не str: eCampus LessonType — числовой код (1, 3, 4, 5, 6, 12…), на
+    # фронте сравнивается с Set<number> (EXAM_TYPES/CREDIT_TYPES/COURSE_WORK_TYPES
+    # в web/app/ecampus/page.tsx). Был объявлен как str — GraphQL сериализовал
+    # его в "4" вместо 4, и Set<number>.has("4") всегда возвращал false, поэтому
+    # фильтры по типу занятия (экзамен/зачёт/курсовая) никогда не срабатывали.
+    lesson_type: Optional[int]
+
+
+@strawberry.type
+class EcampusGradedLessonType:
+    # str, не int: eCampus lesson Id — сквозной ID занятия по всему универу,
+    # превышает 32-битный диапазон GraphQL Int (напр. 2256343093) и ломал
+    # сериализацию всего ответа. Фронт использует его только как ключ
+    # (updateGradeSnapshot), числовое значение не нужно.
+    id:         str
+    grade_text: str
+
+
+@strawberry.type
+class EcampusCourseType:
+    id:             int
+    name:           str
+    term_id:        int
+    term_name:      str
+    lesson_types:   List[EcampusLessonTypeRefType]
+    rating_gained:  float
+    rating_max:     float
+    graded_lessons: List[EcampusGradedLessonType]
+
+
+@strawberry.type
+class EcampusOverviewType:
+    sync_status: str
+    last_sync:   Optional[str]
+    courses:     List[EcampusCourseType]
+    # Зачётка отдаётся как есть (JSON) — её форма фиксированной глубины и не
+    # участвует в проблеме производительности, поэтому не типизируем строго.
+    zachetka:    strawberry.scalars.JSON
+
+
+@strawberry.type
+class EcampusYearType:
+    """Метаданные одного учебного года — для распараллеливания myEcampus по году на фронте."""
+    year:          str
+    term_ids:      List[int]
+    course_count:  int
+
+
+@strawberry.type
+class EcampusCourseLessonsType:
+    course_id:      int
+    course_name:    str
+    # Сырые занятия — нужны целиком только при открытии конкретного курса,
+    # форма не фиксирована (поля разнятся), поэтому JSON, как и zachetka.
+    lessons:        strawberry.scalars.JSON
+    max_rating:     float
+    current_rating: float
+
+
+@strawberry.type
+class EcampusMaterialType:
+    label:    str
+    url:      str
+    icon:     str
+    external: bool
+    color:    str
+

@@ -85,8 +85,7 @@ _run_checks() {
     backend)   dirs_to_check=(backend) ;;
     bot)       dirs_to_check=(ecampus_bot) ;;
     miniapp)   dirs_to_check=(miniapp) ;;
-    dashboard) dirs_to_check=(dashboard) ;;
-    *)         dirs_to_check=(backend ecampus_bot miniapp dashboard) ;;
+    *)         dirs_to_check=(backend ecampus_bot miniapp) ;;
   esac
   for svc_dir in "${dirs_to_check[@]}"; do
     [[ ! -d "$DIR/$svc_dir/app" ]] && continue
@@ -113,7 +112,7 @@ _run_checks() {
   # 4. requirements.txt существуют и не пустые
   echo -ne "  ${CYAN}[4/4]${RESET} requirements.txt ... "
   local req_errors=0
-  for svc_dir in backend ecampus_bot miniapp dashboard; do
+  for svc_dir in backend ecampus_bot miniapp; do
     req="$DIR/$svc_dir/requirements.txt"
     if [[ ! -f "$req" ]] || [[ ! -s "$req" ]]; then
       echo -e "\n    ${RED}✗${RESET} не найден: $req"
@@ -145,14 +144,14 @@ _verify_health() {
 
   while [[ $elapsed -lt $timeout ]]; do
     local all_ok=1
-    for svc in backend bot miniapp dashboard; do
+    for svc in backend bot miniapp; do
       port="${_SVC_PORT[$svc]}"
       curl -sf --max-time 3 "http://127.0.0.1:${port}/health" &>/dev/null || { all_ok=0; break; }
     done
 
     if [[ $all_ok -eq 1 ]]; then
       echo ""
-      for svc in backend bot miniapp dashboard; do
+      for svc in backend bot miniapp; do
         port="${_SVC_PORT[$svc]}"
         resp=$(curl -sf --max-time 3 "http://127.0.0.1:${port}/health" 2>/dev/null || echo "{}")
         echo -e "  ${GREEN}✓${RESET} ${BOLD}${svc}${RESET}:${port}  $resp"
@@ -166,7 +165,7 @@ _verify_health() {
   done
 
   echo -e "\n${RED}${BOLD}❌ Health-check провалился после ${timeout}s${RESET}"
-  for svc in backend bot miniapp dashboard; do
+  for svc in backend bot miniapp; do
     port="${_SVC_PORT[$svc]}"
     if ! curl -sf --max-time 3 "http://127.0.0.1:${port}/health" &>/dev/null; then
       echo -e "  ${RED}✗${RESET} ${svc}:${port} — недоступен"
@@ -178,7 +177,7 @@ _verify_health() {
 }
 
 _save_previous() {
-  for svc in backend bot miniapp dashboard; do
+  for svc in backend bot miniapp; do
     local img="ncfu_${svc}:latest"
     docker image inspect "$img" &>/dev/null && docker tag "$img" "ncfu_${svc}:previous" 2>/dev/null || true
   done
@@ -188,7 +187,7 @@ _save_previous() {
 _rollback() {
   echo -e "\n${YELLOW}${BOLD}⚠️  Откатываемся на предыдущие образы (:previous)...${RESET}"
   local rolled=0
-  for svc in backend bot miniapp dashboard; do
+  for svc in backend bot miniapp; do
     local prev="ncfu_${svc}:previous"
     if docker image inspect "$prev" &>/dev/null 2>&1; then
       echo -e "  откат ${svc} → ${prev}"
@@ -390,7 +389,7 @@ _staging_status() {
 _staging_health() {
   echo -e "\n${BOLD}Health checks (staging):${RESET}"
   declare -A _STAGING_PORT=([backend]=18000 [bot]=18001 [miniapp]=18002 [dashboard]=18003)
-  for svc in backend bot miniapp dashboard; do
+  for svc in backend bot miniapp; do
     port="${_STAGING_PORT[$svc]}"
     if curl -sf --max-time 5 "http://127.0.0.1:${port}/health" &>/dev/null; then
       resp=$(curl -sf --max-time 5 "http://127.0.0.1:${port}/health" 2>/dev/null)

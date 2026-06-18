@@ -476,6 +476,8 @@ class SettingsBody(BaseModel):
     default_teacher:     Optional[str]  = None
     theme:               Optional[str]  = None
     accent_color:        Optional[str]  = None
+    # Язык интерфейса — общий для web, miniapp и бота (см. app/i18n/locales.py)
+    language:             Optional[str]  = None
     # Профиль расписания (сохраняется только если группа не подтверждена)
     profile_role:         Optional[str]  = None
     profile_group_id:     Optional[int]  = None

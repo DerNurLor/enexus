@@ -22,6 +22,7 @@ export interface TelegramUser {
   last_name?: string;
   username?: string;
   photo_url?: string;
+  language_code?: string;
 }
 
 declare global {
@@ -114,4 +115,5 @@ export interface Settings {
   notifications?: boolean;
   theme?: Theme;
   accent_color?: string;
+  language?: string;
 }

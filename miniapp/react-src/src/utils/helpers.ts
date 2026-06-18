@@ -47,12 +47,12 @@ export function getDateRange(q: DateQuick): { from: string; to: string } {
   return { from, to };
 }
 
-const MONTHS = ['', 'янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
-const WDAYS = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
+const MONTHS_RU = ['', 'янв', 'фев', 'мар', 'апр', 'май', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
+const WDAYS_RU = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб'];
 
-export function fmtDate(iso: string): string {
+export function fmtDate(iso: string, months: string[] = MONTHS_RU, wdays: string[] = WDAYS_RU): string {
   const d = new Date(iso + 'T00:00:00');
-  return `${WDAYS[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth() + 1]}`;
+  return `${wdays[d.getDay()]}, ${d.getDate()} ${months[d.getMonth() + 1]}`;
 }
 
 export const LT_KEY: Record<string, string> = {

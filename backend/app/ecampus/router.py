@@ -59,6 +59,83 @@ class SyncStatusResponse(BaseModel):
     sync_courses_found: int = 0
 
 
+# ── Капча: общая логика для /captcha, /connect, /reauth ───────────────────────
+#
+# [BUGFIX] Раньше captcha-сессия в Redis хранила только cookies, БЕЗ значения
+# __RequestVerificationToken (CSRF-токен из HTML-формы). А /connect и /reauth
+# при ручном вводе капчи вообще не читали сохранённую сессию — они создавали
+# НОВЫЙ httpx-клиент, заново ходили на /account/login и /Captcha/Captcha,
+# получая СВЕЖИЙ (другой) captcha-cookie и CSRF-токен, и отправляли введённый
+# пользователем код против этой новой, никогда не показанной ему капчи.
+# Результат: ручной ввод капчи был гарантированно всегда неверным, потому что
+# отправлялся code от ОДНОЙ картинки, а cookie/токен — от ДРУГОЙ. Автокапча
+# работала, т.к. там картинка получается и тут же решается в рамках одного и
+# того же запроса/клиента — несовпадения не было.
+#
+# Фикс: одна функция ходит на login+captcha ОДНИМ клиентом, сохраняет cookies
+# И csrf_token вместе, а /connect и /reauth при ручном вводе переиспользуют
+# именно эту сохранённую сессию для отправки формы — той самой, что видел
+# пользователь.
+
+async def _fetch_and_store_captcha(tg_id: int) -> str:
+    """Получает капчу с eCampus и сохраняет cookies+csrf_token в Redis (TTL 10 мин). Возвращает base64 картинку."""
+    import httpx
+    from bs4 import BeautifulSoup
+    from app.cache.redis import get_redis
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://ecampus.ncfu.ru/account/login",
+    }
+    async with httpx.AsyncClient(headers=headers, timeout=15, follow_redirects=True) as client:
+        login_resp = await client.get("https://ecampus.ncfu.ru/account/login")
+        soup = BeautifulSoup(login_resp.text, "html.parser")
+        token_el = soup.find("input", {"name": "__RequestVerificationToken"})
+        csrf_token = token_el.get("value", "") if token_el else ""
+
+        captcha_resp = await client.get("https://ecampus.ncfu.ru/Captcha/Captcha")
+        cookies = dict(client.cookies)
+
+    r = get_redis()
+    await r.setex(
+        f"ecampus:captcha_session:{tg_id}", 600,
+        json.dumps({"cookies": cookies, "csrf_token": csrf_token}),
+    )
+    return base64.b64encode(captcha_resp.content).decode()
+
+
+async def _load_captcha_session(tg_id: int) -> Optional[dict]:
+    """Возвращает {cookies, csrf_token} ранее сохранённой капча-сессии или None, если её нет/истекла."""
+    from app.cache.redis import get_redis
+
+    raw = await get_redis().get(f"ecampus:captcha_session:{tg_id}")
+    if not raw:
+        return None
+    data = json.loads(raw)
+    if not data.get("cookies") or not data.get("csrf_token"):
+        return None
+    return data
+
+
+async def _submit_ecampus_login(client, login: str, password: str, captcha_code: str, csrf_token: str):
+    """POSTит форму входа eCampus тем же httpx-клиентом (и его cookies)."""
+    return await client.post(
+        "https://ecampus.ncfu.ru/account/login?returnUrl=%2Faccount",
+        data={
+            "Login":      login,
+            "Password":   password,
+            "Code":       captcha_code,
+            "RememberMe": "true",
+            "__RequestVerificationToken": csrf_token,
+        },
+        headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": "https://ecampus.ncfu.ru/account/login",
+            "Origin":  "https://ecampus.ncfu.ru",
+        },
+    )
+
+
 # ── Получить капчу ────────────────────────────────────────────────────────────
 
 @router.get("/captcha")
@@ -66,41 +143,14 @@ async def get_captcha(current_user: AuthUser = Depends(get_current_user)):
     """
     Получает картинку капчи с eCampus и возвращает:
     - base64 изображение для отображения на сайте
-    - captcha_cookie для последующей отправки формы (хранится в Redis)
+    - cookies+csrf_token для последующей отправки формы (хранится в Redis)
     """
-    import httpx
-    from app.cache.redis import get_redis
-
-    headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        "Referer": "https://ecampus.ncfu.ru/account/login",
-    }
-
     try:
-        async with httpx.AsyncClient(headers=headers, timeout=15, follow_redirects=True) as client:
-            # Сначала получаем страницу входа — нужен CSRF токен
-            login_resp = await client.get("https://ecampus.ncfu.ru/account/login")
-            csrf_cookies = dict(client.cookies)
-
-            # Получаем капчу
-            captcha_resp = await client.get("https://ecampus.ncfu.ru/Captcha/Captcha")
-            captcha_cookies = dict(client.cookies)
-
-        # Сохраняем cookies в Redis привязанные к пользователю (TTL 10 минут)
-        r = get_redis()
-        session_data = json.dumps({
-            "csrf_cookies":    csrf_cookies,
-            "captcha_cookies": captcha_cookies,
-        })
-        await r.setex(f"ecampus:captcha_session:{current_user.tg_id}", 600, session_data)
-
-        # Возвращаем base64 картинку
-        img_b64 = base64.b64encode(captcha_resp.content).decode()
+        img_b64 = await _fetch_and_store_captcha(current_user.tg_id)
         return {
             "image": f"data:image/png;base64,{img_b64}",
             "expires_in": 600,
         }
-
     except Exception as e:
         logger.error(f"Failed to get captcha: {e}")
         raise HTTPException(status_code=503, detail=f"Не удалось получить капчу: {e}")
@@ -166,7 +216,6 @@ async def connect_ecampus(
     """
     from app.cache.redis import get_redis
     from app.ecampus.sync_service import save_credentials, ECampusSyncRecord
-    from app.ecampus.client import ECampusClient, ECampusAuthError
     import httpx
     from bs4 import BeautifulSoup
 
@@ -177,62 +226,60 @@ async def connect_ecampus(
 
     # Авторизуемся на eCampus
     try:
-        async with httpx.AsyncClient(
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
-            follow_redirects=True,
-            timeout=60,
-        ) as client:
+        if body.auto_captcha:
+            if not _2captcha_key:
+                raise HTTPException(status_code=503, detail="Автокапча не настроена на сервере.")
 
-            # Получаем CSRF токен и captcha cookie
-            login_page = await client.get("https://ecampus.ncfu.ru/account/login")
-            soup = BeautifulSoup(login_page.text, "html.parser")
-            token_el = soup.find("input", {"name": "__RequestVerificationToken"})
-            if not token_el:
-                raise HTTPException(status_code=503, detail="Не удалось получить CSRF токен")
-            csrf_token = token_el.get("value", "")
+            # Самодостаточный путь: картинка получается и решается в рамках ОДНОГО
+            # клиента/сессии — captcha-cookie и csrf-токен гарантированно соответствуют
+            # друг другу и решённому коду.
+            async with httpx.AsyncClient(
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+                follow_redirects=True,
+                timeout=60,
+            ) as client:
+                login_page = await client.get("https://ecampus.ncfu.ru/account/login")
+                soup = BeautifulSoup(login_page.text, "html.parser")
+                token_el = soup.find("input", {"name": "__RequestVerificationToken"})
+                if not token_el:
+                    raise HTTPException(status_code=503, detail="Не удалось получить CSRF токен")
+                csrf_token = token_el.get("value", "")
 
-            # Получаем капчу
-            captcha_resp = await client.get("https://ecampus.ncfu.ru/Captcha/Captcha")
-
-            if body.auto_captcha and _2captcha_key:
-                # Решаем через 2captcha
+                captcha_resp = await client.get("https://ecampus.ncfu.ru/Captcha/Captcha")
                 from app.ecampus.captcha_solver import solve_math_captcha
                 captcha_code = await solve_math_captcha(captcha_resp.content, _2captcha_key)
                 if not captcha_code:
                     raise HTTPException(status_code=502, detail="Не удалось решить капчу автоматически. Введите вручную.")
-            elif body.auto_captcha and not _2captcha_key:
-                raise HTTPException(status_code=503, detail="Автокапча не настроена на сервере.")
-            else:
-                captcha_code = body.captcha_code
-                if not captcha_code:
-                    raise HTTPException(status_code=400, detail="Введите код с картинки капчи.")
 
-            # Отправляем форму входа
-            resp = await client.post(
-                "https://ecampus.ncfu.ru/account/login?returnUrl=%2Faccount",
-                data={
-                    "Login":    body.login,
-                    "Password": body.password,
-                    "Code":     captcha_code,
-                    "RememberMe": "true",
-                    "__RequestVerificationToken": csrf_token,
-                },
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Referer": "https://ecampus.ncfu.ru/account/login",
-                    "Origin": "https://ecampus.ncfu.ru",
-                },
-            )
+                resp = await _submit_ecampus_login(client, body.login, body.password, captcha_code, csrf_token)
+                session_cookies = dict(client.cookies)
+        else:
+            # Ручной ввод — переиспользуем РОВНО ту сессию (cookies + csrf_token),
+            # в которой пользователю была показана картинка капчи (см. GET /captcha).
+            # Раньше здесь заново ходили на login+captcha, получали другую капчу,
+            # и введённый код никогда не совпадал с ней.
+            if not body.captcha_code:
+                raise HTTPException(status_code=400, detail="Введите код с картинки капчи.")
 
-            # Проверяем успешность
-            if "account/login" in str(resp.url) or "validation-summary-errors" in resp.text:
-                soup2 = BeautifulSoup(resp.text, "html.parser")
-                err_el = soup2.select_one(".validation-summary-errors ul li")
-                err_msg = err_el.text.strip() if err_el else "Неверный логин, пароль или капча"
-                raise HTTPException(status_code=401, detail=err_msg)
+            saved = await _load_captcha_session(current_user.tg_id)
+            if not saved:
+                raise HTTPException(status_code=400, detail="Капча устарела. Обновите картинку и попробуйте снова.")
 
-            # Сохраняем сессию
-            session_cookies = dict(client.cookies)
+            async with httpx.AsyncClient(
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+                cookies=saved["cookies"],
+                follow_redirects=True,
+                timeout=60,
+            ) as client:
+                resp = await _submit_ecampus_login(client, body.login, body.password, body.captcha_code, saved["csrf_token"])
+                session_cookies = dict(client.cookies)
+
+        # Проверяем успешность
+        if "account/login" in str(resp.url) or "validation-summary-errors" in resp.text:
+            soup2 = BeautifulSoup(resp.text, "html.parser")
+            err_el = soup2.select_one(".validation-summary-errors ul li")
+            err_msg = err_el.text.strip() if err_el else "Неверный логин, пароль или капча"
+            raise HTTPException(status_code=401, detail=err_msg)
 
     except HTTPException:
         raise
@@ -489,8 +536,9 @@ async def reauth_with_captcha(
     Вызывается когда /sync вернул session_expired=True.
     Использует уже сохранённые логин/пароль — пользователь вводит только капчу.
     """
-    from app.ecampus.sync_service import ECampusSyncRecord, decrypt_credential, save_credentials
+    from app.ecampus.sync_service import ECampusSyncRecord, decrypt_credential
     from app.core.config import settings
+    from app.cache.redis import get_redis
     import httpx
     from bs4 import BeautifulSoup
 
@@ -507,64 +555,72 @@ async def reauth_with_captcha(
         raise HTTPException(status_code=500, detail="Ошибка расшифровки учётных данных.")
 
     try:
-        async with httpx.AsyncClient(
-            headers={"User-Agent": "Mozilla/5.0"},
-            follow_redirects=True,
-            timeout=60,
-        ) as client:
-            login_page = await client.get("https://ecampus.ncfu.ru/account/login")
-            soup = BeautifulSoup(login_page.text, "html.parser")
-            token_el = soup.find("input", {"name": "__RequestVerificationToken"})
-            if not token_el:
-                raise HTTPException(status_code=503, detail="Не удалось получить CSRF токен.")
-            csrf_token = token_el.get("value", "")
+        if body.auto_captcha:
+            # Самодостаточный путь: картинка получается и решается в рамках ОДНОГО
+            # клиента/сессии, несовпадения cookie/csrf с кодом быть не может.
+            async with httpx.AsyncClient(
+                headers={"User-Agent": "Mozilla/5.0"},
+                follow_redirects=True,
+                timeout=60,
+            ) as client:
+                login_page = await client.get("https://ecampus.ncfu.ru/account/login")
+                soup = BeautifulSoup(login_page.text, "html.parser")
+                token_el = soup.find("input", {"name": "__RequestVerificationToken"})
+                if not token_el:
+                    raise HTTPException(status_code=503, detail="Не удалось получить CSRF токен.")
+                csrf_token = token_el.get("value", "")
 
-            captcha_resp = await client.get("https://ecampus.ncfu.ru/Captcha/Captcha")
+                captcha_resp = await client.get("https://ecampus.ncfu.ru/Captcha/Captcha")
 
-            if body.auto_captcha and _2captcha_key:
+                if not _2captcha_key:
+                    img_b64 = base64.b64encode(captcha_resp.content).decode()
+                    return {"ok": False, "session_expired": True, "captcha_image": img_b64,
+                            "message": "Автокапча не настроена на сервере. Введите вручную."}
+
                 captcha_code = await solve_math_captcha(captcha_resp.content, _2captcha_key)
                 if not captcha_code:
-                    # Не справились — отдаём капчу пользователю
                     img_b64 = base64.b64encode(captcha_resp.content).decode()
-                    return {
-                        "ok": False,
-                        "session_expired": True,
-                        "captcha_image": img_b64,
-                        "message": "Не удалось решить капчу автоматически. Введите вручную.",
-                    }
-            else:
-                captcha_code = body.captcha_code
-                if not captcha_code:
-                    raise HTTPException(status_code=400, detail="Введите код с картинки капчи.")
+                    return {"ok": False, "session_expired": True, "captcha_image": img_b64,
+                            "message": "Не удалось решить капчу автоматически. Введите вручную."}
 
-            resp = await client.post(
-                "https://ecampus.ncfu.ru/account/login?returnUrl=%2Faccount",
-                data={
-                    "Login":    login,
-                    "Password": password,
-                    "Code":     captcha_code,
-                    "RememberMe": "true",
-                    "__RequestVerificationToken": csrf_token,
-                },
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Referer": "https://ecampus.ncfu.ru/account/login",
-                    "Origin":  "https://ecampus.ncfu.ru",
-                },
-            )
+                resp = await _submit_ecampus_login(client, login, password, captcha_code, csrf_token)
 
-            if "account/login" in str(resp.url) or "validation-summary-errors" in resp.text:
-                # Неверная капча или пароль сменился — возвращаем новую капчу
-                captcha_resp2 = await client.get("https://ecampus.ncfu.ru/Captcha/Captcha")
-                img_b64 = base64.b64encode(captcha_resp2.content).decode()
-                return {
-                    "ok": False,
-                    "session_expired": True,
-                    "captcha_image": img_b64,
-                    "message": "Неверная капча. Попробуйте снова.",
-                }
+                if "account/login" in str(resp.url) or "validation-summary-errors" in resp.text:
+                    img_b64 = await _fetch_and_store_captcha(current_user.tg_id)
+                    return {"ok": False, "session_expired": True, "captcha_image": img_b64,
+                            "message": "Неверная капча. Попробуйте снова."}
 
-            session_cookies = dict(client.cookies)
+                session_cookies = dict(client.cookies)
+        else:
+            # Ручной ввод — переиспользуем РОВНО ту сессию (cookies + csrf_token),
+            # в которой пользователю была показана картинка капчи. Раньше здесь
+            # заново ходили на login+captcha, получали другую капчу, и введённый
+            # код никогда не совпадал с ней — отсюда "капча всегда неверная".
+            if not body.captcha_code:
+                raise HTTPException(status_code=400, detail="Введите код с картинки капчи.")
+
+            saved = await _load_captcha_session(current_user.tg_id)
+            if not saved:
+                img_b64 = await _fetch_and_store_captcha(current_user.tg_id)
+                return {"ok": False, "session_expired": True, "captcha_image": img_b64,
+                        "message": "Капча устарела. Введите код с новой картинки."}
+
+            async with httpx.AsyncClient(
+                headers={"User-Agent": "Mozilla/5.0"},
+                cookies=saved["cookies"],
+                follow_redirects=True,
+                timeout=60,
+            ) as client:
+                resp = await _submit_ecampus_login(client, login, password, body.captcha_code, saved["csrf_token"])
+
+                if "account/login" in str(resp.url) or "validation-summary-errors" in resp.text:
+                    # Неверная капча или пароль сменился — отдаём НОВУЮ картинку и
+                    # сохраняем под ней свежую сессию для следующей попытки.
+                    img_b64 = await _fetch_and_store_captcha(current_user.tg_id)
+                    return {"ok": False, "session_expired": True, "captcha_image": img_b64,
+                            "message": "Неверная капча. Попробуйте снова."}
+
+                session_cookies = dict(client.cookies)
 
     except HTTPException:
         raise
@@ -573,6 +629,7 @@ async def reauth_with_captcha(
 
     # Обновляем сессию
     await record.set({"session_cookies_json": json.dumps(session_cookies), "error_msg": None})
+    await get_redis().delete(f"ecampus:captcha_session:{current_user.tg_id}")
 
     background_tasks.add_task(_background_sync, current_user.tg_id)
     return {"ok": True, "message": "Сессия обновлена, синхронизация запущена."}
@@ -716,23 +773,13 @@ async def _silent_reauth(record, captcha_api_key: str) -> bool:
 
 
 async def _fetch_fresh_captcha(tg_id: int) -> dict:
-    """Получает свежую капчу и сохраняет captcha session в Redis."""
-    import httpx
-
-    async with httpx.AsyncClient(
-        headers={"User-Agent": "Mozilla/5.0"},
-        follow_redirects=True,
-        timeout=20,
-    ) as client:
-        captcha_resp = await client.get("https://ecampus.ncfu.ru/Captcha/Captcha")
-        captcha_cookies = dict(client.cookies)
-
-    from app.cache.redis import get_redis
-    r = get_redis()
-    session_data = json.dumps({"captcha_cookies": captcha_cookies, "captcha_image": None})
-    await r.setex(f"ecampus:captcha_session:{tg_id}", 600, session_data)
-
-    img_b64 = base64.b64encode(captcha_resp.content).decode()
+    """
+    Получает свежую капчу и сохраняет captcha-сессию (cookies+csrf_token) в Redis.
+    [BUGFIX] Раньше ходила только на /Captcha/Captcha (без /account/login) и
+    сохраняла только cookies без csrf_token — /reauth не мог корректно
+    переотправить форму с тем же токеном для ручного ввода капчи.
+    """
+    img_b64 = await _fetch_and_store_captcha(tg_id)
     return {"image": img_b64}
 
 
@@ -744,8 +791,7 @@ async def get_course_lessons(
     current_user: AuthUser = Depends(get_current_user),
 ):
     """Возвращает занятия курса, обогащённые аудиторией из расписания."""
-    from app.ecampus.sync_service import ECampusSyncRecord
-    from app.db.database import get_motor_db
+    from app.ecampus.sync_service import ECampusSyncRecord, enrich_lessons_with_room
 
     record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == current_user.tg_id)
     if not record:
@@ -759,37 +805,8 @@ async def get_course_lessons(
         raise HTTPException(status_code=404, detail="Курс не найден.")
 
     lessons = course.get("lessons", {})
-
-    # Обогащаем аудиторией из расписания если она пустая
     if group_id:
-        from app.models.lesson import LessonDoc
-        import re
-        course_name = course.get("Name", "")
-        course_name_short = course_name[:15]
-        # Загружаем расписание группы через Beanie
-        schedule_lessons = await LessonDoc.find(
-            LessonDoc.group_id == group_id,
-        ).to_list()
-        # Фильтруем по предмету
-        schedule_lessons = [
-            sl for sl in schedule_lessons
-            if sl.subject and re.search(re.escape(course_name_short), sl.subject, re.IGNORECASE)
-        ]
-        # Строим индекс дата -> аудитория
-        room_by_date: dict[str, str] = {}
-        for sl in schedule_lessons:
-            date_key = sl.date.strftime("%Y-%m-%d") if sl.date else ""
-            room = sl.room_name or ""
-            if room and room != "None":
-                room_by_date[date_key] = room
-
-        # Обогащаем занятия
-        for lt_lessons in lessons.values():
-            for lesson in lt_lessons:
-                if not lesson.get("Room"):
-                    date_key = str(lesson.get("Date", ""))[:10]
-                    if date_key in room_by_date:
-                        lesson["Room"] = room_by_date[date_key]
+        lessons = await enrich_lessons_with_room(lessons, course.get("Name", ""), group_id)
 
     return {
         "course_id":      course_id,
@@ -913,7 +930,7 @@ async def get_course_materials(
     current_user: AuthUser = Depends(get_current_user),
 ):
     """Возвращает список доступных материалов для курса."""
-    from app.ecampus.sync_service import ECampusSyncRecord
+    from app.ecampus.sync_service import ECampusSyncRecord, build_course_materials
 
     record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == current_user.tg_id)
     if not record:
@@ -926,77 +943,7 @@ async def get_course_materials(
     if not course:
         raise HTTPException(status_code=404, detail="Курс не найден.")
 
-    materials = []
-    BASE = "/api/ecampus"
-
-    # УМК дисциплины — всегда доступен
-    materials.append({
-        "label": "УМК дисциплины",
-        "url": "https://dspace.ncfu.ru/",
-        "icon": "📚",
-        "external": True,
-        "color": "#10b981",
-    })
-
-    # Курс лекций
-    if course.get("HasLectures"):
-        materials.append({
-            "label": "Курс лекций",
-            "url": f"{BASE}/file/lecture?kodCh={course_id}",
-            "icon": "📖",
-            "external": False,
-            "color": "#3b82f6",
-        })
-
-    # Методические указания
-    if course.get("HasUMK"):
-        materials.append({
-            "label": "Метод. указания",
-            "url": f"{BASE}/file/umk?kodCh={course_id}",
-            "icon": "📋",
-            "external": False,
-            "color": "#8b5cf6",
-        })
-
-    # Инструкция
-    if course.get("HasInstruction"):
-        materials.append({
-            "label": "Инструкция",
-            "url": f"{BASE}/file/instruction?kodCh={course_id}",
-            "icon": "📄",
-            "external": False,
-            "color": "#f59e0b",
-        })
-
-    # Рабочая программа (если locked=True — значит файл доступен)
-    if course.get("locked"):
-        materials.append({
-            "label": "Рабочая программа",
-            "url": f"{BASE}/file/program?kodCh={course_id}",
-            "icon": "📑",
-            "external": False,
-            "color": "#ef4444",
-        })
-
-    # СЭО — всегда
-    materials.append({
-        "label": "СЭО",
-        "url": "https://el.ncfu.ru/",
-        "icon": "🖥",
-        "external": True,
-        "color": "#6b7280",
-    })
-
-    # eCampus — прямая ссылка
-    materials.append({
-        "label": "eCampus",
-        "url": "https://ecampus.ncfu.ru/studies",
-        "icon": "🔗",
-        "external": True,
-        "color": "#6b7280",
-    })
-
-    return {"materials": materials}
+    return {"materials": build_course_materials(course, course_id)}
 
 
 # ── Переподтверждение группы (для уже подключённых) ─────────────────────────

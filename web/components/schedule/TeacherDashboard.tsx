@@ -126,18 +126,19 @@ function lessonTypeLabel(t: string | null): string {
 
 // ── Главный компонент ─────────────────────────────────────────────────────────
 interface Props {
-  teacherId:   number
-  teacherName: string
+  teacherId:    number
+  teacherName:  string
   todayLessons: Lesson[]   // уже загруженные уроки текущего дня
+  selectedDate: Date       // выбранная дата — определяет отображаемую неделю
 }
 
-export function TeacherDashboard({ teacherId, teacherName, todayLessons }: Props) {
+export function TeacherDashboard({ teacherId, teacherName, todayLessons, selectedDate }: Props) {
   const [expanded, setExpanded] = useState(false)
-  const currentWeek = getISOWeek(new Date())
+  const selectedWeek = getISOWeek(selectedDate)
 
   const { data: weekData, isLoading } = useQuery<WeekResponse>({
-    queryKey: ['teacher-week-dash', teacherId, currentWeek],
-    queryFn:  () => api.getTeacherWeek(teacherId, currentWeek),
+    queryKey: ['teacher-week-dash', teacherId, selectedWeek],
+    queryFn:  () => api.getTeacherWeek(teacherId, selectedWeek),
     staleTime: 5 * 60_000,
   })
 
@@ -218,13 +219,13 @@ export function TeacherDashboard({ teacherId, teacherName, todayLessons }: Props
           {stats && (
             <span className="text-xs px-2 py-0.5 rounded-full"
               style={{ background: 'var(--surface)', color: 'var(--t-muted)' }}>
-              {stats.totalLessons} пар · {stats.totalHours}ч
+              {stats.totalLessons} пар · {stats.totalHours}ч · {selectedWeek} нед.
             </span>
           )}
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={(e) => { e.stopPropagation(); exportICS(teacherId, teacherName, currentWeek) }}
+            onClick={(e) => { e.stopPropagation(); exportICS(teacherId, teacherName, selectedWeek) }}
             className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] hover:bg-white/5 transition-colors"
             style={{ color: 'var(--t-muted)', border: '1px solid var(--border)' }}
             title="Скачать .ics"

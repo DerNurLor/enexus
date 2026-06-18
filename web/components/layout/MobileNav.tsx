@@ -3,20 +3,22 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { CalendarDays, BookOpen, User, Map } from 'lucide-react'
 import { useScheduleStore } from '@/lib/store'
+import { useT } from '@/lib/i18n'
 
 export function MobileNav() {
   const pathname      = usePathname()
   const newGradesCount = useScheduleStore((s) => s.newGradesCount)
   const profile        = useScheduleStore((s) => s.profile)
   const isTeacher      = profile?.role === 'teacher'
+  const { t } = useT()
 
   const NAV_ITEMS = [
-    { href: '/schedule', label: 'Расписание', icon: CalendarDays },
-    { href: '/map',      label: 'Карта',       icon: Map          },
+    { href: '/schedule', label: t('nav.schedule'), icon: CalendarDays },
+    { href: '/map',      label: t('nav.map'),       icon: Map          },
     isTeacher
-      ? { href: '/teacher', label: 'Занятия', icon: BookOpen }
-      : { href: '/ecampus', label: 'Предметы', icon: BookOpen },
-    { href: '/profile',  label: 'Профиль',     icon: User         },
+      ? { href: '/teacher', label: t('nav.lessons_short'), icon: BookOpen }
+      : { href: '/ecampus', label: t('nav.subjects'), icon: BookOpen },
+    { href: '/profile',  label: t('nav.profile'),     icon: User         },
   ]
 
   return (

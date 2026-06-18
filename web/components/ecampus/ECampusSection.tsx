@@ -5,6 +5,7 @@ import {
   BookOpen, RefreshCw, Trash2, CheckCircle, AlertCircle,
   Loader2, ChevronDown, ChevronUp, Eye, EyeOff, Sparkles, Download
 } from 'lucide-react'
+import { fetchEcampusOverview, clearEcampusCache } from '@/lib/ecampus'
 
 const API_BASE = (process.env.NEXT_PUBLIC_API_URL || '') + '/api/ecampus'
 
@@ -89,7 +90,7 @@ export function ECampusSection({ token, tgAuthReady = true }: Props) {
 
   const { data: syncData } = useQuery({
     queryKey: ['ecampus-data'],
-    queryFn:  () => authedFetch('/data'),
+    queryFn:  fetchEcampusOverview,
     enabled:  !!token && status?.sync_status === 'ok',
   })
 
@@ -140,6 +141,7 @@ export function ECampusSection({ token, tgAuthReady = true }: Props) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ecampus-status'] })
       qc.removeQueries({ queryKey: ['ecampus-data'] })
+      clearEcampusCache()
       setReauthState('idle')
     },
   })
@@ -494,11 +496,11 @@ export function ECampusSection({ token, tgAuthReady = true }: Props) {
                 className="flex items-center gap-1 text-xs w-full text-left"
                 style={{ color: 'var(--t-secondary)' }}>
                 {showData ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                {showData ? 'Скрыть предметы' : `Предметы (${syncData.courses.length})`}
+                {showData ? 'Скрыть предметы' : `Предметы (${syncData?.courses.length ?? 0})`}
               </button>
               {showData && (
                 <div className="mt-2 flex flex-col gap-1 max-h-52 overflow-y-auto">
-                  {syncData.courses.map((c: any, i: number) => (
+                  {syncData?.courses.map((c: any, i: number) => (
                     <div key={i} className="flex items-center px-3 py-2 rounded-lg"
                       style={{ background: 'var(--surface)' }}>
                       <p className="text-xs truncate flex-1" style={{ color: 'var(--t-primary)' }}>
