@@ -132,6 +132,74 @@ async def delete_credentials(tg_id: int) -> bool:
     return False
 
 
+# ── Общая логика для REST /course/{id}/lessons|materials и GraphQL courseLessons|courseMaterials ──
+# Вынесено в один модуль, чтобы REST и GraphQL не расходились в поведении.
+
+async def enrich_lessons_with_room(lessons: dict, course_name: str, group_id: int) -> dict:
+    """Заполняет пустой Room в lessons из расписания группы (LessonDoc) по совпадению предмета."""
+    from app.models.lesson import LessonDoc
+    import re
+
+    course_name_short = course_name[:15]
+    schedule_lessons = await LessonDoc.find(LessonDoc.group_id == group_id).to_list()
+    schedule_lessons = [
+        sl for sl in schedule_lessons
+        if sl.subject and re.search(re.escape(course_name_short), sl.subject, re.IGNORECASE)
+    ]
+    room_by_date: dict[str, str] = {}
+    for sl in schedule_lessons:
+        date_key = sl.date.strftime("%Y-%m-%d") if sl.date else ""
+        room = sl.room_name or ""
+        if room and room != "None":
+            room_by_date[date_key] = room
+
+    for lt_lessons in lessons.values():
+        for lesson in lt_lessons:
+            if not lesson.get("Room"):
+                date_key = str(lesson.get("Date", ""))[:10]
+                if date_key in room_by_date:
+                    lesson["Room"] = room_by_date[date_key]
+    return lessons
+
+
+def build_course_materials(course: dict, course_id: int) -> list[dict]:
+    """Список доступных материалов курса — чисто вычисляемая функция, без I/O."""
+    BASE = "/api/ecampus"
+    materials = [{
+        "label": "УМК дисциплины", "url": "https://dspace.ncfu.ru/",
+        "icon": "📚", "external": True, "color": "#10b981",
+    }]
+    if course.get("HasLectures"):
+        materials.append({
+            "label": "Курс лекций", "url": f"{BASE}/file/lecture?kodCh={course_id}",
+            "icon": "📖", "external": False, "color": "#3b82f6",
+        })
+    if course.get("HasUMK"):
+        materials.append({
+            "label": "Метод. указания", "url": f"{BASE}/file/umk?kodCh={course_id}",
+            "icon": "📋", "external": False, "color": "#8b5cf6",
+        })
+    if course.get("HasInstruction"):
+        materials.append({
+            "label": "Инструкция", "url": f"{BASE}/file/instruction?kodCh={course_id}",
+            "icon": "📄", "external": False, "color": "#f59e0b",
+        })
+    if course.get("locked"):
+        materials.append({
+            "label": "Рабочая программа", "url": f"{BASE}/file/program?kodCh={course_id}",
+            "icon": "📑", "external": False, "color": "#ef4444",
+        })
+    materials.append({
+        "label": "СЭО", "url": "https://el.ncfu.ru/",
+        "icon": "🖥", "external": True, "color": "#6b7280",
+    })
+    materials.append({
+        "label": "eCampus", "url": "https://ecampus.ncfu.ru/studies",
+        "icon": "🔗", "external": True, "color": "#6b7280",
+    })
+    return materials
+
+
 # ── Task handler для очереди ──────────────────────────────────────────────────
 
 async def task_handler(task) -> dict:
@@ -256,7 +324,15 @@ async def _handle_fetch_course(task) -> dict:
 
 async def _collect_all_data(client, record: ECampusSyncRecord, viewmodel: dict) -> dict:
     """Собирает все доступные данные студента."""
-    all_courses, all_grades, all_files, all_links = [], {}, [], []
+    # Начинаем с существующих курсов — никогда не обнуляем данные в процессе синхронизации.
+    # Ключ: (Id, term_id) — уникальная пара курс+семестр.
+    course_map: dict[tuple, dict] = {}
+    for c in (record.courses or []):
+        key = (c.get("Id"), c.get("term_id"))
+        if key != (None, None):
+            course_map[key] = c
+
+    all_grades, all_files, all_links = {}, [], []
 
     # Получаем профиль студента
     try:
@@ -327,7 +403,7 @@ async def _collect_all_data(client, record: ECampusSyncRecord, viewmodel: dict) 
 
     if not student_id:
         logger.warning("student_id not found in viewModel")
-        return {"courses": [], "grades": {}, "files": [], "links": []}
+        return {"courses": list(course_map.values()), "grades": {}, "files": [], "links": []}
 
     if record.student_id != student_id:
         await record.set({"student_id": student_id})
@@ -369,7 +445,9 @@ async def _collect_all_data(client, record: ECampusSyncRecord, viewmodel: dict) 
             course["term_id"]   = term_id
             term_name = term.get("_year_name", "") + " " + term.get("Name", term.get("name", ""))
             course["term_name"] = term_name.strip()
-            course["lessons"]   = {}
+            # Сохраняем уже загруженные занятия из предыдущей синхронизации
+            existing_key = (course.get("Id"), term_id)
+            course["lessons"] = course_map.get(existing_key, {}).get("lessons", {})
 
         # Параллельная загрузка занятий для всех курсов семестра
         lesson_tasks = []
@@ -380,7 +458,7 @@ async def _collect_all_data(client, record: ECampusSyncRecord, viewmodel: dict) 
                     lesson_tasks.append((lt_id, lt.get("Name", str(lt_id)), ci))
 
         if lesson_tasks:
-            LESSON_CONCURRENCY = 6
+            LESSON_CONCURRENCY = 8
             LESSON_TIMEOUT     = 25
             sem = asyncio.Semaphore(LESSON_CONCURRENCY)
 
@@ -413,16 +491,20 @@ async def _collect_all_data(client, record: ECampusSyncRecord, viewmodel: dict) 
 
             await asyncio.gather(*[_fetch_one(lt_id, lt_name, ci) for lt_id, lt_name, ci in lesson_tasks])
 
-        all_courses.extend(courses)
+        # Обновляем course_map (merge: не удаляем данные из других семестров)
+        for course in courses:
+            key = (course.get("Id"), term_id)
+            course_map[key] = course
 
         done_terms += 1
         pct = 5 + int(done_terms / max(total_terms, 1) * 90)
         loaded_ids = list(record.sync_loaded_term_ids or []) + [term_id]
+        merged_courses = list(course_map.values())
         await record.set({
-            "sync_done_terms":     done_terms,
-            "sync_progress":       pct,
-            "sync_courses_found":  len(all_courses),
-            "courses":             all_courses,
+            "sync_done_terms":      done_terms,
+            "sync_progress":        pct,
+            "sync_courses_found":   len(merged_courses),
+            "courses":              merged_courses,
             "sync_loaded_term_ids": loaded_ids,
         })
 
@@ -433,7 +515,8 @@ async def _collect_all_data(client, record: ECampusSyncRecord, viewmodel: dict) 
             seen.add(f["url"])
             unique_files.append(f)
 
-    return {"courses": all_courses, "grades": all_grades, "files": unique_files, "links": all_links}
+    final_courses = list(course_map.values())
+    return {"courses": final_courses, "grades": all_grades, "files": unique_files, "links": all_links}
 
 
 async def sync_profiles_due() -> dict:

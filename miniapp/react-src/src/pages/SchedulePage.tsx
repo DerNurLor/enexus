@@ -5,6 +5,7 @@ import type {
   SearchType, ScheduleResponse, Day, Lesson, SearchResult, Settings, Favorite
 } from '../types'
 import { IconSearch } from '../components/Icons'
+import { useI18n } from '../i18n'
 
 interface Props {
   isActive: boolean
@@ -22,6 +23,7 @@ interface AutoItem {
 }
 
 export function SchedulePage({ settings, favorites, onAddFav, toast, isActive }: Props) {
+  const { t } = useI18n()
   const [searchType, setSearchType] = useState<SearchType>('group')
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState<AutoItem | null>(null)
@@ -118,7 +120,7 @@ export function SchedulePage({ settings, favorites, onAddFav, toast, isActive }:
 
   const doSearch = useCallback(async () => {
     const name = selected?.name ?? query.trim()
-    if (!name) { toast('Введите название для поиска'); return }
+    if (!name) { toast(t('schedule.enter_name')); return }
     window.Telegram?.WebApp?.HapticFeedback?.impactOccurred('medium')
     setLoading(true)
     setResult(null)
@@ -132,11 +134,11 @@ export function SchedulePage({ settings, favorites, onAddFav, toast, isActive }:
       const data = await api<ScheduleResponse>(`/miniapp/api/schedule?${params}`)
       setResult(data)
     } catch (e) {
-      toast((e as Error).message ?? 'Ошибка загрузки')
+      toast((e as Error).message ?? t('schedule.load_error'))
     } finally {
       setLoading(false)
     }
-  }, [selected, query, searchType, dateFrom, dateTo, toast])
+  }, [selected, query, searchType, dateFrom, dateTo, toast, t])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === 'Enter') { setAcVisible(false); doSearch() }
@@ -147,31 +149,31 @@ export function SchedulePage({ settings, favorites, onAddFav, toast, isActive }:
     : false
 
   const PLACEHOLDERS: Record<SearchType, string> = {
-    group: 'Группа: ИСС-б-о-22-3',
-    teacher: 'Фамилия И.О.',
-    room: 'Аудитория 301',
+    group: t('schedule.placeholder_group'),
+    teacher: t('schedule.placeholder_teacher'),
+    room: t('schedule.placeholder_room'),
   }
 
   return (
     <div id="page-schedule" className={`page${isActive ? " active" : ""}`}>
-      <div className="sec-head">РАСПИСАНИЕ</div>
-      <div className="sec-subhead">Поиск по группам, преподавателям, аудиториям</div>
+      <div className="sec-head">{t('schedule.title')}</div>
+      <div className="sec-subhead">{t('schedule.subtitle')}</div>
 
       {/* Search type chips */}
       <div className="chip-row">
-        {(['group', 'teacher', 'room'] as SearchType[]).map(t => (
+        {(['group', 'teacher', 'room'] as SearchType[]).map(st => (
           <button
-            key={t}
-            className={`chip${searchType === t ? ' active' : ''}`}
+            key={st}
+            className={`chip${searchType === st ? ' active' : ''}`}
             onClick={() => {
-              setSearchType(t)
+              setSearchType(st)
               setSelected(null)
               setQuery('')
               setAcVisible(false)
               setResult(null)
             }}
           >
-            {t === 'group' ? 'Группа' : t === 'teacher' ? 'Преподаватель' : 'Аудитория'}
+            {st === 'group' ? t('common.type_group') : st === 'teacher' ? t('common.type_teacher') : t('common.type_room')}
           </button>
         ))}
       </div>
@@ -210,7 +212,7 @@ export function SchedulePage({ settings, favorites, onAddFav, toast, isActive }:
       {/* Date range */}
       <div className="date-grid" style={{ marginBottom: 10 }}>
         <div>
-          <div className="field-label">С</div>
+          <div className="field-label">{t('common.from')}</div>
           <input
             type="date"
             value={dateFrom}
@@ -218,7 +220,7 @@ export function SchedulePage({ settings, favorites, onAddFav, toast, isActive }:
           />
         </div>
         <div>
-          <div className="field-label">По</div>
+          <div className="field-label">{t('common.to')}</div>
           <input
             type="date"
             value={dateTo}
@@ -229,7 +231,7 @@ export function SchedulePage({ settings, favorites, onAddFav, toast, isActive }:
 
       {/* Quick date chips */}
       <div className="chip-row">
-        {([['today', 'Сегодня'], ['tomorrow', 'Завтра'], ['week', 'Неделя'], ['next-week', 'Сл. неделя']] as [DateQuick, string][]).map(([q, label]) => (
+        {([['today', t('date.today')], ['tomorrow', t('date.tomorrow')], ['week', t('date.week')], ['next-week', t('date.next_week')]] as [DateQuick, string][]).map(([q, label]) => (
           <button
             key={q}
             className={`chip${activeQuick === q ? ' active' : ''}`}
@@ -249,7 +251,7 @@ export function SchedulePage({ settings, favorites, onAddFav, toast, isActive }:
         {loading ? <span className="spinner" /> : (
           <IconSearch size={15} />
         )}
-        {loading ? 'Поиск…' : 'Показать расписание'}
+        {loading ? t('common.searching') : t('schedule.show_button')}
       </button>
 
       {/* Results */}
@@ -293,6 +295,7 @@ interface ResultProps {
 }
 
 function ScheduleResult({ data, name, settings, isInFav, onFav }: ResultProps) {
+  const { t } = useI18n()
   const days = data.days ?? []
   const total = data.meta?.total ?? 0
 
@@ -300,8 +303,8 @@ function ScheduleResult({ data, name, settings, isInFav, onFav }: ResultProps) {
     return (
       <div className="empty-state">
         <div className="empty-icon">📭</div>
-        <div className="empty-title">НЕТ ЗАНЯТИЙ</div>
-        <div className="empty-desc">За выбранный период расписание отсутствует</div>
+        <div className="empty-title">{t('schedule.no_lessons_title')}</div>
+        <div className="empty-desc">{t('schedule.no_lessons_desc')}</div>
       </div>
     )
   }
@@ -309,13 +312,13 @@ function ScheduleResult({ data, name, settings, isInFav, onFav }: ResultProps) {
   return (
     <>
       <div className="results-header">
-        <span className="results-count">{total} занятий · {name}</span>
+        <span className="results-count">{t('schedule.lessons_count', { count: total, name })}</span>
         <button
           className="btn btn-secondary btn-sm"
           onClick={onFav}
           style={{ width: 'auto', gap: 5 }}
         >
-          {isInFav ? '★' : '☆'} Избранное
+          {isInFav ? '★' : '☆'} {t('schedule.favorite_button')}
         </button>
       </div>
       {days.map((day: Day) => (
@@ -326,13 +329,14 @@ function ScheduleResult({ data, name, settings, isInFav, onFav }: ResultProps) {
 }
 
 function DayBlock({ day, compact }: { day: Day; compact?: boolean }) {
+  const { t, months, wdays } = useI18n()
   const lessons = day.lessons ?? []
   if (!lessons.length) return null
   return (
     <div className="day-block">
       <div className="day-label">
-        {fmtDate(day.date)}
-        <span className="day-label-meta">Нед. {day.weekNumber ?? '—'}</span>
+        {fmtDate(day.date, months, wdays)}
+        <span className="day-label-meta">{t('schedule.week_short')} {day.weekNumber ?? '—'}</span>
       </div>
       {lessons.map((l: Lesson, i: number) => (
         <LessonCard key={i} lesson={l} compact={compact} index={i} />
@@ -342,6 +346,7 @@ function DayBlock({ day, compact }: { day: Day; compact?: boolean }) {
 }
 
 function LessonCard({ lesson: l, compact, index }: { lesson: Lesson; compact?: boolean; index: number }) {
+  const { t } = useI18n()
   const ltKey = LT_KEY[l.lessonType ?? ''] ?? 'lec'
   const ltShort = LT_SHORT[l.lessonType ?? ''] ?? ''
 
@@ -361,7 +366,7 @@ function LessonCard({ lesson: l, compact, index }: { lesson: Lesson; compact?: b
           {l.teacherName && <span className="lesson-meta-item">👤 {l.teacherName}</span>}
           {l.groupName && <span className="lesson-meta-item">👥 {l.groupName}</span>}
           {l.building && <span className="lesson-meta-item">🏛 {l.building}</span>}
-          {l.subgroup && <span className="lesson-meta-item">Пгр.{l.subgroup}</span>}
+          {l.subgroup && <span className="lesson-meta-item">{t('schedule.subgroup_short')}{l.subgroup}</span>}
         </div>
       )}
     </div>

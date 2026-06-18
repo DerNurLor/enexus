@@ -27,6 +27,7 @@ from aiogram.filters.callback_data import CallbackData
 from loguru import logger
 
 from app.core.config import settings
+from app.i18n import t, get_user_lang, DEFAULT_LANG
 
 
 # ── Callback data ─────────────────────────────────────────────────────────────
@@ -90,14 +91,9 @@ async def cmd_login(message: Message) -> None:
     /login — показывает инструкцию как войти на сайт.
     """
     web_url = _get_web_url()
+    lang = await get_user_lang(message.from_user.id) if message.from_user else DEFAULT_LANG
     await message.answer(
-        "🔐 <b>Вход на сайт</b>\n\n"
-        f"1. Откройте <a href=\"{web_url}/profile\">{web_url}/profile</a>\n"
-        "2. Нажмите <b>«Войти через Telegram»</b>\n"
-        "3. Вам покажут <b>6-буквенный код</b> (заглавные латинские)\n"
-        "4. Отправьте этот код командой <code>/code XXXXXX</code>\n"
-        "5. Подтвердите вход — страница обновится автоматически\n\n"
-        "💡 Или просто напишите <code>/code</code> и код через пробел.",
+        t("login.instructions", lang, web_url=web_url),
         parse_mode="HTML",
         disable_web_page_preview=True,
     )
@@ -111,26 +107,18 @@ async def cmd_code(message: Message) -> None:
     tg_user = message.from_user
     if not tg_user:
         return
+    lang = await get_user_lang(tg_user.id)
 
     # Извлекаем код из аргументов команды
     parts = (message.text or "").strip().split(maxsplit=1)
     if len(parts) < 2 or not parts[1].strip():
-        await message.answer(
-            "❓ Укажи код после команды:\n"
-            "<code>/code XXXXXX</code>\n\n"
-            "Код отображается на сайте при нажатии «Войти через Telegram».",
-            parse_mode="HTML",
-        )
+        await message.answer(t("login.code_missing", lang), parse_mode="HTML")
         return
 
     code = parts[1].strip().upper()  # приводим к верхнему регистру на всякий случай
 
     if not re.fullmatch(r"[A-Z0-9]{6}", code):
-        await message.answer(
-            "❌ Код должен состоять из <b>6 заглавных букв и цифр</b>.\n"
-            "Пример: <code>/code ABCDEF</code>",
-            parse_mode="HTML",
-        )
+        await message.answer(t("login.code_invalid_format", lang), parse_mode="HTML")
         return
 
     await _process_code(message, tg_user, code)
@@ -153,17 +141,18 @@ async def handle_login_code(message: Message) -> None:
 
 async def _process_code(message: Message, tg_user, code: str) -> None:
     """Общая логика проверки кода и запроса подтверждения."""
+    lang = await get_user_lang(tg_user.id)
 
     # Убеждаемся что пользователь есть в БД
     try:
         from app.bot.handlers.commands import _get_or_create_user
         user, _ = await _get_or_create_user(tg_user)
         if user.is_blocked:
-            await message.answer("❌ Ваш аккаунт заблокирован.")
+            await message.answer(t("login.account_blocked", lang))
             return
     except Exception as exc:
         logger.error(f"Failed to get/create user for tg_id={tg_user.id}: {exc}")
-        await message.answer("⚠️ Ошибка сервера. Попробуйте позже.")
+        await message.answer(t("login.server_error", lang))
         return
 
     # Проверяем код через API
@@ -173,33 +162,27 @@ async def _process_code(message: Message, tg_user, code: str) -> None:
     })
 
     if not result or not result.get("ok"):
-        error = result.get("detail", "Неверный или истёкший код") if result else "Ошибка сервера"
-        await message.answer(
-            f"❌ <b>{error}</b>\n\n"
-            "Проверьте код на сайте и попробуйте снова.\n"
-            "Код действителен <b>3 минуты</b>.",
-            parse_mode="HTML",
-        )
+        error = result.get("detail") if result else None
+        error = error or (t("login.code_error_default", lang) if result else t("login.code_error_server", lang))
+        await message.answer(t("login.code_error", lang, error=error), parse_mode="HTML")
         return
 
     session_id = result.get("session_id", "")
-    name = tg_user.first_name or "пользователь"
+    name = tg_user.first_name or t("login.default_name", lang)
 
     kb = InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(
-            text="✅ Подтвердить вход",
+            text=t("login.confirm_button", lang),
             callback_data=LoginConfirmCallback(action="confirm", session_id=session_id).pack(),
         ),
         InlineKeyboardButton(
-            text="❌ Отмена",
+            text=t("login.cancel_button", lang),
             callback_data=LoginConfirmCallback(action="cancel", session_id=session_id).pack(),
         ),
     ]])
 
     await message.answer(
-        f"🔐 <b>Подтверждение входа</b>\n\n"
-        f"Привет, {name}! Кто-то входит на сайт с твоим аккаунтом.\n\n"
-        f"Подтвердить вход?",
+        t("login.confirm_prompt", lang, name=name),
         parse_mode="HTML",
         reply_markup=kb,
     )
@@ -215,6 +198,7 @@ async def handle_login_callback(callback: CallbackQuery) -> None:
 
     data = LoginConfirmCallback.unpack(callback.data)
     tg_id = callback.from_user.id
+    lang = await get_user_lang(tg_id)
 
     if data.action == "cancel":
         # Отменяем сессию на сервере
@@ -226,12 +210,8 @@ async def handle_login_callback(callback: CallbackQuery) -> None:
         except Exception:
             pass
 
-        await callback.message.edit_text(
-            "❌ <b>Вход отменён.</b>\n\n"
-            "Если это были не вы — ничего страшного, ссылка уже недействительна.",
-            parse_mode="HTML",
-        )
-        await callback.answer("Вход отменён")
+        await callback.message.edit_text(t("login.cancelled", lang), parse_mode="HTML")
+        await callback.answer(t("login.cancelled_toast", lang))
         return
 
     # Подтверждаем вход
@@ -241,20 +221,12 @@ async def handle_login_callback(callback: CallbackQuery) -> None:
     })
 
     if not result or not result.get("ok"):
-        await callback.message.edit_text(
-            "⚠️ <b>Ошибка подтверждения.</b>\n\n"
-            "Возможно, сессия истекла. Попробуйте войти снова.",
-            parse_mode="HTML",
-        )
-        await callback.answer("Ошибка, попробуйте снова")
+        await callback.message.edit_text(t("login.confirm_error", lang), parse_mode="HTML")
+        await callback.answer(t("login.confirm_error_toast", lang))
         return
 
-    await callback.message.edit_text(
-        "✅ <b>Вход подтверждён!</b>\n\n"
-        "Страница на сайте обновится автоматически.",
-        parse_mode="HTML",
-    )
-    await callback.answer("Вход выполнен ✅")
+    await callback.message.edit_text(t("login.confirmed", lang), parse_mode="HTML")
+    await callback.answer(t("login.confirmed_toast", lang))
 
 
 # ── Fallback: старый /start login (совместимость) ─────────────────────────────
@@ -265,15 +237,11 @@ async def cmd_start_login(message: Message, token_param: str) -> None:
     Оставлен для совместимости со старыми ссылками.
     """
     web_url = _get_web_url()
-    name = message.from_user.first_name if message.from_user else "пользователь"
+    lang = await get_user_lang(message.from_user.id) if message.from_user else DEFAULT_LANG
+    name = message.from_user.first_name if message.from_user else t("login.default_name", lang)
 
     await message.answer(
-        f"👋 Привет, {name}!\n\n"
-        "🔐 <b>Новый способ входа</b>\n\n"
-        f"1. Откройте <a href=\"{web_url}/profile\">{web_url}/profile</a>\n"
-        "2. Нажмите <b>«Войти через Telegram»</b>\n"
-        "3. Отправьте мне показанный <b>6-значный код</b>\n"
-        "4. Подтвердите — страница обновится сама ✨",
+        t("start.login_welcome", lang, name=name, web_url=web_url),
         parse_mode="HTML",
         disable_web_page_preview=True,
     )

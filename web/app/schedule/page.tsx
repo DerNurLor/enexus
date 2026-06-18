@@ -18,20 +18,9 @@ import { TeacherDashboard } from '@/components/schedule/TeacherDashboard'
 import { useGestures }       from '@/hooks/useGestures'
 import { api } from '@/lib/api'
 import type { Lesson, GroupMeta, TeacherMeta, RoomMeta } from '@/lib/types'
+import { useT } from '@/lib/i18n'
 
 type SearchMode = 'group' | 'teacher' | 'room'
-
-const SEARCH_MODES: { value: SearchMode; label: string }[] = [
-  { value: 'group',   label: 'Группа' },
-  { value: 'teacher', label: 'Преподаватель' },
-  { value: 'room',    label: 'Аудитория' },
-]
-
-const PLACEHOLDER: Record<SearchMode, string> = {
-  group:   'напр. ИС-21',
-  teacher: 'напр. Иванов И.И.',
-  room:    'напр. А-308',
-}
 
 function mapLessonType(t: string | null): 'lab' | 'lecture' | 'seminar' | 'practice' | 'exam' | 'credit' | 'consultation' {
   const s = (t || '').toLowerCase()
@@ -136,11 +125,24 @@ function useLiveClock() {
 function SchedulePageInner() {
   const queryClient = useQueryClient()
   const searchParams = useSearchParams()
+  const { t } = useT()
   const {
     mode, groupId, groupName, teacherId, teacherName, roomId, roomName,
     setMode, setGroup, setTeacher, setRoom, profile, profileComplete, authToken,
     favorites, setFavorites,
   } = useScheduleStore()
+
+  const SEARCH_MODES: { value: SearchMode; label: string }[] = [
+    { value: 'group',   label: t('schedule.type_group') },
+    { value: 'teacher', label: t('schedule.type_teacher') },
+    { value: 'room',    label: t('schedule.type_room') },
+  ]
+
+  const PLACEHOLDER: Record<SearchMode, string> = {
+    group:   t('schedule.placeholder_group'),
+    teacher: t('schedule.placeholder_teacher'),
+    room:    t('schedule.placeholder_room'),
+  }
 
   const isFavorite = useMemo(() => {
     if (mode === 'group' && groupId)
@@ -408,7 +410,7 @@ function SchedulePageInner() {
               {isCurrent && (
                 <div className="flex items-center gap-1.5 mb-1 ml-1">
                   <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                  <span className="text-[10px] font-semibold" style={{ color: '#4ade80' }}>Сейчас идёт</span>
+                  <span className="text-[10px] font-semibold" style={{ color: '#4ade80' }}>{t('schedule.live_now')}</span>
                 </div>
               )}
               <LessonCard lesson={{
@@ -474,13 +476,13 @@ function SchedulePageInner() {
     <div className="px-4 lg:px-0" ref={containerRef}
       {...pageGestures}>
       <PageHeader
-        title="Расписание"
+        title={t('schedule.title')}
         action={
           <div className="flex items-center gap-2">
             {entityId && (
               <button onClick={handleRefresh} disabled={isFetching || isRefreshing}
                 className="p-1.5 rounded-lg hover:bg-white/5 transition-all disabled:opacity-40 tap-scale"
-                title="Обновить расписание"
+                title={t('schedule.refresh_tooltip')}
                 style={{ color: isRefreshing ? 'var(--cyan)' : 'var(--t-muted)' }}>
                 <RefreshCw size={14} className={isRefreshing || isFetching ? 'animate-spin' : ''} />
               </button>
@@ -488,7 +490,7 @@ function SchedulePageInner() {
             {entityId && authToken && (
               <button onClick={toggleFavorite}
                 className="p-1.5 rounded-lg hover:bg-white/5 transition-colors"
-                title={isFavorite ? 'Убрать из избранного' : 'Добавить в избранное'}
+                title={isFavorite ? t('schedule.fav_remove_tooltip') : t('schedule.fav_add_tooltip')}
                 style={{ color: 'var(--cyan)' }}>
                 <Star size={14} fill={isFavorite ? 'var(--cyan)' : 'none'}
                   className={isFavorite ? 'star-bounce' : ''} />
@@ -508,7 +510,7 @@ function SchedulePageInner() {
         <div className="flex items-center gap-2 mb-3 px-3 py-2 rounded-xl text-xs"
           style={{ background: 'rgba(255,180,0,0.08)', border: '1px solid rgba(255,180,0,0.2)', color: 'rgba(255,180,0,0.9)' }}>
           <WifiOff size={13} />
-          <span>Нет подключения — показываем кешированные данные</span>
+          <span>{t('schedule.offline_banner')}</span>
         </div>
       )}
 
@@ -518,9 +520,9 @@ function SchedulePageInner() {
           style={{ background: 'rgba(74,222,128,0.06)', border: '1px solid rgba(74,222,128,0.2)' }}>
           <div className="flex items-center gap-2 mb-1">
             <span className="w-2 h-2 rounded-full bg-green-400 live-ring flex-shrink-0" style={{ flexShrink: 0 }} />
-            <span className="text-xs font-semibold" style={{ color: '#4ade80' }}>Сейчас идёт</span>
+            <span className="text-xs font-semibold" style={{ color: '#4ade80' }}>{t('schedule.live_now')}</span>
             <span className="text-xs ml-auto" style={{ color: 'var(--t-muted)' }}>
-              до {currentLesson.time_end}
+              {t('schedule.until', { time: currentLesson.time_end })}
             </span>
           </div>
           <p className="text-sm font-semibold truncate" style={{ color: 'var(--t-primary)' }}>
@@ -542,9 +544,9 @@ function SchedulePageInner() {
         <div className="mb-4 px-4 py-3 rounded-xl"
           style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
           <div className="flex items-center justify-between mb-1">
-            <span className="text-xs" style={{ color: 'var(--t-muted)' }}>Следующая пара</span>
+            <span className="text-xs" style={{ color: 'var(--t-muted)' }}>{t('schedule.next_lesson')}</span>
             <span className="text-xs font-mono font-semibold" style={{ color: 'var(--cyan)' }}>
-              в {nextLesson.time_start}
+              {t('schedule.at_time', { time: nextLesson.time_start })}
             </span>
           </div>
           <p className="text-sm font-semibold truncate" style={{ color: 'var(--t-primary)' }}>
@@ -558,6 +560,7 @@ function SchedulePageInner() {
           teacherId={teacherId}
           teacherName={teacherName || ''}
           todayLessons={lessons}
+          selectedDate={selectedDate}
         />
       )}
 
@@ -594,7 +597,7 @@ function SchedulePageInner() {
               <div>
                 <div className="flex items-center gap-1.5 px-3 pt-2.5 pb-1">
                   <Star size={11} style={{ color: 'var(--cyan)' }} />
-                  <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--t-muted)' }}>Избранное</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--t-muted)' }}>{t('schedule.favorites_label')}</span>
                 </div>
                 {favorites.filter(f => f.type === mode).map(fav => (
                   <button key={`${fav.type}:${fav.id}`}
@@ -615,7 +618,7 @@ function SchedulePageInner() {
               <div>
                 <div className="flex items-center gap-1.5 px-3 pt-2.5 pb-1">
                   <History size={11} style={{ color: 'var(--t-muted)' }} />
-                  <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--t-muted)' }}>Недавние</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--t-muted)' }}>{t('schedule.recent_label')}</span>
                 </div>
                 {searchHistory.slice(0, 5).map(h => (
                   <button key={h}
@@ -639,14 +642,14 @@ function SchedulePageInner() {
       {!entityId ? (
         <div className="flex flex-col items-center py-16 gap-3">
           <Search size={40} style={{ color: 'var(--t-muted)' }} />
-          <span className="text-sm text-center" style={{ color: 'var(--t-muted)' }}>
-            Введите название группы,<br />преподавателя или аудитории
+          <span className="text-sm text-center" style={{ color: 'var(--t-muted)', whiteSpace: 'pre-line' }}>
+            {t('schedule.empty_prompt')}
           </span>
           {/* УЛУЧШЕНИЕ: кнопка настройки профиля всегда видна на пустом экране */}
           <Link href="/profile"
             className="mt-2 flex items-center gap-1.5 text-xs px-4 py-2 rounded-xl transition-colors hover:bg-white/5"
             style={{ color: 'var(--cyan)', border: '1px solid rgba(92,225,230,0.3)' }}>
-            {profileComplete ? 'Изменить профиль' : 'Настроить профиль'}
+            {profileComplete ? t('schedule.edit_profile') : t('schedule.setup_profile')}
             <ChevronRight size={12} />
           </Link>
         </div>
@@ -667,11 +670,11 @@ function SchedulePageInner() {
         <div className="flex flex-col items-center py-12 gap-3">
           <CalendarRange size={36} style={{ color: 'var(--t-muted)', opacity: 0.5 }} />
           <p className="text-sm font-medium" style={{ color: 'var(--t-secondary)' }}>
-            {isOffline ? 'Нет данных в кеше' : 'Занятий нет'}
+            {isOffline ? t('schedule.no_cache_data') : t('schedule.no_lessons')}
           </p>
           {!isOffline && (
             <p className="text-xs" style={{ color: 'var(--t-muted)' }}>
-              {isToday ? 'Сегодня выходной или каникулы' : 'В этот день пар нет'}
+              {isToday ? t('schedule.weekend_or_break') : t('schedule.no_lessons_day')}
             </p>
           )}
           <div className="flex gap-2 mt-1">
@@ -682,19 +685,19 @@ function SchedulePageInner() {
             }}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs hover:bg-white/5 transition-colors"
               style={{ border: '1px solid var(--border)', color: 'var(--t-secondary)' }}>
-              Следующий день →
+              {t('schedule.next_day')}
             </button>
           </div>
         </div>
       ) : (
         <>
           {showingCache && (
-            <p className="text-xs mb-3" style={{ color: 'var(--t-muted)' }}>📦 Данные из кеша</p>
+            <p className="text-xs mb-3" style={{ color: 'var(--t-muted)' }}>{t('schedule.cached_data')}</p>
           )}
           {!showingCache && isFetching && (
             <p className="text-xs mb-3 flex items-center gap-1.5" style={{ color: 'var(--t-muted)' }}>
               <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: 'var(--cyan)' }} />
-              Обновление…
+              {t('schedule.updating')}
             </p>
           )}
           <div className={slideDir === 'left' ? 'slide-in-left' : slideDir === 'right' ? 'slide-in-right' : ''}>

@@ -165,15 +165,26 @@ class ECampusQueue:
                         await self.set_result(task.task_id, {"ok": False, "error": str(e)})
 
         while self._running:
-            task = await self._pop_task()
+            try:
+                task = await self._pop_task()
+            except Exception as exc:
+                # [F6] Транзиентная ошибка Redis (timeout/disconnect) не должна
+                # навсегда убивать воркер — логируем и пробуем снова через паузу.
+                logger.error(f"ECampus queue _pop_task failed: {exc}")
+                await asyncio.sleep(2)
+                continue
+
             if task:
                 # [F1] Проверяем что семафор не насыщен перед созданием таска
                 # (не блокируем — просто откладываем если нет слотов)
                 if self._sem._value == 0:
                     # Все слоты заняты — кладём задачу обратно и ждём
-                    r = self._redis()
-                    key = REDIS_KEY_HIGH if task.priority == Priority.HIGH else REDIS_KEY_LOW
-                    await r.rpush(key, task.to_json())
+                    try:
+                        r = self._redis()
+                        key = REDIS_KEY_HIGH if task.priority == Priority.HIGH else REDIS_KEY_LOW
+                        await r.rpush(key, task.to_json())
+                    except Exception as exc:
+                        logger.error(f"ECampus queue requeue failed: {exc}")
                     await asyncio.sleep(0.1)
                     continue
 

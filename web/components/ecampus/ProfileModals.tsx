@@ -4,7 +4,7 @@
  * ZachetkaModal — таблица зачётной книжки
  * StatsModal    — интерактивная статистика с графиками
  */
-import { useState, useMemo } from 'react'
+import { useState, useMemo, memo } from 'react'
 import { X, ChevronDown } from 'lucide-react'
 
 // ── Цвета оценок ─────────────────────────────────────────────────────────────
@@ -19,6 +19,48 @@ const GRADE_COLOR: Record<string, { bg: string; text: string }> = {
 function gradeStyle(mark: string) {
   return GRADE_COLOR[mark.toLowerCase()] ?? { bg: '#a6adc818', text: '#a6adc8' }
 }
+
+// ── EntryCard — module-level so React never unmounts/remounts it on re-renders ─
+const EntryCard = memo(function EntryCard({ e, index = 0 }: { e: any; index?: number }) {
+  const gs = gradeStyle(e.mark ?? '')
+  const delay = Math.min(index * 15, 150)
+  return (
+    <div className="flex items-start gap-3 px-4 py-3"
+      style={{ borderBottom: '1px solid var(--border)', animation: `fadeUp 0.3s ease ${delay}ms both` }}>
+      <div className="flex-1 min-w-0">
+        <p className="text-[13px] font-medium leading-snug mb-1"
+          style={{ color: 'var(--t-primary)' }}>
+          {e.discipline || '—'}
+        </p>
+        <div className="flex items-center gap-2 flex-wrap">
+          {e.teacher && (
+            <span className="text-[11px]" style={{ color: 'var(--t-muted)' }}>{e.teacher}</span>
+          )}
+          {e.type && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded"
+              style={{ background: 'var(--surface)', color: 'var(--t-muted)' }}>
+              {e.type}
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="shrink-0 flex flex-col items-end gap-1">
+        <span className="text-[11px] font-bold px-2 py-1 rounded-lg"
+          style={{
+            background: gs.bg, color: gs.text, border: `1px solid ${gs.text}30`,
+            animation: `popIn 0.3s cubic-bezier(0.34,1.56,0.64,1) ${delay + 80}ms both`,
+          }}>
+          {e.mark || '—'}
+        </span>
+        {e.date && (
+          <span className="text-[10px]" style={{ color: 'var(--t-muted)', animation: `fadeIn 0.3s ease ${delay + 60}ms both` }}>
+            {e.date}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+})
 
 // ── Base modal wrapper ────────────────────────────────────────────────────────
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
@@ -123,47 +165,6 @@ export function ZachetkaModal({ data, onClose }: { data: any; onClose: () => voi
     }
     return stats
   }, [allYears])
-
-  function EntryCard({ e, index = 0 }: { e: any; index?: number }) {
-    const gs = gradeStyle(e.mark ?? '')
-    const delay = Math.min(index * 18, 200)
-    return (
-      <div className="flex items-start gap-3 px-4 py-3"
-        style={{ borderBottom: '1px solid var(--border)', animation: `fadeUp 0.32s ease ${delay}ms both` }}>
-        <div className="flex-1 min-w-0">
-          <p className="text-[13px] font-medium leading-snug mb-1"
-            style={{ color: 'var(--t-primary)' }}>
-            {e.discipline || '—'}
-          </p>
-          <div className="flex items-center gap-2 flex-wrap">
-            {e.teacher && (
-              <span className="text-[11px]" style={{ color: 'var(--t-muted)' }}>{e.teacher}</span>
-            )}
-            {e.type && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded"
-                style={{ background: 'var(--surface)', color: 'var(--t-muted)' }}>
-                {e.type}
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="shrink-0 flex flex-col items-end gap-1">
-          <span className="text-[11px] font-bold px-2 py-1 rounded-lg"
-            style={{
-              background: gs.bg, color: gs.text, border: `1px solid ${gs.text}30`,
-              animation: `popIn 0.3s cubic-bezier(0.34,1.56,0.64,1) ${delay + 80}ms both`,
-            }}>
-            {e.mark || '—'}
-          </span>
-          {e.date && (
-            <span className="text-[10px]" style={{ color: 'var(--t-muted)', animation: `fadeIn 0.3s ease ${delay + 60}ms both` }}>
-              {e.date}
-            </span>
-          )}
-        </div>
-      </div>
-    )
-  }
 
   return (
     <Modal title="Зачётная книжка" onClose={onClose}>
@@ -529,7 +530,71 @@ function TimelineChart({ grades, title }: { grades: any[]; title: string }) {
 }
 
 export function StatsModal({ data, onClose }: { data: any; onClose: () => void }) {
-  const courses: any[] = data?.courses ?? []
+  const allCourses: any[] = data?.courses ?? []
+
+  // Год — первый токен term_name (см. backend/app/graphql/resolvers.py:_derive_year_label,
+  // term_name хранится как "{year} {semester}", напр. "1 1", "1 2", "2 3"…).
+  const yearTermsMap = useMemo(() => {
+    const m = new Map<string, Map<number, string>>() // year -> term_id -> term_name
+    for (const c of allCourses) {
+      if (c.term_id == null) continue
+      const tn = String(c.term_name || '').trim()
+      const year = tn.split(' ')[0] || '—'
+      if (!m.has(year)) m.set(year, new Map())
+      m.get(year)!.set(c.term_id, tn || String(c.term_id))
+    }
+    return m
+  }, [allCourses])
+
+  const allYears = useMemo(() => [...yearTermsMap.keys()].sort((a, b) => {
+    const na = Number(a), nb = Number(b)
+    return (!isNaN(na) && !isNaN(nb)) ? na - nb : a.localeCompare(b)
+  }), [yearTermsMap])
+
+  // StatsModal монтируется только когда data уже загружена (см. вызовы в profile/page.tsx),
+  // поэтому ленивая инициализация безопасна — все года/семестры выбраны по умолчанию.
+  const [selectedTerms, setSelectedTerms] = useState<Set<number>>(() => new Set(
+    allCourses.map(c => c.term_id).filter((t): t is number => t != null)
+  ))
+
+  const totalTermsCount = useMemo(() => {
+    let n = 0
+    for (const terms of yearTermsMap.values()) n += terms.size
+    return n
+  }, [yearTermsMap])
+
+  function isYearActive(y: string): boolean {
+    const terms = [...(yearTermsMap.get(y)?.keys() ?? [])]
+    return terms.length > 0 && terms.every(t => selectedTerms.has(t))
+  }
+
+  function toggleYear(y: string) {
+    const terms = [...(yearTermsMap.get(y)?.keys() ?? [])]
+    const fullySelected = terms.length > 0 && terms.every(t => selectedTerms.has(t))
+    setSelectedTerms(prev => {
+      const next = new Set(prev)
+      terms.forEach(t => fullySelected ? next.delete(t) : next.add(t))
+      return next
+    })
+  }
+
+  function toggleTerm(tid: number) {
+    setSelectedTerms(prev => {
+      const next = new Set(prev)
+      if (next.has(tid)) next.delete(tid); else next.add(tid)
+      return next
+    })
+  }
+
+  function resetFilters() {
+    setSelectedTerms(new Set(allCourses.map(c => c.term_id).filter((t): t is number => t != null)))
+  }
+
+  const isFiltered = selectedTerms.size < totalTermsCount
+  const courses = useMemo(
+    () => isFiltered ? allCourses.filter(c => selectedTerms.has(c.term_id)) : allCourses,
+    [allCourses, selectedTerms, isFiltered]
+  )
 
   const allGrades = useMemo(() => {
     const rows: any[] = []
@@ -616,6 +681,54 @@ export function StatsModal({ data, onClose }: { data: any; onClose: () => void }
   return (
     <Modal title="Статистика успеваемости" onClose={onClose}>
       <div className="px-4 py-4 flex flex-col gap-6">
+
+        {/* Фильтр по годам и семестрам */}
+        {allYears.length > 1 && (
+          <div className="flex flex-col gap-2">
+            <div className="flex items-center justify-between">
+              <p className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--t-muted)' }}>
+                Курс
+              </p>
+              {isFiltered && (
+                <button onClick={resetFilters} className="text-[10px]" style={{ color: 'var(--accent)' }}>
+                  Сбросить
+                </button>
+              )}
+            </div>
+            <div className="flex gap-1.5 flex-wrap">
+              {allYears.map(y => {
+                const active = isYearActive(y)
+                return (
+                  <button key={y} onClick={() => toggleYear(y)}
+                    className="text-[11px] font-medium px-3 py-1.5 rounded-full transition-colors"
+                    style={{
+                      background: active ? 'var(--accent)' : 'var(--surface)',
+                      color:      active ? 'var(--accent-fg)' : 'var(--t-secondary)',
+                      border:     `1px solid ${active ? 'var(--accent)' : 'var(--border)'}`,
+                    }}>
+                    {y} курс
+                  </button>
+                )
+              })}
+            </div>
+            <div className="flex gap-1.5 flex-wrap">
+              {allYears.flatMap(y => [...(yearTermsMap.get(y)?.entries() ?? [])]).map(([tid, tname]) => {
+                const active = selectedTerms.has(tid)
+                return (
+                  <button key={tid} onClick={() => toggleTerm(tid)}
+                    className="text-[10px] px-2.5 py-1 rounded-lg transition-colors"
+                    style={{
+                      background: active ? 'color-mix(in srgb, var(--accent) 12%, transparent)' : 'transparent',
+                      color:      active ? 'var(--accent)' : 'var(--t-muted)',
+                      border:     `1px solid ${active ? 'color-mix(in srgb, var(--accent) 30%, transparent)' : 'var(--border)'}`,
+                    }}>
+                    {tname}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Мини-дашборд */}
         <div className="grid grid-cols-3 gap-2">

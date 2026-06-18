@@ -11,6 +11,7 @@ import {
   IconCalendar, IconBuilding, IconStar, IconUser,
 } from './components/Icons'
 import type { User, Page, Settings, Favorite, SearchType } from './types'
+import { useI18n } from './i18n'
 
 interface AuthResponse {
   token: string
@@ -30,6 +31,7 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>({ time24h: true })
   const { message: toastMsg, visible: toastVisible, toast } = useToast()
   useTheme((settings.theme as 'auto' | 'light' | 'dark') ?? 'auto')
+  const { t, setLang } = useI18n()
 
   useEffect(() => {
     const tg = window.Telegram?.WebApp
@@ -53,7 +55,7 @@ export default function App() {
           // setToken('dev')
           // toast('Dev mode — initData отсутствует')
           // revealApp()
-          setErrorMsg('Приложение доступно только через Telegram.')
+          setErrorMsg(t('app.telegram_only'))
           return
         }
 
@@ -66,14 +68,17 @@ export default function App() {
 
         const [favsData, settingsData] = await Promise.all([
           api<FavoritesResponse>('/miniapp/api/favorites').catch(() => ({ favorites: [] })),
-          api<SettingsResponse>('/miniapp/api/settings').catch(() => ({ settings: {} })),
+          api<SettingsResponse>('/miniapp/api/settings').catch(() => ({ settings: {} as Settings })),
         ])
         setFavorites(favsData.favorites ?? [])
         setSettings({ time24h: true, ...settingsData.settings })
+        if (settingsData.settings?.language) {
+          setLang(settingsData.settings.language)
+        }
 
         revealApp()
       } catch (e) {
-        setErrorMsg('Ошибка авторизации. Попробуйте открыть приложение заново.')
+        setErrorMsg(t('app.auth_error'))
       }
     }
 
@@ -98,7 +103,7 @@ export default function App() {
   // Favorites management
   const addFav = useCallback(async (type: SearchType, id: string, name: string) => {
     if (favorites.some(f => f.type === type && f.id === id)) {
-      toast('Уже в избранном'); return
+      toast(t('app.already_fav')); return
     }
     try {
       const data = await api<FavoritesResponse>('/miniapp/api/favorites', {
@@ -106,9 +111,9 @@ export default function App() {
         body: JSON.stringify({ type, id, label: name }),
       })
       setFavorites(data.favorites ?? favorites)
-      toast('Добавлено в избранное ★')
-    } catch { toast('Ошибка сохранения') }
-  }, [favorites, toast])
+      toast(t('app.added_fav'))
+    } catch { toast(t('app.save_error')) }
+  }, [favorites, toast, t])
 
   const deleteFav = useCallback(async (fav: Favorite) => {
     try {
@@ -117,8 +122,8 @@ export default function App() {
         method: 'DELETE',
       })
       setFavorites(data.favorites ?? favorites)
-    } catch { toast('Ошибка удаления') }
-  }, [favorites, toast])
+    } catch { toast(t('app.delete_error')) }
+  }, [favorites, toast, t])
 
   const loadFav = useCallback((fav: Favorite) => {
     navigate('schedule')
@@ -169,22 +174,22 @@ export default function App() {
   const navItems: { id: Page; label: string; icon: React.ReactNode }[] = [
     {
       id: 'schedule',
-      label: 'Расписание',
+      label: t('nav.schedule'),
       icon: <IconCalendar size={20} />,
     },
     {
       id: 'rooms',
-      label: 'Аудитории',
+      label: t('nav.rooms'),
       icon: <IconBuilding size={20} />,
     },
     {
       id: 'favorites',
-      label: 'Избранное',
+      label: t('nav.favorites'),
       icon: <IconStar size={20} />,
     },
     {
       id: 'profile',
-      label: 'Профиль',
+      label: t('nav.profile'),
       icon: <IconUser size={20} />,
     },
   ]
@@ -208,9 +213,9 @@ export default function App() {
           </div>
         ) : (
             <>
-              <div className="loader-logo">СКФУ</div>
+              <div className="loader-logo">{t('app.brand')}</div>
               <div className="loader-ring" />
-              <div className="loader-sub">Загрузка расписания…</div>
+              <div className="loader-sub">{t('app.loading')}</div>
             </>
           )}
       </div>
@@ -221,15 +226,15 @@ export default function App() {
           {/* Header */}
           <header className="header">
             <div className="header-wordmark">
-              <div className="header-title">СКФУ</div>
-              <div className="header-sub">Расписание занятий</div>
+              <div className="header-title">{t('app.brand')}</div>
+              <div className="header-sub">{t('app.header_sub')}</div>
             </div>
             <div
               className="header-avatar"
               onClick={() => navigate('profile')}
               role="button"
               tabIndex={0}
-              aria-label="Профиль"
+              aria-label={t('app.profile_aria')}
             >
               {user?.avatar
                 ? <img src={user.avatar} alt="" onError={e => { (e.target as HTMLImageElement).style.display = 'none' }} />
@@ -271,7 +276,7 @@ export default function App() {
           </main>
 
           {/* Bottom nav */}
-          <nav className="bottom-nav" aria-label="Основная навигация">
+          <nav className="bottom-nav" aria-label={t('app.nav_aria')}>
             {navItems.map(item => (
               <button
                 key={item.id}

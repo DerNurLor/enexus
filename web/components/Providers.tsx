@@ -3,6 +3,25 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { useState, useEffect } from 'react'
 import { useScheduleStore } from '@/lib/store'
 import { authenticateWithTelegram, setToken } from '@/lib/auth'
+import { resolveBrowserLang } from '@/lib/i18n'
+
+function LanguageInit() {
+  const updateSettings = useScheduleStore((s) => s.updateSettings)
+
+  useEffect(() => {
+    // Только для совсем новых сессий — не перетираем уже сохранённый выбор языка.
+    let hasStoredLanguage = false
+    try {
+      const raw = localStorage.getItem('ncfu-schedule')
+      hasStoredLanguage = !!raw && JSON.parse(raw)?.state?.settings?.language
+    } catch { /* */ }
+    if (!hasStoredLanguage) {
+      updateSettings({ language: resolveBrowserLang(navigator.languages || navigator.language) })
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  return null
+}
 
 function ThemeApplier() {
   const { theme, accent_color } = useScheduleStore((s) => s.settings)
@@ -76,6 +95,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <LanguageInit />
       <TgAuthInit />
       <ThemeApplier />
       {children}

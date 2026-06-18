@@ -85,6 +85,7 @@ export interface ServerSettings {
   default_teacher?:  string | null
   theme?:            string
   accent_color?:     string
+  language?:         string
   profile_group_confirmed?: boolean
 }
 
@@ -296,6 +297,9 @@ export async function loginWithWidgetAndInit(
 
 export function logout() {
   clearToken()
+  // Кэш предметов/зачётки в localStorage — иначе на общем компьютере следующий
+  // вход показал бы данные предыдущего пользователя до первого ответа GraphQL.
+  import('@/lib/ecampus').then(({ clearEcampusCache }) => clearEcampusCache())
 }
 
 // Алиас для обратной совместимости с Providers.tsx

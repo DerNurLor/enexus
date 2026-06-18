@@ -31,6 +31,9 @@ from .types import (
     FreeRoomType, LessonConnection,
     SearchResult, OverviewType, ScrapeLogSummary,
     ScrapeResultType, ScheduleUpdatedEvent, PageInfo,
+    EcampusOverviewType, EcampusCourseType,
+    EcampusLessonTypeRefType, EcampusGradedLessonType, EcampusYearType,
+    EcampusCourseLessonsType, EcampusMaterialType,
 )
 
 WEEKDAY_NAMES = {
@@ -1039,3 +1042,175 @@ async def subscribe_schedule_updated(
 
 # Alias: schema.py calls resolve_lessons_on, resolver is resolve_lessons_on_day
 resolve_lessons_on = resolve_lessons_on_day
+
+
+# ── eCampus (per-student data) ─────────────────────────────────────────────────
+
+def _course_rating(course: dict) -> tuple[float, float, list]:
+    """
+    Считает фактический рейтинг курса из занятий — eCampus нередко отдаёт
+    CurrentRating/MaxRating = 0 или null в самом курсе. Логика 1:1 повторяет
+    computeRating(), который раньше выполнялся на фронте (web/app/ecampus/page.tsx),
+    но теперь считается здесь — занятия (тяжёлая часть) не покидают сервер.
+    Также собирает компактный список оценённых занятий {id, gradeText} —
+    нужен фронту только для подсчёта "новых оценок" (полные записи занятий
+    с датами/аудиториями/etc туда не нужны).
+    """
+    gained = 0.0
+    max_   = 0.0
+    graded: list[EcampusGradedLessonType] = []
+
+    for lessons in (course.get("lessons") or {}).values():
+        for l in lessons:
+            if l.get("GainedScore"):
+                gained += float(l.get("GainedScore") or 0)
+            if l.get("MaxScore"):
+                max_ += float(l.get("MaxScore") or 0)
+            grade_text = str(l.get("GradeText") or "").strip()
+            lid = l.get("Id")
+            if grade_text and lid is not None:
+                graded.append(EcampusGradedLessonType(id=str(lid), grade_text=grade_text))
+
+    api_gained = course.get("CurrentRating") or 0
+    api_max    = course.get("MaxRating") or 0
+
+    if max_ == 0 and api_max and api_max > 0:
+        max_ = api_max
+    if max_ == 0 and api_max and api_max > 0:
+        gained = api_gained or 0
+        max_   = api_max
+    elif gained == 0 and api_gained and api_gained > 0 and max_ > 0:
+        gained = api_gained
+
+    return gained, max_, graded
+
+
+def _derive_year_label(course: dict) -> str:
+    """
+    term_name хранится как "{year_label} {semester_label}", напр. "1 1", "1 2",
+    "2 3" — первый токен — номер учебного года (см. sync_service._collect_all_data,
+    term["_year_name"] + " " + term["Name"]). Год не хранится отдельным полем на
+    курсе, поэтому извлекаем его отсюда — надёжно для уже накопленных данных.
+    """
+    term_name = str(course.get("term_name") or "").strip()
+    return term_name.split(" ")[0] if term_name else "?"
+
+
+async def resolve_my_ecampus_years(tg_id: int) -> List[EcampusYearType]:
+    """
+    Лёгкий запрос метаданных: список учебных лет с их term_id и количеством
+    предметов — фронт использует его, чтобы распараллелить основной запрос
+    myEcampus на N запросов (по году) вместо одного большого.
+    """
+    from app.ecampus.sync_service import ECampusSyncRecord
+
+    record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == tg_id)
+    if not record:
+        raise Exception("Подключите eCampus в настройках.")
+
+    years: dict[str, dict] = {}
+    for course in (record.courses or []):
+        label   = _derive_year_label(course)
+        term_id = course.get("term_id")
+        y = years.setdefault(label, {"term_ids": set(), "count": 0})
+        if term_id is not None:
+            y["term_ids"].add(term_id)
+        y["count"] += 1
+
+    def _sort_key(label: str):
+        try:
+            return (0, int(label))
+        except ValueError:
+            return (1, label)
+
+    return [
+        EcampusYearType(year=label, term_ids=sorted(y["term_ids"]), course_count=y["count"])
+        for label, y in sorted(years.items(), key=lambda kv: _sort_key(kv[0]))
+    ]
+
+
+async def resolve_my_ecampus(tg_id: int, term_ids: Optional[List[int]] = None) -> EcampusOverviewType:
+    from app.ecampus.sync_service import ECampusSyncRecord
+
+    record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == tg_id)
+    if not record:
+        raise Exception("Подключите eCampus в настройках.")
+
+    term_id_filter = set(term_ids) if term_ids else None
+
+    courses_out = []
+    for course in (record.courses or []):
+        if term_id_filter is not None and course.get("term_id") not in term_id_filter:
+            continue
+        gained, max_, graded = _course_rating(course)
+        lesson_types = [
+            EcampusLessonTypeRefType(
+                id=lt.get("Id", 0),
+                name=lt.get("Name", str(lt.get("Id", ""))),
+                lesson_type=lt.get("LessonType"),
+            )
+            for lt in (course.get("LessonTypes") or [])
+        ]
+        courses_out.append(EcampusCourseType(
+            id=course.get("Id", 0),
+            name=course.get("Name", ""),
+            term_id=course.get("term_id", 0),
+            term_name=course.get("term_name", ""),
+            lesson_types=lesson_types,
+            rating_gained=gained,
+            rating_max=max_,
+            graded_lessons=graded,
+        ))
+
+    return EcampusOverviewType(
+        sync_status=record.sync_status,
+        last_sync=record.last_sync.isoformat() if record.last_sync else None,
+        courses=courses_out,
+        zachetka=record.zachetka or {},
+    )
+
+
+async def resolve_my_ecampus_course_lessons(
+    tg_id: int, course_id: int, term_id: int, group_id: Optional[int] = None,
+) -> EcampusCourseLessonsType:
+    from app.ecampus.sync_service import ECampusSyncRecord, enrich_lessons_with_room
+
+    record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == tg_id)
+    if not record:
+        raise Exception("Данные не найдены.")
+
+    course = next(
+        (c for c in record.courses if c.get("Id") == course_id and c.get("term_id") == term_id),
+        None
+    )
+    if not course:
+        raise Exception("Курс не найден.")
+
+    lessons = course.get("lessons", {})
+    if group_id:
+        lessons = await enrich_lessons_with_room(lessons, course.get("Name", ""), group_id)
+
+    return EcampusCourseLessonsType(
+        course_id=course_id,
+        course_name=course.get("Name", ""),
+        lessons=lessons,
+        max_rating=course.get("MaxRating", 0),
+        current_rating=course.get("CurrentRating", 0),
+    )
+
+
+async def resolve_my_ecampus_course_materials(tg_id: int, course_id: int, term_id: int) -> List[EcampusMaterialType]:
+    from app.ecampus.sync_service import ECampusSyncRecord, build_course_materials
+
+    record = await ECampusSyncRecord.find_one(ECampusSyncRecord.tg_id == tg_id)
+    if not record:
+        raise Exception("Данные не найдены.")
+
+    course = next(
+        (c for c in record.courses if c.get("Id") == course_id and c.get("term_id") == term_id),
+        None
+    )
+    if not course:
+        raise Exception("Курс не найден.")
+
+    return [EcampusMaterialType(**m) for m in build_course_materials(course, course_id)]

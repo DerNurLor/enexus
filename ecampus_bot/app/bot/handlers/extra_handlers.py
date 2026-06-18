@@ -18,6 +18,7 @@ from aiogram.types import (
 from loguru import logger
 
 from app.core.config import settings
+from app.i18n import t, get_user_lang, DEFAULT_LANG
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -70,19 +71,16 @@ async def cmd_classmates(message: Message) -> None:
     tg_user = message.from_user
     if not tg_user:
         return
+    lang = await get_user_lang(tg_user.id)
 
     user = await _get_auth_user(tg_user.id)
     if not user:
-        await message.answer("👤 Не удалось найти ваш профиль.", parse_mode="HTML")
+        await message.answer(t("classmates.profile_not_found", lang), parse_mode="HTML")
         return
 
     group_id, group_name = _profile_group(user)
     if not group_id and not group_name:
-        await message.answer(
-            "👥 <b>Группа не настроена</b>\n\n"
-            "Настройте профиль на сайте, чтобы видеть одногруппников.",
-            parse_mode="HTML",
-        )
+        await message.answer(t("classmates.no_group", lang), parse_mode="HTML")
         return
 
     # Ищем всех с той же группой через motor (AuthUser не имеет индекса по miniapp_settings)
@@ -97,29 +95,24 @@ async def cmd_classmates(message: Message) -> None:
         classmates_raw = await cursor.to_list(length=200)
     except Exception as e:
         logger.warning(f"classmates query failed: {e}")
-        await message.answer("❌ Ошибка при получении списка одногруппников.", parse_mode="HTML")
+        await message.answer(t("classmates.query_error", lang), parse_mode="HTML")
         return
 
     # Убираем самого пользователя, сортируем
     classmates = [c for c in classmates_raw if c.get("tg_id") != tg_user.id]
     classmates.sort(key=lambda c: (c.get("last_name") or "", c.get("first_name") or ""))
 
-    # Убираем самого пользователя из списка, сортируем по имени
-    classmates = [c for c in classmates if c.tg_id != tg_user.id]
-    classmates.sort(key=lambda c: (c.last_name or "", c.first_name or ""))
-
-    group_label = group_name or f"группа #{group_id}"
+    group_label = group_name or t("classmates.group_fallback_label", lang, id=group_id)
 
     if not classmates:
         await message.answer(
-            f"👥 <b>Одногруппники · {group_label}</b>\n\n"
-            "Пока никто из вашей группы не зарегистрировался в боте.",
+            t("classmates.none_registered", lang, group_label=group_label),
             parse_mode="HTML",
         )
         return
 
-    lines = [f"👥 <b>Одногруппники · {group_label}</b>\n"]
-    lines.append(f"<i>Зарегистрировано: {len(classmates)} чел.</i>\n")
+    lines = [t("classmates.header", lang, group_label=group_label)]
+    lines.append(t("classmates.registered_count", lang, count=len(classmates)))
 
     for i, c in enumerate(classmates, 1):
         parts = [p for p in [c.get("last_name"), c.get("first_name")] if p]
@@ -130,7 +123,7 @@ async def cmd_classmates(message: Message) -> None:
     # Telegram ограничивает сообщение 4096 символами
     text = "\n".join(lines)
     if len(text) > 4000:
-        text = text[:3990] + "\n<i>…и ещё</i>"
+        text = text[:3990] + t("classmates.more_suffix", lang)
 
     await message.answer(text, parse_mode="HTML")
 
@@ -144,23 +137,19 @@ async def cmd_teacher(message: Message) -> None:
     /teacher           — запрос имени (FSM-lite через inline кнопки не нужен)
     /teacher Фамилия   — сразу поиск
     """
+    lang = await get_user_lang(message.from_user.id) if message.from_user else DEFAULT_LANG
     text = message.text or ""
     parts = text.split(maxsplit=1)
     query = parts[1].strip() if len(parts) > 1 else ""
 
     if not query:
-        await message.answer(
-            "👤 <b>Поиск преподавателя</b>\n\n"
-            "Напишите фамилию (или часть):\n"
-            "<code>/teacher Иванов</code>",
-            parse_mode="HTML",
-        )
+        await message.answer(t("teacher.search_prompt", lang), parse_mode="HTML")
         return
 
-    await _do_teacher_search(message, query)
+    await _do_teacher_search(message, query, lang)
 
 
-async def _do_teacher_search(message: Message, query: str) -> None:
+async def _do_teacher_search(message: Message, query: str, lang: str = DEFAULT_LANG) -> None:
     """Выполняет поиск и показывает результаты или профиль."""
     try:
         col = _motor_teachers()
@@ -174,38 +163,34 @@ async def _do_teacher_search(message: Message, query: str) -> None:
         results = await cursor.to_list(length=8)
     except Exception as e:
         logger.warning(f"teacher search failed: {e}")
-        await message.answer("❌ Ошибка поиска.", parse_mode="HTML")
+        await message.answer(t("teacher.search_error", lang), parse_mode="HTML")
         return
 
     if not results:
-        await message.answer(
-            f"🔍 По запросу <b>{query}</b> ничего не найдено.\n\n"
-            "Попробуйте другую фамилию.",
-            parse_mode="HTML",
-        )
+        await message.answer(t("teacher.not_found", lang, query=query), parse_mode="HTML")
         return
 
     if len(results) == 1:
-        await _show_teacher_profile(message, results[0])
+        await _show_teacher_profile(message, results[0], lang)
         return
 
     # Несколько результатов — показываем список
     buttons = [
         [InlineKeyboardButton(
-            text=t.short_name or t.full_name,
-            callback_data=f"teacher:{t.teacher_id}",
+            text=res.get("short_name") or res.get("full_name"),
+            callback_data=f"teacher:{res.get('teacher_id')}",
         )]
-        for t in results
+        for res in results
     ]
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
     await message.answer(
-        f"🔍 Найдено преподавателей: <b>{len(results)}</b>\n\nВыберите:",
+        t("teacher.found_count", lang, count=len(results)),
         parse_mode="HTML",
         reply_markup=kb,
     )
 
 
-async def _show_teacher_profile(message_or_query, teacher) -> None:
+async def _show_teacher_profile(message_or_query, teacher, lang: str = DEFAULT_LANG) -> None:
     """Рендерит полный профиль преподавателя с кнопками."""
     from datetime import date
 
@@ -229,26 +214,26 @@ async def _show_teacher_profile(message_or_query, teacher) -> None:
         lines.append(f"🏛 {', '.join(inst_names[:2])}")
 
     if subjects:
-        lines.append(f"\n📚 <b>Предметы:</b>")
+        lines.append(t("teacher.subjects_label", lang))
         for s in subjects[:6]:
             lines.append(f"  • {s}")
         if len(subjects) > 6:
-            lines.append(f"  <i>…и ещё {len(subjects)-6}</i>")
+            lines.append(t("teacher.more_subjects", lang, count=len(subjects)-6))
 
     if lesson_types:
-        lines.append(f"\n🗂 <b>Типы занятий:</b> {', '.join(lesson_types[:4])}")
+        lines.append(t("teacher.lesson_types_label", lang, types=', '.join(lesson_types[:4])))
 
     if group_names:
         shown = group_names[:8]
-        lines.append(f"\n👥 <b>Группы ({len(group_names)}):</b> {', '.join(shown)}")
+        lines.append(t("teacher.groups_label", lang, count=len(group_names), names=', '.join(shown)))
         if len(group_names) > 8:
-            lines.append(f"  <i>…и ещё {len(group_names)-8}</i>")
+            lines.append(t("teacher.more_groups", lang, count=len(group_names)-8))
 
     if lessons_cnt:
-        lines.append(f"\n📊 Занятий в БД: <b>{lessons_cnt}</b>")
+        lines.append(t("teacher.lessons_in_db", lang, count=lessons_cnt))
 
     if scraped:
-        lines.append("🕐 Расписание: <b>загружено</b>")
+        lines.append(t("teacher.schedule_loaded", lang))
 
     # Статистика из LessonDoc через motor
     try:
@@ -269,20 +254,20 @@ async def _show_teacher_profile(message_or_query, teacher) -> None:
                 if l.get("lesson_type"): types_c[l["lesson_type"]] += 1
 
             total = len(lessons)
-            lines.append(f"\n📈 <b>Статистика за всё время:</b>")
-            lines.append(f"  Всего пар: <b>{total}</b>")
+            lines.append(t("teacher.alltime_stats_label", lang))
+            lines.append(t("teacher.total_lessons", lang, count=total))
 
             if types_c:
                 top_types = types_c.most_common(3)
-                lines.append(f"  Типы: {', '.join(f'{k} ({v})' for k,v in top_types)}")
+                lines.append(t("teacher.types_label", lang, types=', '.join(f'{k} ({v})' for k,v in top_types)))
 
             if bldgs_c:
                 top_b = bldgs_c.most_common(3)
-                lines.append(f"  Корпуса: {', '.join(f'{k} ({v})' for k,v in top_b)}")
+                lines.append(t("teacher.buildings_label", lang, buildings=', '.join(f'{k} ({v})' for k,v in top_b)))
 
             if rooms_c:
                 top_r = rooms_c.most_common(3)
-                lines.append(f"  Аудитории: {', '.join(f'{k} ({v})' for k,v in top_r)}")
+                lines.append(t("teacher.rooms_label", lang, rooms=', '.join(f'{k} ({v})' for k,v in top_r)))
     except Exception as e:
         logger.debug(f"teacher stats query failed: {e}")
 
@@ -297,7 +282,7 @@ async def _show_teacher_profile(message_or_query, teacher) -> None:
     from aiogram.types import WebAppInfo as _WebAppInfo
     buttons = [
         [InlineKeyboardButton(
-            text="📅 Расписание",
+            text=t("teacher.schedule_button", lang),
             web_app=_WebAppInfo(url=f"{miniapp_url}{schedule_path}"),
         )],
     ]
@@ -313,6 +298,7 @@ async def _show_teacher_profile(message_or_query, teacher) -> None:
 async def cb_teacher(callback: CallbackQuery) -> None:
     """Показывает профиль преподавателя по teacher_id из callback."""
     await callback.answer()
+    lang = await get_user_lang(callback.from_user.id) if callback.from_user else DEFAULT_LANG
     try:
         tid = int((callback.data or "").removeprefix("teacher:"))
     except ValueError:
@@ -326,10 +312,10 @@ async def cb_teacher(callback: CallbackQuery) -> None:
         return
 
     if not teacher:
-        await callback.message.answer("❌ Преподаватель не найден.")
+        await callback.message.answer(t("teacher.not_found_short", lang))
         return
 
-    await _show_teacher_profile(callback, teacher)
+    await _show_teacher_profile(callback, teacher, lang)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -344,10 +330,11 @@ async def cmd_me(message: Message) -> None:
     tg_user = message.from_user
     if not tg_user:
         return
+    lang = await get_user_lang(tg_user.id)
 
     user = await _get_auth_user(tg_user.id)
     if not user:
-        await message.answer("👤 Профиль не найден.", parse_mode="HTML")
+        await message.answer(t("me.profile_not_found", lang), parse_mode="HTML")
         return
 
     ms   = (user.get("miniapp_settings") or {})
@@ -361,15 +348,19 @@ async def cmd_me(message: Message) -> None:
     username   = f"@{tg_user.username}" if tg_user.username else ""
 
     role_emoji = "🎓" if role == "student" else "👤" if role == "teacher" else "❓"
-    role_label = "Студент" if role == "student" else "Преподаватель" if role == "teacher" else "Не настроен"
+    role_label = (
+        t("me.role_student", lang) if role == "student"
+        else t("me.role_teacher", lang) if role == "teacher"
+        else t("me.role_unset", lang)
+    )
 
     profile_str = ""
     if role == "student" and group_name:
-        profile_str = f"\n📌 Группа: <b>{group_name}</b>"
+        profile_str = t("me.group_line", lang, group_name=group_name)
     elif role == "teacher":
         t_name = ms.get("profile_teacher_name")
         if t_name:
-            profile_str = f"\n📌 Преподаватель: <b>{t_name}</b>"
+            profile_str = t("me.teacher_line", lang, teacher_name=t_name)
 
     # Квота
     quota_str = ""
@@ -379,12 +370,12 @@ async def cmd_me(message: Message) -> None:
         used, cap = qs["used"], qs["cap"]
         pct = int(used / cap * 100) if cap else 0
         bar = "█" * (pct // 10) + "░" * (10 - pct // 10)
-        quota_str = f"\n\n💬 Лимит запросов: <code>{bar}</code> {used}/{cap}"
+        quota_str = t("me.quota_line", lang, bar=bar, used=used, cap=cap)
     except Exception:
         pass
 
     lines = [
-        f"👤 <b>Личный кабинет</b>\n",
+        t("me.header", lang),
         f"{role_emoji} {full_name}",
         username,
         f"<i>{role_label}</i>",
@@ -406,39 +397,39 @@ async def cmd_me(message: Message) -> None:
     # Расписание
     if role == "student" and group_id:
         path = f"/schedule?mode=group&id={group_id}&name={_q(group_name or '')}"
-        buttons.append([InlineKeyboardButton(text="📅 Моё расписание", web_app=_wa(path))])
+        buttons.append([InlineKeyboardButton(text=t("me.my_schedule_button", lang), web_app=_wa(path))])
     elif role == "teacher":
         t_id   = ms.get("profile_teacher_id")
         t_name = ms.get("profile_teacher_name", "")
         if t_id:
             path = f"/schedule?mode=teacher&id={t_id}&name={_q(t_name)}"
-            buttons.append([InlineKeyboardButton(text="📅 Моё расписание", web_app=_wa(path))])
+            buttons.append([InlineKeyboardButton(text=t("me.my_schedule_button", lang), web_app=_wa(path))])
 
     # Mini App главная
     buttons.append([InlineKeyboardButton(
-        text="📱 Расписание (приложение)",
+        text=t("me.miniapp_button", lang),
         web_app=WebAppInfo(url=miniapp_url),
     )])
 
     # Предметы / занятия
     if role == "student":
         buttons.append([
-            InlineKeyboardButton(text="📚 Предметы", web_app=_wa("/ecampus")),
-            InlineKeyboardButton(text="📊 Статистика", callback_data="me:stats"),
+            InlineKeyboardButton(text=t("me.subjects_button", lang), web_app=_wa("/ecampus")),
+            InlineKeyboardButton(text=t("me.stats_button", lang), callback_data="me:stats"),
         ])
         if group_name:
-            buttons.append([InlineKeyboardButton(text="👥 Одногруппники", callback_data="me:classmates")])
+            buttons.append([InlineKeyboardButton(text=t("me.classmates_button", lang), callback_data="me:classmates")])
     elif role == "teacher":
-        buttons.append([InlineKeyboardButton(text="📈 Мои занятия", web_app=_wa("/teacher"))])
+        buttons.append([InlineKeyboardButton(text=t("me.my_lessons_button", lang), web_app=_wa("/teacher"))])
 
     # Профиль и карта
     buttons.append([
-        InlineKeyboardButton(text="⚙️ Профиль", web_app=_wa("/profile")),
-        InlineKeyboardButton(text="🗺 Карта",    web_app=_wa("/map")),
+        InlineKeyboardButton(text=t("me.profile_button", lang), web_app=_wa("/profile")),
+        InlineKeyboardButton(text=t("me.map_button", lang),    web_app=_wa("/map")),
     ])
     buttons.append([
-        InlineKeyboardButton(text="💬 Лимит запросов", callback_data="me:limit"),
-        InlineKeyboardButton(text="❓ Помощь",          callback_data="me:help"),
+        InlineKeyboardButton(text=t("me.limit_button", lang), callback_data="me:limit"),
+        InlineKeyboardButton(text=t("me.help_button", lang),  callback_data="me:help"),
     ])
 
     kb = InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -452,16 +443,17 @@ async def cb_me(callback: CallbackQuery) -> None:
     tg_user = callback.from_user
     if not tg_user:
         return
+    lang = await get_user_lang(tg_user.id)
 
     if action == "stats":
         from app.bot.handlers.grades import cmd_stats, _get_ecampus_record, _build_stats_keyboard
         rec = await _get_ecampus_record(tg_user.id)
         if not rec or not rec.get("courses"):
-            await callback.message.answer("📭 Нет данных eCampus.", parse_mode="HTML")
+            await callback.message.answer(t("me.no_ecampus_data", lang), parse_mode="HTML")
             return
-        kb = _build_stats_keyboard(rec["courses"])
+        kb = _build_stats_keyboard(rec["courses"], lang)
         await callback.message.answer(
-            "📊 <b>Статистика успеваемости</b>\n\nВыберите период:",
+            t("me.stats_choose_period", lang),
             parse_mode="HTML",
             reply_markup=kb,
         )
@@ -478,16 +470,4 @@ async def cb_me(callback: CallbackQuery) -> None:
             logger.warning(f"cb_me limit failed: {e}")
 
     elif action == "help":
-        await callback.message.answer(
-            "📖 <b>Быстрая справка</b>\n\n"
-            "/me       — этот экран\n"
-            "/grades   — оценки из eCampus\n"
-            "/stats    — статистика (с выбором семестра)\n"
-            "/subjects — список предметов\n"
-            "/teacher  — поиск преподавателя\n"
-            "/classmates — одногруппники\n"
-            "/limit    — лимит запросов\n"
-            "/miniapp  — открыть приложение\n"
-            "/help     — полная справка",
-            parse_mode="HTML",
-        )
+        await callback.message.answer(t("help.quick", lang), parse_mode="HTML")

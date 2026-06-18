@@ -33,7 +33,9 @@ class AuthUser(Document):
     roles: list[str] = Field(default_factory=lambda: ["user"])
     is_blocked: bool = False
     block_reason: Optional[str] = None
-    created_at: datetime = Field(default_factory=_utcnow)       last_active: datetime = Field(default_factory=_utcnow)      miniapp_favorites: list[dict] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=_utcnow)
+    last_active: datetime = Field(default_factory=_utcnow)
+    miniapp_favorites: list[dict] = Field(default_factory=list)
     miniapp_settings:  dict       = Field(default_factory=dict)
     totp_secret:    Optional[str] = None
     totp_enabled:   bool = False
@@ -68,7 +70,8 @@ class AuthApiKey(Document):
     rate_limit_rpm: int = 60
     expires_at: Optional[datetime] = None
     is_revoked: bool = False
-    created_at: datetime = Field(default_factory=_utcnow)    last_used_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+    last_used_at: Optional[datetime] = None
     use_count: int = 0
 
     class Settings:
@@ -109,7 +112,8 @@ class AuthErrorLog(Document):
     request_id: Optional[str] = None
     path: Optional[str] = None
     details: dict[str, Any] = Field(default_factory=dict)
-    timestamp: datetime = Field(default_factory=_utcnow)    error_id: Optional[str] = None
+    timestamp: datetime = Field(default_factory=_utcnow)
+    error_id: Optional[str] = None
     tg_id: Optional[int] = None
     tg_chat_id: Optional[int] = None
     user_text: Optional[str] = None
@@ -220,7 +224,8 @@ class BroadcastJob(Document):
     sent_count: int = 0
     total_count: int = 0
     created_by: Optional[str] = None
-    created_at: datetime = Field(default_factory=_utcnow)    started_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+    started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
 
     class Settings:
@@ -233,7 +238,8 @@ class BroadcastJob(Document):
 
 class AuthDPoPNonce(Document):
     nonce: Indexed(str, unique=True)  # type: ignore[valid-type]
-    issued_at: datetime = Field(default_factory=_utcnow)    used: bool = False
+    issued_at: datetime = Field(default_factory=_utcnow)
+    used: bool = False
 
     class Settings:
         name = "auth_dpop_nonces"
@@ -254,7 +260,8 @@ class BotFeedback(Document):
     rating: Optional[str] = None
     status: str = "pending"
 
-    created_at: datetime = Field(default_factory=_utcnow)    updated_at: datetime = Field(default_factory=_utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
     class Settings:
         name = "bot_feedback"
         indexes = [

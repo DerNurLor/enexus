@@ -9,9 +9,10 @@ from aiogram.enums import ParseMode
 from loguru import logger
 
 from app.core.config import settings
-from app.bot.router import router
+from app.bot.router import router, get_bot_commands
 from app.bot.middlewares import LoggingMiddleware, RateLimitMiddleware
 from app.bot.middlewares.anti_flood import AntiFloodMiddleware, MessageLimitMiddleware
+from app.i18n import SUPPORTED_LANGUAGES, DEFAULT_LANG
 
 _bot: Bot | None = None
 _dp:  Dispatcher | None = None
@@ -46,6 +47,16 @@ async def setup_bot() -> tuple[Bot, Dispatcher]:
     _dp.message.middleware(RateLimitMiddleware())
 
     _dp.include_router(router)
+
+    # ── Register the localized command menu for each supported language ───────
+    try:
+        await _bot.set_my_commands(get_bot_commands(DEFAULT_LANG))
+        for lang in SUPPORTED_LANGUAGES:
+            if lang == DEFAULT_LANG:
+                continue
+            await _bot.set_my_commands(get_bot_commands(lang), language_code=lang)
+    except Exception as exc:
+        logger.warning(f"set_my_commands failed: {exc}")
 
     webhook_url    = f"{settings.webhook_base_url}/webhook/telegram"
     webhook_secret = settings.telegram_webhook_secret.get_secret_value() or None

@@ -9,6 +9,7 @@ Security changes:
 """
 import strawberry
 from typing import Optional, List, AsyncGenerator
+from fastapi import Request
 from strawberry.fastapi import GraphQLRouter
 from strawberry.extensions import MaxTokensLimiter
 
@@ -21,7 +22,25 @@ from app.graphql.types import (
     LessonConnection, DayType,
     FreeRoomType, SearchResult,
     OverviewType, ScrapeResultType, ScheduleUpdatedEvent,
+    EcampusOverviewType, EcampusYearType, EcampusCourseLessonsType, EcampusMaterialType,
 )
+
+
+# ── Auth context для per-user полей (eCampus) ─────────────────────────────────
+# Остальная схема (institutes/groups/teachers/...) — публичные данные расписания,
+# им контекст не нужен. eCampus — персональные данные студента, поэтому
+# Query.myEcampus требует тот же Bearer JWT, что и REST API.
+
+async def get_graphql_context(request: Request) -> dict:
+    user = None
+    authorization = request.headers.get("authorization")
+    if authorization:
+        try:
+            from app.auth.dependencies import get_current_user
+            user = await get_current_user(request, authorization)
+        except Exception:
+            user = None
+    return {"user": user}
 
 
 # ── [V8] Query depth limiter extension ────────────────────────────────────────
@@ -199,6 +218,46 @@ class Query:
     async def overview(self, recent_scrapes_limit: int = 5) -> OverviewType:
         return await R.resolve_overview(recent_scrapes_limit)
 
+    @strawberry.field(
+        description=(
+            "Authenticated student's eCampus overview: courses (lightweight — "
+            "ratings computed server-side, no raw lesson dump), zachetka, sync "
+            "status. Requires Bearer auth. Replaces REST GET /ecampus/data. "
+            "Pass termIds to fetch only a subset (e.g. one academic year) — "
+            "see myEcampusYears for the available term_id groups."
+        )
+    )
+    async def my_ecampus(self, info: strawberry.Info, term_ids: Optional[List[int]] = None) -> EcampusOverviewType:
+        user = info.context.get("user")
+        if not user:
+            raise Exception("Authentication required")
+        return await R.resolve_my_ecampus(user.tg_id, term_ids)
+
+    @strawberry.field(
+        description="Lightweight metadata: academic years with their term_ids and course counts — for splitting myEcampus into parallel per-year requests."
+    )
+    async def my_ecampus_years(self, info: strawberry.Info) -> List[EcampusYearType]:
+        user = info.context.get("user")
+        if not user:
+            raise Exception("Authentication required")
+        return await R.resolve_my_ecampus_years(user.tg_id)
+
+    @strawberry.field(description="Lessons of a single course (raw, enriched with room from schedule if group_id given). Replaces REST GET /ecampus/course/{id}/lessons.")
+    async def my_ecampus_course_lessons(
+        self, info: strawberry.Info, course_id: int, term_id: int, group_id: Optional[int] = None,
+    ) -> EcampusCourseLessonsType:
+        user = info.context.get("user")
+        if not user:
+            raise Exception("Authentication required")
+        return await R.resolve_my_ecampus_course_lessons(user.tg_id, course_id, term_id, group_id)
+
+    @strawberry.field(description="Available materials for a single course. Replaces REST GET /ecampus/course/{id}/materials.")
+    async def my_ecampus_course_materials(self, info: strawberry.Info, course_id: int, term_id: int) -> List[EcampusMaterialType]:
+        user = info.context.get("user")
+        if not user:
+            raise Exception("Authentication required")
+        return await R.resolve_my_ecampus_course_materials(user.tg_id, course_id, term_id)
+
 
 @strawberry.type
 class Mutation:
@@ -234,4 +293,5 @@ graphql_router = GraphQLRouter(
     schema,
     graphql_ide="graphiql",
     subscription_protocols=["graphql-ws"],
+    context_getter=get_graphql_context,
 )

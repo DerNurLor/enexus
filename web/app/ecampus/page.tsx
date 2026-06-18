@@ -3,6 +3,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { useScheduleStore } from '@/lib/store'
+import { fetchEcampusOverview, getCachedEcampusOverview, fetchCourseLessons, fetchCourseMaterials } from '@/lib/ecampus'
 import { useGestures }       from '@/hooks/useGestures'
 import { PageHeader } from '@/components/layout/PageHeader'
 import {
@@ -39,38 +40,14 @@ const TERM_MAP: Record<number, { sem: number; year: number }> = {
 }
 
 /**
- * Вычисляет фактический рейтинг предмета из занятий.
- * eCampus нередко отдаёт CurrentRating = 0 или null — считаем сами.
+ * Рейтинг предмета — посчитан на сервере (GraphQL myEcampus) из занятий,
+ * т.к. eCampus нередко отдаёт CurrentRating = 0 или null.
  * Возвращает { gained, max, pct } где pct = 0–100.
  */
 function computeRating(course: any): { gained: number; max: number; pct: number } {
-  // Сначала пробуем данные из самого курса (если eCampus заполнил)
-  const apiGained = course.CurrentRating as number | null | undefined
-  const apiMax    = course.MaxRating    as number | null | undefined
-
-  // Считаем из уроков — это источник истины
-  let gained = 0
-  let max    = 0
-  for (const lessons of Object.values(course.lessons || {}) as any[][]) {
-    for (const l of lessons) {
-      if (l.GainedScore) gained += Number(l.GainedScore) || 0
-      if (l.MaxScore)    max    += Number(l.MaxScore)    || 0
-    }
-  }
-
-  // Если eCampus дал MaxRating но не заполнил MaxScore в уроках — используем его
-  if (max === 0 && apiMax && apiMax > 0) max = apiMax
-
-  // Если считать не из чего — берём значения из API как есть
-  if (max === 0 && apiMax && apiMax > 0) {
-    gained = apiGained || 0
-    max    = apiMax
-  } else if (gained === 0 && apiGained && apiGained > 0 && max > 0) {
-    // API дал CurrentRating, а GainedScore в уроках нет — доверяем API
-    gained = apiGained
-  }
-
-  const pct = max > 0 ? Math.min((gained / max) * 100, 100) : 0
+  const gained = course.ratingGained ?? 0
+  const max    = course.ratingMax ?? 0
+  const pct    = max > 0 ? Math.min((gained / max) * 100, 100) : 0
   return { gained, max, pct }
 }
 
@@ -127,20 +104,25 @@ function GradeBadge({ grade }: { grade: string }) {
 }
 
 // ── Sync progress bar ─────────────────────────────────────────────────────────
-function SyncProgressBar({ status }: { status: any }) {
-  if (status?.sync_status !== 'running') return null
-  const progress     = status.sync_progress ?? 0
-  const doneTerm     = status.sync_done_terms ?? 0
-  const totalTerms   = status.sync_total_terms ?? 0
-  const coursesFound = status.sync_courses_found ?? 0
-  const stage =
-    progress < 5  ? '🔌 Подключение к eCampus...' :
-    progress < 20 ? '🔐 Авторизация на портале...' :
-    progress < 40 ? '📚 Загрузка списка семестров...' :
-    progress < 60 ? (totalTerms > 0 ? `📖 Семестр ${doneTerm} из ${totalTerms} — сбор предметов...` : '📖 Загрузка предметов...') :
-    progress < 80 ? '📝 Загрузка оценок и материалов...' :
-    progress < 95 ? '💾 Сохранение данных...' :
-                    '✅ Почти готово...'
+// active держит бар видимым с момента клика по кнопке обновления и до тех пор,
+// пока реально не подгрузятся свежие данные — а не только пока status.sync_status
+// формально равен 'running' (между этими моментами есть зазоры по времени).
+function SyncProgressBar({ status, active }: { status: any; active: boolean }) {
+  if (!active) return null
+  const isRunning    = status?.sync_status === 'running'
+  const progress     = isRunning ? (status.sync_progress ?? 0) : 100
+  const doneTerm     = status?.sync_done_terms ?? 0
+  const totalTerms   = status?.sync_total_terms ?? 0
+  const coursesFound = status?.sync_courses_found ?? 0
+  const stage = !isRunning
+    ? '🔄 Применяем результат, обновляем список...'
+    : progress < 5  ? '🔌 Подключение к eCampus...' :
+      progress < 20 ? '🔐 Авторизация на портале...' :
+      progress < 40 ? '📚 Загрузка списка семестров...' :
+      progress < 60 ? (totalTerms > 0 ? `📖 Семестр ${doneTerm} из ${totalTerms} — сбор предметов...` : '📖 Загрузка предметов...') :
+      progress < 80 ? '📝 Загрузка оценок и материалов...' :
+      progress < 95 ? '💾 Сохранение данных...' :
+                      '✅ Почти готово...'
 
   return (
     <div className="mb-4 px-4 py-3 rounded-xl"
@@ -210,37 +192,24 @@ function BottomSheet({ open, onClose, children }: {
 }
 
 // ── Course detail panel ───────────────────────────────────────────────────────
-function CourseDetail({ course, groupId, onClose, onRefreshed, zachetkaIndex }: {
-  course: any; groupId: number | null; onClose: () => void; onRefreshed?: () => void
+function CourseDetail({ course, groupId, onClose, onRequestSync, syncing, zachetkaIndex }: {
+  course: any; groupId: number | null; onClose: () => void
+  onRequestSync: () => void; syncing: boolean
   zachetkaIndex?: Record<string, Array<{mark: string; type: string; date: string; year: string; term: string}>>
 }) {
   const [activeTab, setActiveTab] = useState<string | null>(null)
-  const [refreshing, setRefreshing] = useState(false)
   const router = useRouter()
   const { profile } = useScheduleStore()
-  const qc = useQueryClient()
-
-  const handleRefreshCourse = async () => {
-    setRefreshing(true)
-    try {
-      await authedFetch('/sync', { method: 'POST' })
-      await qc.invalidateQueries({ queryKey: ['ecampus-data'] })
-      await qc.invalidateQueries({ queryKey: ['ecampus-status'] })
-      onRefreshed?.()
-    } catch { /* silent */ } finally {
-      setRefreshing(false)
-    }
-  }
 
   const { data: lessonsData, isLoading: lessonsLoading } = useQuery({
     queryKey: ['ecampus-lessons', course.Id, course.term_id, groupId],
-    queryFn: () => authedFetch(`/course/${course.Id}/lessons?term_id=${course.term_id}${groupId ? `&group_id=${groupId}` : ''}`),
+    queryFn: () => fetchCourseLessons(course.Id, course.term_id, groupId),
     staleTime: 300_000,
   })
 
   const { data: materialsData } = useQuery({
     queryKey: ['ecampus-materials', course.Id, course.term_id],
-    queryFn: () => authedFetch(`/course/${course.Id}/materials?term_id=${course.term_id}`),
+    queryFn: () => fetchCourseMaterials(course.Id, course.term_id),
     staleTime: 600_000,
   })
 
@@ -277,11 +246,11 @@ function CourseDetail({ course, groupId, onClose, onRefreshed, zachetkaIndex }: 
             <p className="text-[11px]" style={{ color: 'var(--t-muted)' }}>{course.term_name}</p>
           </div>
           <div className="flex items-center gap-1">
-            <button onClick={handleRefreshCourse} disabled={refreshing}
+            <button onClick={onRequestSync} disabled={syncing}
               className="shrink-0 p-1.5 rounded-lg hover:bg-white/5 disabled:opacity-40"
               title="Обновить предмет"
               style={{ color: 'var(--accent)' }}>
-              <RefreshCw size={13} className={refreshing ? 'animate-spin' : ''} />
+              <RefreshCw size={13} className={syncing ? 'animate-spin' : ''} />
             </button>
             <button onClick={onClose} className="shrink-0 p-1.5 rounded-lg hover:bg-white/5"
               style={{ color: 'var(--t-muted)' }}>
@@ -360,7 +329,7 @@ function CourseDetail({ course, groupId, onClose, onRefreshed, zachetkaIndex }: 
             Материалы
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {materialsData.materials.map((mat: any, i: number) => (
+            {materialsData?.materials.map((mat: any, i: number) => (
               mat.external ? (
                 <a key={i} href={mat.url} target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] hover:opacity-80"
@@ -392,7 +361,7 @@ function CourseDetail({ course, groupId, onClose, onRefreshed, zachetkaIndex }: 
             <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'var(--t-muted)' }}>Занятия</span>
           </div>
           <div className="flex gap-1 mb-3 overflow-x-auto pb-1">
-            {Object.entries(lessonsData.lessons as Record<string, any[]>).map(([typeName, ls]) => {
+            {Object.entries(lessonsData?.lessons as Record<string, any[]>).map(([typeName, ls]) => {
               const graded = ls.filter((l: any) => l.GradeText?.trim()).length
               return (
                 <button key={typeName} onClick={() => setActiveTab(typeName)}
@@ -582,6 +551,9 @@ export default function ECampusPage() {
 
   const syncInitiated  = useRef(false)
   const syncWasRunning = useRef(false)
+  // true пока идёт финальный рефетч /data после того, как сервер сообщил sync_status≠running —
+  // без этого прогресс-бар успевал пропасть до того, как реально подгрузились свежие данные.
+  const [finalizing, setFinalizing] = useState(false)
 
   const syncMutation = useMutation({
     onMutate: () => {
@@ -603,12 +575,19 @@ export default function ECampusPage() {
 
   const { data: ecampusData, isLoading } = useQuery<any>({
     queryKey: ['ecampus-data'],
-    queryFn: () => authedFetch('/data'),
+    queryFn: fetchEcampusOverview,
     enabled: !!authToken && !!status?.connected,
     staleTime: 60_000,
-    // placeholderData сохраняет предыдущие данные пока идёт refetch — список предметов не пропадает
-    placeholderData: (prev: any) => prev,
-    refetchInterval: (status?.sync_status === 'running' || syncMutation.isPending) ? 2000 : false,
+    // placeholderData сохраняет предыдущие данные пока идёт refetch; на холодный старт
+    // (новая вкладка/браузер) подставляем последний снимок из localStorage —
+    // список предметов виден мгновенно, ещё до ответа GraphQL.
+    placeholderData: (prev: any) => prev ?? getCachedEcampusOverview(),
+    // Функция: React Query вызывает её при каждом решении об интервале,
+    // получает актуальный статус через замыкание на последний рендер
+    refetchInterval: (query) => {
+      const s = query.state.data?.sync_status ?? status?.sync_status
+      return (s === 'running' || syncMutation.isPending) ? 2000 : false
+    },
   })
 
   // Detect server-confirmed running→ok to trigger a final data refresh.
@@ -621,7 +600,14 @@ export default function ECampusPage() {
     if (syncWasRunning.current && s !== 'running') {
       syncWasRunning.current = false
       syncInitiated.current  = false
-      qc.invalidateQueries({ queryKey: ['ecampus-data'] })
+      setFinalizing(true)
+      // ecampus-lessons/materials — открытая панель предмета (если есть) тоже должна обновиться,
+      // а не только список (иначе кнопка "Обновить предмет" визуально ничего не меняет).
+      Promise.all([
+        qc.invalidateQueries({ queryKey: ['ecampus-data'] }),
+        qc.invalidateQueries({ queryKey: ['ecampus-lessons'] }),
+        qc.invalidateQueries({ queryKey: ['ecampus-materials'] }),
+      ]).finally(() => setFinalizing(false))
     }
   }, [status?.sync_status, qc]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -658,7 +644,10 @@ export default function ECampusPage() {
     return idx
   }, [ecampusData?.zachetka])
 
-  const isRunning = status?.sync_status === 'running'
+  const isRunning  = status?.sync_status === 'running'
+  // Активен с момента клика по любой из двух кнопок обновления и до тех пор,
+  // пока реально не подгрузятся свежие данные — прогресс-бар не пропадает раньше времени.
+  const syncActive = isRunning || syncMutation.isPending || finalizing
 
   const coursesByTerm = useMemo(() => {
     if (!ecampusData?.courses) return {} as Record<number, any[]>
@@ -818,7 +807,7 @@ export default function ECampusPage() {
       </div>
 
       {/* Sync progress */}
-      <SyncProgressBar status={status} />
+      <SyncProgressBar status={status} active={syncActive} />
 
       {isLoading && !ecampusData ? (
         <div className="flex flex-col gap-3">
@@ -943,8 +932,7 @@ export default function ECampusPage() {
               ) : filteredCourses.map((course: any) => {
                 const isSelected  = selectedCourse?.Id === course.Id && selectedCourse?.term_id === course.term_id
                 const isLoading   = loadingCourseIds.has(course.Id)
-                const gradeCount  = Object.values(course.lessons || {}).flat()
-                  .filter((l: any) => l.GradeText?.trim()).length
+                const gradeCount  = course.gradeCount ?? 0
 
                 return (
                   <button key={`${course.Id}-${course.term_id}`}
@@ -1044,6 +1032,8 @@ export default function ECampusPage() {
                 <div className="card pb-4">
                   <CourseDetail course={selectedCourse} groupId={profile?.groupId ?? null}
                     zachetkaIndex={zachetkaIndex}
+                    onRequestSync={() => { if (!syncCooldown) syncMutation.mutate() }}
+                    syncing={isRunning || syncMutation.isPending || syncCooldown}
                     onClose={() => { setSelectedCourse(null) }} />
                 </div>
               </div>
@@ -1063,6 +1053,8 @@ export default function ECampusPage() {
         {selectedCourse && (
           <CourseDetail course={selectedCourse} groupId={profile?.groupId ?? null}
             zachetkaIndex={zachetkaIndex}
+            onRequestSync={() => { if (!syncCooldown) syncMutation.mutate() }}
+            syncing={isRunning || syncMutation.isPending || syncCooldown}
             onClose={() => { setSheetOpen(false); setSelectedCourse(null) }} />
         )}
       </BottomSheet>
